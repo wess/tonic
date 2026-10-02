@@ -1,0 +1,45 @@
+true
+["bob@example", "bob", "example"]
+[["1"], ["2"], ["3"]]
+"a b c"
+["a", "b", "c", "d"]
+%{"month" => "05", "year" => "2024"}
+true
+true
+~r/abc/i
+"Hello world"
+["h", "é", "l", "l", "o"]
+"o"
+"e"
+["a", "b-c"]
+["a", "b"]
+"hixx"
+"heLlo"
+:dynamic_atom
+3.25
+{42, "abc"}
+{3.14, "xyz"}
+"FF"
+[1, 2, 3, 4]
+3.14
+3.0
+"ab..."
+"lix"
+"xir"
+"STRASSE"
+"àéî"
+"atom"
+"12.5"
+"ab"
+"1|two|three"
+{"eli", "xir"}
+"bar"
+true
+0.9444444444444445
+~c"abc"
+"hello world"
+~c"hi"
+"hello"
+"\"a\\\"b\""
+1
+"olléh"

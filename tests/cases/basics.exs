@@ -1,0 +1,85 @@
+# arithmetic and numbers
+IO.puts(1 + 2 * 3)
+IO.puts(10 / 4)
+IO.puts(div(10, 3))
+IO.puts(rem(-10, 3))
+IO.puts(Integer.mod(-10, 3))
+IO.puts(2 ** 10)
+IO.puts(2 ** 100)
+IO.puts(-7 |> abs())
+IO.puts(1.5 + 2)
+IO.puts(0.1 + 0.2)
+IO.puts(100000.0)
+IO.puts(1.0e-10)
+IO.inspect(1.0e15)
+IO.inspect(123456789.123)
+IO.puts(round(2.5))
+IO.puts(trunc(-3.7))
+IO.puts(max(3, 7))
+IO.inspect(1 == 1.0)
+IO.inspect(1 === 1.0)
+IO.inspect(:a < :b)
+IO.inspect(1 < :a)
+IO.inspect({1, 2} < {1, 3})
+IO.inspect([1, 2] < [1, 2, 3])
+IO.inspect("abc" < "abd")
+# strings
+s = "hello"
+IO.puts(s <> " world")
+IO.puts(String.upcase(s))
+IO.puts(String.length("héllo"))
+IO.puts(byte_size("héllo"))
+IO.inspect(String.split("a,b,,c", ","))
+IO.inspect(String.split("  a b  c "))
+IO.puts(String.reverse("abc"))
+IO.inspect(String.to_integer("42") + 1)
+IO.inspect(String.duplicate("ab", 3))
+IO.inspect(String.slice("hello world", 6, 5))
+IO.inspect(String.replace("a-b-c", "-", "+"))
+IO.inspect(String.trim("  hi  "))
+IO.inspect(String.pad_leading("7", 3, "0"))
+IO.inspect(String.contains?("elixir", "xir"))
+IO.inspect(String.starts_with?("elixir", ["el", "x"]))
+# atoms and tuples
+IO.inspect(:ok)
+IO.inspect(:"hello world")
+IO.inspect(elem({:a, :b, :c}, 1))
+IO.inspect(put_elem({1, 2}, 0, :x))
+IO.inspect(tuple_size({1, 2, 3}))
+# lists
+l = [1, 2, 3]
+IO.inspect([0 | l])
+IO.inspect(l ++ [4, 5])
+IO.inspect([1, 2, 3, 2] -- [2])
+IO.inspect(hd(l))
+IO.inspect(tl(l))
+IO.inspect(length(l))
+IO.inspect(Enum.reverse(l))
+IO.inspect([a: 1, b: 2])
+IO.inspect(~c"hello")
+IO.inspect([104, 105])
+IO.inspect(~w(foo bar baz))
+IO.inspect(~w(foo bar)a)
+# maps
+m = %{name: "Ann", age: 30}
+IO.inspect(m.name)
+IO.inspect(m[:age])
+IO.inspect(Map.put(m, :city, "Paris"))
+IO.inspect(%{m | age: 31})
+IO.inspect(Map.keys(m))
+IO.inspect(%{"a" => 1, 2 => :b})
+IO.inspect(Map.get(m, :missing, :default))
+%{name: name} = m
+IO.puts(name)
+# pattern matching
+{a, b, _} = {1, 2, 3}
+IO.puts(a + b)
+[h | t] = [:x, :y, :z]
+IO.inspect({h, t})
+x = 5
+case 5 do
+  ^x -> IO.puts("pinned")
+  _ -> IO.puts("no")
+end
+"he" <> rest = "hello"
+IO.puts(rest)

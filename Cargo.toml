@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["shared", "runtime", "compiler"]
+
+[profile.release]
+opt-level = 3
+debug = false
+panic = "unwind"
+lto = "thin"
+codegen-units = 4
+
+[profile.dev]
+opt-level = 1

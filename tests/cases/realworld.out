@@ -1,0 +1,31 @@
+1 + 2 * 3      => {:ok, 7}
+(1 + 2) * 3    => {:ok, 9}
+-4 * (2 - 5)   => {:ok, 12}
+10 / (5 - 5)   => {:error, "division by zero in expression"}
+2 $ 3          => {:error, {:bad_char, "$"}}
+100 / 7 / 2    => {:ok, 7}
+Stats(n=8, mean=3.88, range=1..9)
+%Stats{count: 8, sum: 31, min: 1, max: 9}
+[{"the", 4}, {"quick", 3}, {"dog", 2}, {"fox", 2}]
+[
+  {1, 500500},
+  {2, 2001000},
+  {3, 4501500},
+  {4, 8002000},
+  {5, 12502500},
+  {6, 18003000},
+  {7, 24503500},
+  {8, 32004000}
+]
+| alice |  31 | admin |
+| bob   |  25 | user |
+| carol |  47 | user |
+pi      | 3.14|{ok,[1,2]}
+
+"HELL"
+%{
+  "a" => ["apple", "avocado"],
+  "b" => ["banana", "blueberry"],
+  "c" => ["cherry"]
+}
+[a: 1, b: 2, c: 3]

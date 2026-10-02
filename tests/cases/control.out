@@ -1,0 +1,23 @@
+[:negative, :zero, :positive, :not_a_number]
+1 2 Fizz 4 Buzz Fizz 7 8 Fizz Buzz 11 Fizz 13 14 FizzBuzz
+yes
+unless ok
+3
+{:failed, :nope}
+[1, 4, 9, 16, 25]
+[2, 4, 6, 8, 10]
+[{1, :a}, {1, :b}, {2, :a}, {2, :b}]
+[a: 10, b: 20]
+15
+~c"abc"
+[1, 2, 3]
+rescued: boom
+%ArgumentError{message: "bad arg"}
+{:caught, :thrown}
+{:exit, :bye}
+after runs
+:div_by_zero
+key :b not found in: %{a: 1}
+no match of right hand side value: {:error, 1}
+no case clause matching: 3
+function Control.classify/0 is undefined or private

@@ -1,0 +1,81 @@
+name: ci
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      TONIC_TEST_TIMEOUT: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-docs
+      - uses: Swatinem/rust-cache@v2
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.2.4'
+          elixir-version: '1.18.3'
+      - name: Install LLVM
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y clang-18 libpcre2-dev
+            echo 'TONIC_CC=clang-18' >> "$GITHUB_ENV"
+          else
+            brew install llvm@18 pcre2
+            echo "TONIC_CC=$(brew --prefix llvm@18)/bin/clang" >> "$GITHUB_ENV"
+          fi
+      - name: Harness regression tests
+        run: python3 tests/harness.py
+      - name: Install Hex
+        run: mix local.hex --force
+      - name: Debug runtime build
+        run: cargo build --workspace --locked
+      - name: Rust tests
+        run: cargo test --workspace --locked
+      - name: Mix archive tasks
+        run: bash mix/tests/run.sh
+      - name: Hex package integration
+        env:
+          TONIC_TEST_HEX: '1'
+        run: cargo test -p tonic --test packages real_hex_decimal_package_compiles_and_executes -- --ignored
+      - name: Additional locked Hex package comparisons
+        env:
+          TONIC_TEST_HEX: '1'
+        run: cargo test -p tonic --test packagesextra -- --ignored
+      - name: Release build
+        run: cargo build --release --workspace --locked
+      - name: Mix archive native integration
+        run: python3 tests/archive.py
+      - name: Fixture tests
+        run: bash tests/run.sh
+      - name: Live Elixir parity
+        run: bash tools/compare.sh
+      - name: Garbage collector stress
+        env:
+          TONIC_GC_STRESS: '1'
+        run: bash tests/run.sh tests/cases/basics.exs tests/cases/binaries.exs tests/cases/enums.exs tests/cases/structs.exs
+      - name: Package and verify clean installation
+        run: |
+          python3 tools/release.py
+          python3 tests/release.py dist/*.tar.gz
+      - name: Sustained supervision with forced moving collection
+        env:
+          TONIC_SOAK_SECONDS: '60'
+        run: cargo test -p tonic --test soak -- --nocapture

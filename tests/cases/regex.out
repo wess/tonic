@@ -1,0 +1,9 @@
+{"(", {:error, {~c"missing )", 1}}}
+{")", {:error, {~c"unmatched parentheses", 0}}}
+{"*", {:error, {~c"nothing to repeat", 0}}}
+{"a**", {:error, {~c"nothing to repeat", 2}}}
+{"[", {:error, {~c"missing terminating ] for character class", 1}}}
+{"[z-a]", {:error, {~c"range out of order in character class", 3}}}
+["CAFÉ"]
+true
+false

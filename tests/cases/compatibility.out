@@ -1,0 +1,6 @@
+{CompatibilityConsumer, 4, 9, 8}
+{11, 15, 12, 5}
+[{:def, :recorded, 0, 0, true}, {:def, :original, 1, 0, true}]
+[{:def, :original, 1, 0, true}]
+{42, 17}
+{CompatibilityCallbacks, true}

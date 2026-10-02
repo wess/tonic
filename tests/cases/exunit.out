@@ -1,0 +1,26 @@
+Running ExUnit with seed: 0, max_cases: 1
+
+*....
+
+  1) test failure (ExUnitCaseTest)
+     tests/cases/exunit.exs:49
+     Assertion with == failed
+     code:  assert [1, 2, 3] == [1, 2, 4]
+     left:  [1, 2, 3]
+     right: [1, 2, 4]
+     stacktrace:
+       tests/cases/exunit.exs:50: (test)
+
+
+
+  2) test raise (ExUnitCaseTest)
+     tests/cases/exunit.exs:53
+     ** (ArgumentError) bad
+     code: raise ArgumentError, "bad"
+     stacktrace:
+       tests/cases/exunit.exs:54: (test)
+
+..
+Finished in <time>
+9 tests, 2 failures, 1 skipped
+{2, 9, 1}

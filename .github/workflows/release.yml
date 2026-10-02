@@ -1,0 +1,83 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+  bundle:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-docs
+      - uses: Swatinem/rust-cache@v2
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.2.4'
+          elixir-version: '1.18.3'
+      - name: Install LLVM and PCRE2
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y clang-18 libpcre2-dev
+            echo 'TONIC_CC=clang-18' >> "$GITHUB_ENV"
+          else
+            brew install llvm@18 pcre2
+            echo "TONIC_CC=$(brew --prefix llvm@18)/bin/clang" >> "$GITHUB_ENV"
+          fi
+      - name: Match tag to version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, tomllib
+          version = tomllib.loads(pathlib.Path('compiler/Cargo.toml').read_text())['package']['version']
+          assert os.environ['RELEASE_TAG'] == 'v' + version, 'tag must match compiler version'
+          PY
+      - name: Package
+        run: python3 tools/release.py
+      - name: Verify installed bundle
+        run: python3 tests/release.py dist/*.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle${{ matrix.os }}
+          path: dist/*
+          if-no-files-found: error
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: bundle
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundle*
+          merge-multiple: true
+          path: dist
+      - name: Verify checksums
+        working-directory: dist
+        run: |
+          for checksum in *.sha256; do sha256sum --check "$checksum"; done
+      - name: Publish experimental release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist/* --verify-tag --prerelease --title "Tonic $RELEASE_TAG" --notes-file docs/release.md

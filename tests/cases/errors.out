@@ -1,0 +1,79 @@
+ArithmeticError: bad argument in arithmetic expression
+ArgumentError: argument error
+ArgumentError: errors were found at the given arguments:
+
+  * 1st argument: not a textual representation of an integer
+
+KeyError: key :b not found in: %{a: 1}
+KeyError: key :b not found in: [a: 1]
+ArgumentError: errors were found at the given arguments:
+
+  * 1st argument: out of range
+
+ArgumentError: errors were found at the given arguments:
+
+  * 1st argument: not a nonempty list
+
+FunctionClauseError: no function clause matching in String.upcase/2
+Protocol.UndefinedError: protocol Enumerable not implemented for type Atom
+
+Got value:
+
+    :not_enum
+
+RuntimeError: plain message
+ArgumentError: argument error
+ArgumentError: custom arg
+caught throw: {:my, :value}
+caught exit: :normal_exit
+UndefinedFunctionError: function String.nope/1 is undefined or private
+CaseClauseError: no case clause matching: 5
+MatchError: no match of right hand side value: {:error, 1}
+CondClauseError: no cond clause evaluated to a truthy value
+WithClauseError: no with clause matching: {:error, 1}
+FunctionClauseError: no function clause matching in Integer.parse/2
+MatchError: no match of right hand side value: :not_ok
+BadArityError: #Function<id in file:tests/cases/errors.exs> with arity 1 called with 2 arguments (1, 2)
+ArithmeticError: bad argument in arithmetic expression
+FunctionClauseError: no function clause matching in List.first/2
+Enum.OutOfBoundsError: out of bounds error
+Enum.EmptyError: empty error
+ArgumentError: errors were found at the given arguments:
+
+  * 1st argument: not an already existing atom
+
+ArithmeticError: bad argument in arithmetic expression
+KeyError: key :k not found in: %{}
+KeyError: key :nope not found
+ArgumentError: errors were found at the given arguments:
+
+  * 1st argument: not an atom
+
+ArgumentError: errors were found at the given arguments:
+
+  * 1st argument: not a tuple
+
+ArgumentError: errors were found at the given arguments:
+
+  * 2nd argument: out of range
+
+ArgumentError: errors were found at the given arguments:
+
+  * 1st argument: not an integer
+
+ArgumentError: errors were found at the given arguments:
+
+  * 3rd argument: out of range
+
+MatchError: no match of right hand side value: "ab"
+KeyError: key :k not found in: %{a: 1}
+%RuntimeError{message: "boom"}
+** (RuntimeError) boom
+** (throw) :thing
+** (exit) shutdown: :x
+"m"
+multi x
+else branch
+after branch
+{:caught, :t}
+:bye

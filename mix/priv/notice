@@ -1,0 +1,10 @@
+Tonic Mix archive 0.0.1
+Copyright 2026 Tonic contributors
+
+The original Tonic Mix task code is licensed under the Apache License,
+Version 2.0. The complete license is provided in priv/license.
+
+This archive provides tasks that invoke an external Tonic executable and
+requires an existing Mix/Elixir installation. It does not bundle the Tonic
+native runtime, PCRE2, Rust libraries, or imported Elixir/Erlang sources.
+Those separately distributed components retain their own applicable notices.

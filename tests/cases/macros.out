@@ -1,0 +1,12 @@
+:has_value
+nil
+{2, 1}
+:ok
+{:failed, "3 > 5", 3, 5}
+:macro_x
+:outer_x
+:set_by_macro
+3
+610
+{4000, "localhost", false}
+Enum.map(list, fn x -> x * 2 end)

@@ -1,0 +1,76 @@
+[
+  {"a", 1},
+  {"b", [true, nil, 1.5, <<120, 34, 121, 10, 1, 195, 169>>]},
+  {"c", %{"d" => "e"}}
+]
+[{"age", 3}, {"name", "w"}]
+true
+{:ok, [nil, 123, "string", %{"key" => "value"}, -1500.0, 100.0, "é😀\n"]}
+{:error, {:unexpected_end, 4}}
+{:error, {:invalid_byte, 3, 120}}
+{:error, {:unexpected_end, 3}}
+{:error, {:unexpected_end, 8}}
+{:error, {:invalid_byte, 7, 32}}
+%{"a" => [], "b" => %{}}
+%JSON.DecodeError{
+  message: "invalid byte 93 at position (byte offset) 3",
+  offset: 3,
+  data: "[1,]"
+}
+{[10, 20], [], ""}
+"[1]"
+~r/a(b)?c/iu
+["d", ""]
+["", "a", "b", "c", ""]
+["a", "c"]
+["a", "b", "c"]
+true
+"Unicode\u00A0spaces"
+%URI{
+  scheme: "https",
+  authority: "elixir-lang.org",
+  userinfo: nil,
+  host: "elixir-lang.org",
+  port: 443,
+  path: "/",
+  query: nil,
+  fragment: nil
+}
+[["1"], ["22"], ["333"]]
+%{"m" => "05", "y" => "2024"}
+["a", "b", "c"]
+"x at me y at you"
+"fOo"
+true
+["a", "a"]
+["a", "b"]
+{:error, {~c"missing )", 1}}
+"a\\.b\\*c"
+"a+b+c"
+[{3, 2}]
+2
+1
+309
+[0.5455598952593053, 0.6039309974353404, 0.6684893034823949]
+[6, 1]
+[5, 6, 2, 4, 3, 8, 7, 10, 1, 9]
+626693929737514003358
+{12.51, -12.51, 5.567, 13.0, -0.0, -57.0, 34.26, 12.341444444444441, 2.57}
+%ArgumentError{message: "precision 16 is out of valid range of 0..15"}
+{3, 4}
+{-7070651414971679, 2251799813685248}
+{100000000000000000000, 1}
+"asd�"
+"nem rán bERROR! bề"
+1
+{:one, :other}
+3
+0..-1//1
+"elixir"
+[1, 2, 3]
+[2, 3]
+1..3
+"eii"
+"ixir"
+"lix"
+true

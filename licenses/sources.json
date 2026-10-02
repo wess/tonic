@@ -1,0 +1,1251 @@
+{
+  "sources": [
+    {
+      "file": "lib/calendar.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar.ex",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/iso.ex",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/date.ex",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/time.ex",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/naive_datetime.ex",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/datetime.ex",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/date_range.ex",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/duration.ex",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/time_zone_database.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation stripped where applicable; native compatibility adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar.ex": "1b8abf455b475be47475b54427187a8180732e0e7e18d025a14f2f447497eb1f",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/iso.ex": "fc6cb9195bd89521731e7173cf94e7c1eef3fb98990cf91f047dfa097d899c0a",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/date.ex": "9027186aa59c1a3e8d326645bf8bd35b4d42077c793020585c3d97f4bd236168",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/time.ex": "c99523fd447b3dc8caeaa7f27a506edf6d57e7f4f9d534b65bb4d0fbc3123824",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/naive_datetime.ex": "ea2ca858bacb014fba24f1fc1716a896fb2d9f060a97b3572ae81684f3091a60",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/datetime.ex": "814a896c8a982cd743ba2e4957acefc33ae59a11bdc891d67973f8a155dd4ef8",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/date_range.ex": "22a64fcd10f0ce35a5df70056531bfe3ccdcb39c5c38a06ec814fe14376933ef",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/duration.ex": "7bf4670d1208788e2142fc43710b1c2268547a04f8e7c5fe86c2d9cc6fdd405a",
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/time_zone_database.ex": "e35c3da820cab9291fcd44f73b197bb8e3ee7046636d2c94f00e49d4ada48cd5"
+      },
+      "sha256": "5e9db8add80f0c9b031454d163bd9882ec02820eada3b5259b1865f9e528672b"
+    },
+    {
+      "file": "lib/chars.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/string/chars.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation stripped where applicable; native compatibility adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/string/chars.ex": "4f9860cf5b1f3563a278e36353fc800408a819c79a350ae1e2de0929d1bce450"
+      },
+      "sha256": "751fdb6eb48628b4a1bf3ecb4a133461952cc796bc8df1bbeb26b2ff7d2012b4"
+    },
+    {
+      "file": "lib/erl/elixir.erl",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir.erl": "d84908c021e990c83c94db88b6b61770a49c38af775a2ab42ec477d86dd3456b"
+      },
+      "sha256": "ce9213c9bfe87f9247a84eded329afd93bb4ce497ad23e4a9c5633b7b08b5063"
+    },
+    {
+      "file": "lib/erl/elixir_aliases.erl",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_aliases.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_aliases.erl": "e51f510576f7bbb71656ab80ddf84a92a31235793801b947a4bf564819a09f5e"
+      },
+      "sha256": "e0d0ee51ae12821980029500282a2ebb994214cdbd5f58e9f1172cba5a7c6509"
+    },
+    {
+      "file": "lib/erl/elixir_errors.erl",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_errors.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_errors.erl": "45848f90cadb7a42f20a2110ca16c94b9b75822c3a8dcc965dcd1cfedec09abc"
+      },
+      "sha256": "97c53c0643f85284112aaf0f949e35e813d08467577f2f88578e91bcdc1476eb"
+    },
+    {
+      "file": "lib/erl/elixir_interpolation.erl",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_interpolation.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_interpolation.erl": "b0dff68180d10ea6899e53ba66d5e3c7837c16e9b6a627f4aecf3de9047fa213"
+      },
+      "sha256": "72bc40a72fa04343b2fa02ad7721d1ed8e4173a41010e6d56e75afe116e911c9"
+    },
+    {
+      "file": "lib/erl/elixir_json.erl",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_json.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_json.erl": "2e367d6fc9efbd6df7c15bd4efbe3f861896a8ae4582063b9331a7ca72b7a5f7"
+      },
+      "sha256": "35da80eed1c09dee485ebb9381c01480f59f2aecaeda9fde50e405d07edff098"
+    },
+    {
+      "file": "lib/erl/elixir_parser.erl",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_parser.yrl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_parser.yrl": "5f209c259e18a1859a46d73fac84d51874bd8b14dc265350bd4a4e152cef08ac"
+      },
+      "sha256": "bb33c01f763e7a681303430eb4766b84a562585ce2d6bb96631895780bcd71f4"
+    },
+    {
+      "file": "lib/erl/elixir_quote.erl",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_quote.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_quote.erl": "3ce11f31c6d7761e0078f135963a85bb7d8a3fbe636b6bfd9c98699a1f887eaa"
+      },
+      "sha256": "8d14a963e43319b66e74bc370d245b14de2e58b1e469f193f69795cee32be018"
+    },
+    {
+      "file": "lib/erl/elixir_tokenizer.erl",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_tokenizer.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_tokenizer.erl": "155ffb6f036c79bba88d31d9ce640393f4a55df4b3cf6b01bae78d4cd3dd81d8"
+      },
+      "sha256": "276b3feed2dc5f6277af8e6ef8e706c52272dcf1efa44c7fad823ba90449b535"
+    },
+    {
+      "file": "lib/erl/erl_anno.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/erl_anno.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/erl_anno.erl": "31c8efae5dfbf62a98af14660ed19229639bb94857c025873f9fb79346046b50"
+      },
+      "sha256": "5f270dbb3cff75d15d3cddd41302ac3fe91103a58f040e70a8f776d573ff13d1"
+    },
+    {
+      "file": "lib/erl/erl_scan.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/erl_scan.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/erl_scan.erl": "6e1175072354516a34224ff3e74b57e2270798bf7b77aafc5dd3b749ac03a679"
+      },
+      "sha256": "8fbc2fb62d4de58f71ee85a2dd7ce470bef2eb96dd6f3e1d7b8d3491fd5f3a59"
+    },
+    {
+      "file": "lib/erl/gen.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gen.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gen.erl": "bf25bd7350ed20be1b5b4e1bbd7fe1776c2ca5ba9a0ae3558df57ede2af7d680"
+      },
+      "sha256": "ef1a873683c672f7bcefdcadc329e2c9bc1860e6e1149f2ecabdbe518c922f2c"
+    },
+    {
+      "file": "lib/erl/gen_event.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gen_event.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gen_event.erl": "9dc5726ca03bf7e6c34614e1c88de48c88472df6c48d737124aee8a14c442286"
+      },
+      "sha256": "b9e856a0469baa90112d9bd2928224823a4a4bceafe205079cbd21ba44510645"
+    },
+    {
+      "file": "lib/erl/gen_server.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gen_server.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gen_server.erl": "5adbf93c85a5950a91977dd0ee681412f37ad90392568e4aaaf927e3953c06f0"
+      },
+      "sha256": "32ee79cec19af7a604b2d198daea5575402e73ee030b8d21602a89d6299b2d9d"
+    },
+    {
+      "file": "lib/erl/include/elixir.hrl",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir.hrl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir.hrl": "ddfc70ab9d3d3b49c1f6e1a2ba436df079a48773e99fedd4b08860a751270b03"
+      },
+      "sha256": "849fcf09ba775674fe3fac21f695e347b4740086d96b1db06a8a3df71d077ba2"
+    },
+    {
+      "file": "lib/erl/include/elixir_tokenizer.hrl",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_tokenizer.hrl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/src/elixir_tokenizer.hrl": "6cb30eed6a924d8fd7b6152cff3386d66a06ca829f5ec21b55a1ba6dc9b1b101"
+      },
+      "sha256": "d94a2190352e67468c98488f7cbb3cfe0da56f9411918900bcf4ecfee5547891"
+    },
+    {
+      "file": "lib/erl/include/logger.hrl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/kernel/include/logger.hrl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/kernel/include/logger.hrl": "cd527364cd505b602916d699ef6e34dbe5c74edca274eafb76b9869ae2461d38"
+      },
+      "sha256": "23e2b48d76e7fc69c6ecda4ed22dc7c1234df2b4109edfc7e9f5221386262688"
+    },
+    {
+      "file": "lib/erl/io_lib.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/io_lib.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/io_lib.erl": "ed02603e72e1715eb2b18f762437620191edfa924c9dc9140fd0ceb93f8612f6"
+      },
+      "sha256": "72008dd801b35d5fba2f6919b6761d0a68cfe3860f80fa91dfbaeb696ac2cbef"
+    },
+    {
+      "file": "lib/erl/io_lib_format.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/io_lib_format.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/io_lib_format.erl": "823ecce4ae2ee2107e6a7454d9c1570789aba10e068c12ac12169ceeb2e4128d"
+      },
+      "sha256": "ed2e36550fe7043041ea37b04f92ac96d592de9942c5cfbb9e40f99e7a472922"
+    },
+    {
+      "file": "lib/erl/io_lib_fread.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/io_lib_fread.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/io_lib_fread.erl": "71ffe816ff997246b056f17e984c52c445bea7a690b0e51bdf00b9494ecea69b"
+      },
+      "sha256": "d1e78ed01f49ea39aff276fb342db4ca8c30eca22753db079c10fb46a9bf7031"
+    },
+    {
+      "file": "lib/erl/io_lib_pretty.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/io_lib_pretty.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/io_lib_pretty.erl": "4e0f0f2156da715204a95cace05aad7b319a85a08505d5e8abc79983c162eb38"
+      },
+      "sha256": "13968945c4c3b07340bb173de3dddf9fb102c7b720d239d5b4353456397d54ce"
+    },
+    {
+      "file": "lib/erl/proc_lib.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/proc_lib.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/proc_lib.erl": "fcfb47cd2c9115b7b58a1ab45e3f51a813e67f2c0c632efcf64c31d098ae8c32"
+      },
+      "sha256": "c5b8d49e9f7a45ea431a7ee7adf2df8f44c5bee342e4866035152624711c0e76"
+    },
+    {
+      "file": "lib/erl/supervisor.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/supervisor.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/supervisor.erl": "001a1ef8edfa5cd02de868a9ac71aebf0ee666b583ed09a0dd14df29bcffb343"
+      },
+      "sha256": "89a8d80e6d00174d7c7038505e4a489a9b16f4f7489ddb374d2e29d2974cb66c"
+    },
+    {
+      "file": "lib/erl/sys.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/sys.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/sys.erl": "02c531eedd5337b8cc1431b662dbd068b66acf213168c1d4ff30be9dd8eefc77"
+      },
+      "sha256": "7983249e1530e8814d4358c08481cd35439580f172c2c9f308af9006e9ea20fc"
+    },
+    {
+      "file": "lib/erlang.ex",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/rand.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Algorithms and module behavior ported to Elixir with native runtime integration.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/rand.erl": "7f956b3658f5b2054fe5809b7db1221e76109339a27ca728184d5a90fc679b0d"
+      },
+      "sha256": "8426248cfc940c6abd0b5062d56ff1df16c17e072b8d1bc7978492a57922eef6"
+    },
+    {
+      "file": "lib/erlang_ds.ex",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/queue.erl",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/proplists.erl",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/ordsets.erl",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/orddict.erl",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/sets.erl",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/dict.erl",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gb_sets.erl",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gb_trees.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Algorithms and module behavior ported to Elixir with native runtime integration.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/queue.erl": "e4ce130f3d46e1c2b1b947faad3a7b59cac6166ed51e7b6ac0c96a139b2951db",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/proplists.erl": "174723f975a5bea8343289ddabe52eb27ce61bd5e854c09067d9061af4069bdf",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/ordsets.erl": "064acc495f9a5ddf0c1bdc9d97fa7d1b1b975b10076495dbce4babf73900f17d",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/orddict.erl": "f4a64a75733edb8212ebad531698289d9a6c2eb2c2e6d6d6052e08462101edb3",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/sets.erl": "17bc091bd8dfe8ccf9d4ffba2429c1e53a2e1747b605ef383aab164dee95cb43",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/dict.erl": "0e7e0c859c3a719c7296943c596b6faa55144b392310f034f18cf3948d676bb4",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gb_sets.erl": "803f15e52aa38e6e6216ab3fc7c596d32a80b79ec6230c9d75545a614048ee9b",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gb_trees.erl": "13bac44e25a70cfd2791a8113ebac559f50aa428a899d0f4598d5a5647d6bd88"
+      },
+      "sha256": "630682d12c724525857b4cb20355e4ceb0083168121c6c87cc8b2ea18c31a8ed"
+    },
+    {
+      "file": "lib/erlang_io.ex",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/filename.erl",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/filelib.erl",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/kernel/src/file.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Algorithms and module behavior ported to Elixir with native runtime integration.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/filename.erl": "66527efe673440b9b61ee49a411e681ad50f678cbf59ae8a3e2176f45521a296",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/filelib.erl": "1f12e037519672ab5c7582ac120835513e1fe630d446f8be73dd9186faf61bb4",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/kernel/src/file.erl": "cb535d2aabd0de531857d777d68f7c08c785f3ef19d301d79bb0916d746aefa8"
+      },
+      "sha256": "8237bc65924454d29e80505077236edbbd0e87870433548be922a550365dd783"
+    },
+    {
+      "file": "lib/erlang_text.ex",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/lists.erl",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/string.erl",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/unicode.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Algorithms and module behavior ported to Elixir with native runtime integration.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/lists.erl": "41e25e2bb15f88ee6f68e90d1d0b9751fac0b3781af0b43682b5b565220c4a20",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/string.erl": "df5158407e6b9364b24446e3f0a51eb959954679b11cf93fb0566efef24b6cbc",
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/unicode.erl": "b1367ee3dfeeded3c8bcca7dd3cef797b04f83b4623cbefcfe24eb27b14050cb"
+      },
+      "sha256": "ec7f7ae92c86eb4ccf7bc519b8070dcd3d592bd5db527658c21038986ba283b2"
+    },
+    {
+      "file": "lib/ex/access.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/access.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/access.ex": "9bffa75e2a3497f0e1677545273eea92f0a2a0d8d439b73f16b529b8898a437b"
+      },
+      "sha256": "8ae4b4706ae1041687a21777103a7c3a424af7e3aea60a8f1b64d9b91b1f703e"
+    },
+    {
+      "file": "lib/ex/agent.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/agent.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/agent.ex": "9937459359c16a46317857d670d282323e7eaf601684510072f0757f1883eb6a"
+      },
+      "sha256": "54995fd66827ea1e5229744bef40d34ab53c4b9294004ab833ea5fa2e748ef12"
+    },
+    {
+      "file": "lib/ex/agent_server.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/agent/server.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/agent/server.ex": "3b9e00b061543f514cace7b06bb0c4c40589e5e2cd19ad101eeee9b32872ce4b"
+      },
+      "sha256": "67be8a8867195cc74013f7bb1df7a726b06145555566e5057d61439de727bb9b"
+    },
+    {
+      "file": "lib/ex/ansi.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/io/ansi.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/io/ansi.ex": "d90908976c3d4df90b00bb4ba48af4ef7ff9a2172340defcd90f6aef0f798d2b"
+      },
+      "sha256": "e05efc5ec813d2953e38fe1c571ebd5063b81d02136205c354836a1edf00d6db"
+    },
+    {
+      "file": "lib/ex/application.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/application.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/application.ex": "c5b6320434474ae91dc1c4943a4466718078acd386e38bb84f3afd3c1a4d70a2"
+      },
+      "sha256": "645fd04a30c2ce51427530bf205eb309617423546376757ab86f228fae1707d0"
+    },
+    {
+      "file": "lib/ex/atom.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/atom.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/atom.ex": "d7f15cebdd029e43096605e4ce99599b9b649e846b4eb5c1bf472f711ad81c9c"
+      },
+      "sha256": "da2c2acdd2e31160da7fe8007a3fd9364c623a151e3050da3c3ed5b718986fd1"
+    },
+    {
+      "file": "lib/ex/code_formatter.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/code/formatter.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/code/formatter.ex": "f555a14ba7aee171e6bbbfc8babaa4f3fc8ed5979b2ccaf94c9decabc2ac223a"
+      },
+      "sha256": "7bafe54a3050c4c7ba5875d1e2aa5a8367dd9c11c90aeb86857bdeea87527819"
+    },
+    {
+      "file": "lib/ex/code_identifier.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/code/identifier.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/code/identifier.ex": "33bda61cebbb97514ebfee76a8112ccf1fe3e5c4cf4439dfa6d11c0bdf0222c8"
+      },
+      "sha256": "e2bfd084520417b31ce850249c6f1d14217760f893d385e3b2f3cbcbf0e4d166"
+    },
+    {
+      "file": "lib/ex/code_normalizer.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/code/normalizer.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/code/normalizer.ex": "e3ba2ddc16268835cf165c0deab5452268f26149ffded2830899e038d14805f7"
+      },
+      "sha256": "e96a1ff829c5ed6075c8e82db2511894be68088d1532c76ee9f5de35e78e36e8"
+    },
+    {
+      "file": "lib/ex/collectable.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/collectable.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/collectable.ex": "2b6065cd69c8cfb49af2c5d5cab210df81cd325eb04ca58b0339d9aecad63aa6"
+      },
+      "sha256": "03342d299cb3974ed3d9c502e5093fee0245d0db1a59092b23debafa0132002d"
+    },
+    {
+      "file": "lib/ex/duration.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/duration.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/calendar/duration.ex": "7bf4670d1208788e2142fc43710b1c2268547a04f8e7c5fe86c2d9cc6fdd405a"
+      },
+      "sha256": "91895baa30d8dfe2c7cd453ae7d4eac20674260bc42439f3c2c334a2966fd341"
+    },
+    {
+      "file": "lib/ex/dynamic_supervisor.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/dynamic_supervisor.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/dynamic_supervisor.ex": "75dad290cf34294824d2d0f0741f0d1db2f2ff5533658adab54b0349b3050a62"
+      },
+      "sha256": "967961b8c48fa05d9c999d34b2859614641ce2b1bc964b1ce59774d551f33eb8"
+    },
+    {
+      "file": "lib/ex/enum.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/enum.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/enum.ex": "be2266867d8dbb7f702d2031f5c8ba21fca57272f9aa06a3cf1d11451f33aa4b"
+      },
+      "sha256": "a3e60e59048212922f34ad2833d9b489ceb0b77ec9632e5834de8413e2ab4ebe"
+    },
+    {
+      "file": "lib/ex/ex_unit_assertions.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/assertions.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/assertions.ex": "e2942c9fc3bbd2ba5c98f992278018a9bd9b52ffa5f45d2b20fb3da1532363f0"
+      },
+      "sha256": "8e26b38f6035c7d1659aaa1f216f6006694208b7b0ed2fdd45201109ac054e40"
+    },
+    {
+      "file": "lib/ex/ex_unit_callbacks.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/callbacks.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/callbacks.ex": "3460e6017e8603981d698ca995a6b567a1b222aebd269393e6c06700abbc36b1"
+      },
+      "sha256": "62085d7afab1855991c8ee33ee66e7eda33ef7eea45dabc26cee4d779bfecf6c"
+    },
+    {
+      "file": "lib/ex/ex_unit_capture_io.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/capture_io.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/capture_io.ex": "68649ce61f330444934d758df7d8b4fbb846761defa1b5e3206e268788a0b467"
+      },
+      "sha256": "a6fa30b2c5d6c1bac8aef8877b45543887473dbd9267fde38521e8245ef66985"
+    },
+    {
+      "file": "lib/ex/ex_unit_capture_log.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/capture_log.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/capture_log.ex": "803a8231a8893435b91e28e320b28844835bc3bd48d59f113e06f861efc217ad"
+      },
+      "sha256": "094d0ec414482e875731e5d3abf3cf00e08357062caeb1b701d6184018ea9ba2"
+    },
+    {
+      "file": "lib/ex/ex_unit_capture_server.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/capture_server.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/capture_server.ex": "26bc56956561f80fcc4b511b6c2834ae5fdc220ea5231b07d789a40159d6ca8d"
+      },
+      "sha256": "920eeb945dc24d7b5aa7092bf035a72fa88534aa2a4e2e4a310e26b610d9634d"
+    },
+    {
+      "file": "lib/ex/ex_unit_cli_formatter.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/cli_formatter.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/cli_formatter.ex": "0d0a4fba0822da82662c3ef4f9da0892a0a81ba3246fd3078f1d6c359eacc6c8"
+      },
+      "sha256": "c66e64f9c8584e3a78643ed63d45d84bbf1d92b188a56b66a9bcd8ec5bc21ee0"
+    },
+    {
+      "file": "lib/ex/ex_unit_diff.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/diff.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/diff.ex": "0296a7ee554c6211a6e7fcffa2106e4040c7901fd79cb007607eae92d9185a0e"
+      },
+      "sha256": "507c7803026bd46577127c632416a620676395e0bd62be48332a840262fdf01a"
+    },
+    {
+      "file": "lib/ex/ex_unit_event_manager.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/event_manager.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/event_manager.ex": "4baa398f0c9fb89f492eb079e98687da1d2f36f100dabe5df194d733f98c26ad"
+      },
+      "sha256": "efb33ff7301a9073da7d33e7587b37cd7c07517208d6003bbb22c53de86ba63d"
+    },
+    {
+      "file": "lib/ex/ex_unit_failures_manifest.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/failures_manifest.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/failures_manifest.ex": "751826c76f3a08093b973f10728760221b3933ba77e901083ab21fecdd6855b7"
+      },
+      "sha256": "dc2fb16d32ec1e67fbc816824eb39344e61530e7a1c23d6b7f99552aa77253d0"
+    },
+    {
+      "file": "lib/ex/ex_unit_filters.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/filters.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/filters.ex": "8c8a3d4fa453af053308b81f242f6a591d2cddba767e3e554a74d45c4a218eec"
+      },
+      "sha256": "55c89265aa7ebc0d686cf6efadb47fa76eb9de5b565cd9d416e02ae505a00986"
+    },
+    {
+      "file": "lib/ex/ex_unit_formatter.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/formatter.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/formatter.ex": "a3c723a6aec9ca1257c963f65c6df65768bc22ce0b7726bad43f8e74c3419521"
+      },
+      "sha256": "2f9398dfb6cd708138b1a59bfcf9b0964409317d490f30eda08e72f666af90c8"
+    },
+    {
+      "file": "lib/ex/ex_unit_main.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit.ex": "2c270c064e66b26120d2b5723318336bb96300aab1407256a67b2c5a8a849512"
+      },
+      "sha256": "e7c8385f530262dd4939401d4cf48ddde0b7b79f88ea968700cc6026a23652c7"
+    },
+    {
+      "file": "lib/ex/ex_unit_on_exit_handler.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/on_exit_handler.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/on_exit_handler.ex": "747bc1b0ed93db47843c4393ce88a81c03666f59b502609db2d8d3178b998365"
+      },
+      "sha256": "ae8783604ace60a7eb9fecc83fe17ab81a52023da98bab80cd62b85d0632b9a1"
+    },
+    {
+      "file": "lib/ex/ex_unit_on_exit_handler_supervisor.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/on_exit_handler/supervisor.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/on_exit_handler/supervisor.ex": "d37c3d14837b5808bdf68b30f7aee2ef6faa7a8f05b4c63b728f9d73d714849e"
+      },
+      "sha256": "eae6e9482a93473caa0aa6ae4874fec68b5783dff9cdcc06bfe3ed70942acedd"
+    },
+    {
+      "file": "lib/ex/ex_unit_runner.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/runner.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/runner.ex": "c5186ea4e8601643fe10e4061d6900c3ea6cbef5a20eca228a06c5f9123f44c0"
+      },
+      "sha256": "c12dfcf81337d125a0b8cfb700e17e4c97c5941f122c6d915981d29ae8a35ae5"
+    },
+    {
+      "file": "lib/ex/ex_unit_runner_stats.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/runner_stats.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/runner_stats.ex": "f4dbec785347ea3d9be52fcd0778d054e15f1a498e3f64ac8f7fcf1597ba3d9f"
+      },
+      "sha256": "3a46067020acd71f72d4c8926ccd7552b35397165cf22eb59e0c04246fdc0c24"
+    },
+    {
+      "file": "lib/ex/ex_unit_server.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/server.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/ex_unit/lib/ex_unit/server.ex": "e2da2ed89d6aff895f771e998ea784a02c42b8bfde2ca28dad98033e01a901b9"
+      },
+      "sha256": "0d22b1c0ce91c9a9484641953c0658ccf1f9cf260360ff75b22964b005cc2dbd"
+    },
+    {
+      "file": "lib/ex/function.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/function.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/function.ex": "b2bdd1d25cbfafeed72c581d8b534b663bc3b49effa0237a7ff819f2a9fe5937"
+      },
+      "sha256": "b8db646363c08f8ba323d5cad1fdaf8a2b871762b3162c2ea1ac42fd7d09adb8"
+    },
+    {
+      "file": "lib/ex/gen_server.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/gen_server.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/gen_server.ex": "6d00e38c0f2ed6296b3c353e823123042345035da7328a1db6f73de44bf57fe2"
+      },
+      "sha256": "d5bf261995fc33c60dda12305ac7ad654ef404a341a2aa71c124dd04ada70f97"
+    },
+    {
+      "file": "lib/ex/inspect.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/inspect.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/inspect.ex": "95b8d5cd31b3d049d0f355f8f68269772bc783814aa4eb3c6bd72b2a69146620"
+      },
+      "sha256": "0905fe2b5c97fedd932fc030a4f8128f88157e1da2ce9d8eed729a60b7a1a6bc"
+    },
+    {
+      "file": "lib/ex/inspect_algebra.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/inspect/algebra.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/inspect/algebra.ex": "f55b5e44dd7efa1c4827728b88758f030be658b2c9a0cec41ab2b57b008f4f8e"
+      },
+      "sha256": "24378e88a6c604739f1fb854cd1ed3f2e54b0c341289c1924496362eba54b4d4"
+    },
+    {
+      "file": "lib/ex/integer.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/integer.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/integer.ex": "fa62ac19e8bb579261f8a49c16ac6d7769fc99a7c5499e20c7e7a0cf116a9199"
+      },
+      "sha256": "e4e7eac4b5b0eec27fc933092f1adba92374a99b2ff26b17368676da03126f50"
+    },
+    {
+      "file": "lib/ex/json.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/json.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/json.ex": "4e88d2269305582c4ea6e6b1f658ac4832a083083f850756005bfbbe9d186552"
+      },
+      "sha256": "439f001bb42b597fc11da74fee5413dd96dded70d0f85c834ee83df00ae2bd3b"
+    },
+    {
+      "file": "lib/ex/keyword.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/keyword.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/keyword.ex": "e825237b5300ef5b89a10b32bddf0b74730981ce8bddea427caa12c0fd41557c"
+      },
+      "sha256": "d9342df0aba121bb2659ad4d30bef51350a7f9ed2b205b61e32d4d7493672d4c"
+    },
+    {
+      "file": "lib/ex/list.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/list.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/list.ex": "1ed300311e5e79c4544a1a3f10141bac19a35bd8d5707813dfd934769b4a2b0e"
+      },
+      "sha256": "639732af2c0f4a45ac81ee518e366e7f2338de2416a432b578d94135d765c0a9"
+    },
+    {
+      "file": "lib/ex/logger_formatter.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/logger/lib/logger/formatter.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/logger/lib/logger/formatter.ex": "9fbca8e3d34d05134a92470f8b9171af20a0fee742d6222191f3a9af924b10af"
+      },
+      "sha256": "6b1f13c20faaae15b37141bbb8b2d1d35880cadbbf411c0d1ebd7c47da1f9e98"
+    },
+    {
+      "file": "lib/ex/logger_translator.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/logger/lib/logger/translator.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/logger/lib/logger/translator.ex": "f5e3d1b243f751f3aa2f4f323c784767d1bf622474c93ec4899aaabf4ae6f888"
+      },
+      "sha256": "2c275d23921a69ba3485c660e0a87f6d461be61a58f8737a4262790771cd51cc"
+    },
+    {
+      "file": "lib/ex/logger_utils.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/logger/lib/logger/utils.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/logger/lib/logger/utils.ex": "b2dc6c578bd7cecef9af59c24d655a3244c99e698097ce9bc0b9ce7e09649a6b"
+      },
+      "sha256": "0815e78cf5da1ad785554c32775bd0c76b22ea20e3d293f39f4689fbbda73e97"
+    },
+    {
+      "file": "lib/ex/macro.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/macro.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/macro.ex": "34a366e712b37b6af22a686bfd859dce259e3b402f7b0779bf95cc44ad1c1360"
+      },
+      "sha256": "afe3cf98aac0b19698420ce443038648fa5aaa0befbda99e319bf3c2c0de8f56"
+    },
+    {
+      "file": "lib/ex/map.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/map.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/map.ex": "3c5181a6eff5b47dcb170ebe432be01fbd48918c34689ec373d2c752cf753c65"
+      },
+      "sha256": "2a4b307170709e23e0550f775299f0d64113bbfa0d56db99965af4e2d7b4ef16"
+    },
+    {
+      "file": "lib/ex/map_set.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/map_set.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/map_set.ex": "83e71a58e291e8d38937ea3ec48ba384ed1708263d148356f84ec0b172e7e01a"
+      },
+      "sha256": "d5993de27dc9b44ca1b3cce3f6390c132682bb7e70193b4a9467782b76ba9fe7"
+    },
+    {
+      "file": "lib/ex/option_parser.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/option_parser.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/option_parser.ex": "4470fa352c7907c14a960353f3df870d85f463fca066962ee9780c3420ce0c38"
+      },
+      "sha256": "e4df436adba2e3d9defe57574c32ea0027e427d659709e43c2df0a58087690d5"
+    },
+    {
+      "file": "lib/ex/partition_supervisor.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/partition_supervisor.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/partition_supervisor.ex": "bdd3c591eeba39b579142881dd94d681bb8c4d8caa254cb49c4559dbf27f9e9c"
+      },
+      "sha256": "c4f8e48532d96d1be50dd215fe02720e42e62299618154c9ee94ac98d7c20a62"
+    },
+    {
+      "file": "lib/ex/process.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/process.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/process.ex": "c0fcf8a347f16acaeae64754c93970b5ad6d5a823680f1afc014ee5bde8db80a"
+      },
+      "sha256": "cf542018efb08d2a96ea86d88f2954d119036d98bfa6bde14458ba22f678e8b6"
+    },
+    {
+      "file": "lib/ex/range.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/range.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/range.ex": "faddaac14c5e854e7ecbac1571844f7e62a8ae99f0005d0693dfa4552f983ae3"
+      },
+      "sha256": "c6d7eb2bdeabbe0f9461bcf24df2e59b6abccc9056c9327113c1f81a7186c6cf"
+    },
+    {
+      "file": "lib/ex/regex.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/regex.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/regex.ex": "7e31bdf96292d100598c520338dc757d28cbb2cf0cbfa3a53e23a672268885bf"
+      },
+      "sha256": "9fa313da188f57aa0cb57decb2efaf5307135865e85c02bbd279bc8578e93fe1"
+    },
+    {
+      "file": "lib/ex/registry.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/registry.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/registry.ex": "593606ca821a4e403b9df4c6ab35c13fdada335c949482f0e131d3cb5edcdf27"
+      },
+      "sha256": "44325d49a3f14f180463ee5267c386df5da611c67057f92dffc8ba7f0ab38622"
+    },
+    {
+      "file": "lib/ex/stream.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/stream.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/stream.ex": "c45118ab9b716f283c85728de7d9d70c327bcc6fe26339513fd4ff3e535aa75f"
+      },
+      "sha256": "d5a11510fcb0d9fe164f1c60adbb3646ccf9adb5842becc258760cf346fbfe1d"
+    },
+    {
+      "file": "lib/ex/stream_reducers.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/stream/reducers.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/stream/reducers.ex": "4d69fc40ef5c6cf473996a43623ce088bac7ef3efdcc3e0be5dbff10d85e5ec4"
+      },
+      "sha256": "af3be8a59281670ef3ff26aa3008ea88250ba068c2f7329a835528933119bcc6"
+    },
+    {
+      "file": "lib/ex/string.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/string.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/string.ex": "7202b529a4e38e2a546f881a75c7df261d3d61a87ff944457cfb97b84903c3c5"
+      },
+      "sha256": "1ecfae0131e49a1e02b973f1a885a52bb8c7c89f7bd44c063201a357cbeb82db"
+    },
+    {
+      "file": "lib/ex/string_io.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/string_io.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/string_io.ex": "4d50bb9a96d5f1183ce2d9d706a01d7ec4f0bfdbd36e721d0a30af8ff91e241d"
+      },
+      "sha256": "7400efce26d6562d13b9afd5775d267f4a8f5da5ddcae313a46f0eece258985e"
+    },
+    {
+      "file": "lib/ex/supervisor.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/supervisor.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/supervisor.ex": "e9d63501dfa83707ea2fffc0201ebf6db9c2f763a4bb9189d4092999c940ebb7"
+      },
+      "sha256": "b98234549e96a8409d675913cf4e2df672f1642e7c33486c6b5924f977e4c300"
+    },
+    {
+      "file": "lib/ex/supervisor_default.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/supervisor/default.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/supervisor/default.ex": "9eb3324d18f2eded816417baa908a1d54756ae7fabbe9192efe92fe949e3eea3"
+      },
+      "sha256": "95199e90ec913bce484a97c4cb09625e991058760fedcf5f28a43c9d99de3d56"
+    },
+    {
+      "file": "lib/ex/task.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/task.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/task.ex": "a45259358fe33f08cd7d98da2b50a1fe18a5b6b978574dbee6c4379f2aee19ab"
+      },
+      "sha256": "8284abc8ed614127f98762c59ce011630f3063fac993d60e6621212f83dade04"
+    },
+    {
+      "file": "lib/ex/task_supervised.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/task/supervised.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/task/supervised.ex": "67b42ec112c6e532def22e1a4aecd0bed85d54bcfda6670f7631688d33cbed38"
+      },
+      "sha256": "de06c9ad9166358200f94a5fcf6a72414dfdacca74ab0467d4f8536d18316cd7"
+    },
+    {
+      "file": "lib/ex/task_supervisor.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/task/supervisor.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/task/supervisor.ex": "f09f012c438d67a26b236eb75acb5cfbcbfbae3531011820065b552c394b95fb"
+      },
+      "sha256": "be9214e012166d42c37c1d605e6ac14574f1c179ec7bc2dd55a04c81bc3fba21"
+    },
+    {
+      "file": "lib/ex/tuple.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/tuple.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/tuple.ex": "288773be502339e557b45c834a55d4240a2f330301fcc14472dff6fbf2c5e8f4"
+      },
+      "sha256": "ae505dbe8688a685cda3d2106832d4ebb132cb1257b1358b445bfec98ed959c1"
+    },
+    {
+      "file": "lib/ex/uri.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/uri.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/uri.ex": "9360a679efad42cc12b79765579a40db209437767244ca5ef809236b358423b5"
+      },
+      "sha256": "1dd143872a6f118ee8b45cce4c331b0e4742ba04071495281235f81d6f0e12c4"
+    },
+    {
+      "file": "lib/ex/version.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/version.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/version.ex": "1651c1ff31ae306bee42ef62de08f82f940db65e90b66622ae0f98b240d3198f"
+      },
+      "sha256": "c2edb2dcabd150ec36d5252bc829993ea1fb69a97a9079dc6a09813f40b7b360"
+    },
+    {
+      "file": "lib/exception.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/exception.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation stripped where applicable; native compatibility adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/exception.ex": "b49a4dfaf3404f0c427ab7d3c3a10f2c65da938dc45b087264bffd3fb796138b"
+      },
+      "sha256": "8d609e6ffac0ea14a8fc445a8c51a6dd1dd7e8ea3976aa617365c9638a06c76d"
+    },
+    {
+      "file": "lib/string_tokenizer.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/unicode/tokenizer.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation stripped where applicable; native compatibility adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/unicode/tokenizer.ex": "d8fd516dbdb09662f7ca957f5dbb35db9704f85ae11f4d487a5dd15a5d355321"
+      },
+      "sha256": "25a81c4fd948bcdefb367e90c0ee35d69c653b249e80bc679f072da55413b617"
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+7
+2.5
+3
+-1
+2
+1024
+1267650600228229401496703205376
+7
+3.5
+0.30000000000000004
+1.0e5
+1.0e-10
+1000000000000000.0
+123456789.123
+3
+-3
+7
+true
+false
+true
+true
+true
+true
+true
+hello world
+HELLO
+5
+6
+["a", "b", "", "c"]
+["a", "b", "c"]
+cba
+43
+"ababab"
+"world"
+"a+b+c"
+"hi"
+"007"
+true
+true
+:ok
+:"hello world"
+:b
+{:x, 2}
+3
+[0, 1, 2, 3]
+[1, 2, 3, 4, 5]
+[1, 3, 2]
+1
+[2, 3]
+3
+[3, 2, 1]
+[a: 1, b: 2]
+~c"hello"
+~c"hi"
+["foo", "bar", "baz"]
+[:foo, :bar]
+"Ann"
+30
+%{name: "Ann", age: 30, city: "Paris"}
+%{name: "Ann", age: 31}
+[:name, :age]
+%{2 => :b, "a" => 1}
+:default
+Ann
+3
+{:x, [:y, :z]}
+pinned
+llo

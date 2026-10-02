@@ -1,0 +1,24 @@
+%User{name: "Ann", age: 30, email: nil}
+%User{name: "anon", age: 0, email: nil}
+Hi Ann
+User(Ann)
+30
+%User{name: "Ann", age: 31, email: nil}
+true
+true
+%{name: "Ann", age: 30, email: nil}
+Ann
+circle: 12.56636
+rect: 12
+[12.56636, 12]
+%MyError{message: "something went wrong", code: 0}
+custom 42
+item 7 not found
+protocol Shape not implemented for type Atom
+
+Got value:
+
+    :not_a_shape
+
+%User{name: "Bob", age: 0, email: nil}
+[:__struct__, :age, :email, :name]

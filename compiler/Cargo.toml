@@ -1,0 +1,13 @@
+[package]
+name = "tonic"
+version = "0.0.1"
+edition = "2021"
+license = "Apache-2.0"
+
+[[bin]]
+name = "tonic"
+path = "src/main.rs"
+
+[dependencies]
+tonic-shared = { path = "../shared" }
+num-bigint = "0.4"
