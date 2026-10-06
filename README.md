@@ -1,8 +1,10 @@
 # tonic
 
 **0.0.1 · experimental.** Start with scripts and small native applications.
+Visit the [Tonic website](https://wess.io/tonic/).
 See the [release guide](docs/release.md) for installation and the
 [compatibility report](docs/compatibility.md) for tested packages and limitations.
+Remaining work is tracked in [TODO.md](TODO.md).
 
 An ahead-of-time compiler for **Elixir** that produces native executables via
 **LLVM**, with a precise, moving garbage collector and an Erlang-style process
@@ -319,6 +321,20 @@ fixture and live-reference comparisons, and exercises the moving collector.
 The release workflow requires those checks, verifies installed bundles with a
 fresh cache, and publishes an experimental GitHub prerelease for a matching
 version tag. Manual release workflow runs produce artifacts without publishing.
+
+## Website
+
+The GitHub Pages website is in `site/`. Preview it with:
+
+```sh
+python3 -m http.server 8765 --directory site
+```
+
+The `pages` workflow publishes changes to `site/` from `main` at
+[wess.io/tonic](https://wess.io/tonic/), through your account's GitHub Pages
+domain. It can also be run manually.
+The mage artwork is original SVG, and the bundled VT323 font includes its license
+in `site/assets/fontlicense.txt`.
 
 ## License
 
