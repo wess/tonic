@@ -89,6 +89,7 @@ defmodule Tonic.Eval do
 
   defp dump_binding(st) do
     st.vars
+    |> Map.delete({:tonic_caller, nil})
     |> Enum.map(fn
       {{name, nil}, v} -> {name, v}
       {key, v} -> {key, v}
@@ -219,7 +220,7 @@ defmodule Tonic.Eval do
   def expr({:=, meta, [pat, e]}, st) do
     {v, st} = expr(e, st)
     if st.in_module and st.function == nil do
-      Tonic.Eval.Modules.record_attribute_value(st.module, st.file, Keyword.get(meta, :line, st.line), :tonic_binding, v)
+      Tonic.Eval.Modules.record_attribute_value(st.module, st.file, record_line(meta, st), :tonic_binding, v)
     end
 
     case match(pat, v, st) do
@@ -429,7 +430,13 @@ defmodule Tonic.Eval do
           end
         end)
       else
-        expr(body, mst)
+        stmts =
+          case body do
+            {:__block__, _, es} -> es
+            e -> [e]
+          end
+
+        Enum.reduce(stmts, {nil, mst}, fn e, {_, mst} -> expr(e, mst) end)
       end
     mst = Tonic.Eval.Modules.finish(name, mst)
 
@@ -446,6 +453,26 @@ defmodule Tonic.Eval do
     {{:module, name, nil, nil}, st}
   end
 
+  # What a module-level macro call expands to is recorded under the call's
+  # line (the native compiler gives the whole expansion that line), so its
+  # definitions and attribute values can be found by the call's source lines.
+  defp eval_expansion(ast, meta, st) do
+    if st.in_module and st.function == nil and Process.get(:tonic_expansion_line) == nil do
+      Process.put(:tonic_expansion_line, Keyword.get(meta, :line, st.line))
+
+      try do
+        expr(ast, st)
+      after
+        Process.delete(:tonic_expansion_line)
+      end
+    else
+      expr(ast, st)
+    end
+  end
+
+  @doc false
+  def record_line(meta, st), do: Process.get(:tonic_expansion_line) || Keyword.get(meta, :line, st.line)
+
   def expr({kind, meta, [head | rest]}, %{in_module: true} = st) when kind in [:def, :defp, :defmacro, :defmacrop] do
     body =
       case rest do
@@ -454,6 +481,44 @@ defmodule Tonic.Eval do
       end
 
     define(kind, head, body, meta, st)
+  end
+
+  def expr({kind, meta, [{:when, _, [head, guard]}]}, %{in_module: true} = st) when kind in [:defguard, :defguardp] do
+    define(if(kind == :defguard, do: :def, else: :defp), head, [do: guard], meta, st)
+  end
+
+  def expr({:defprotocol, meta, [name_ast, [do: body]]}, st) do
+    expr({:defmodule, meta, [name_ast, [do: body]]}, st)
+  end
+
+  def expr({:defimpl, meta, [proto_ast | rest]}, st) do
+    {opts, body} =
+      case rest do
+        [opts, [do: body]] -> {opts, body}
+        [opts] ->
+          {body, opts} = Keyword.pop(opts, :do)
+          {opts, body}
+      end
+
+    {proto, st} = expr(proto_ast, st)
+
+    targets =
+      case Keyword.fetch(opts, :for) do
+        {:ok, ast} -> ast |> expr(st) |> elem(0) |> List.wrap()
+        :error -> [st.module]
+      end
+
+    for target <- targets do
+      attributes = [
+        {:@, meta, [{:protocol, meta, [proto]}]},
+        {:@, meta, [{:for, meta, [target]}]}
+      ]
+
+      name = Module.concat(proto, target)
+      expr({:defmodule, meta, [name, [do: {:__block__, [], attributes ++ [body]}]]}, %{st | module: nil})
+    end
+
+    {:ok, st}
   end
 
   def expr({:@, _, [{name, _, [spec]}]}, %{in_module: true} = st) when name in [:callback, :macrocallback, :spec, :type, :typep, :opaque] do
@@ -469,7 +534,7 @@ defmodule Tonic.Eval do
       [value_ast] ->
         {v, st} = expr(value_ast, st)
         Tonic.Eval.Modules.put_attribute(st.module, name, v)
-        Tonic.Eval.Modules.record_attribute_value(st.module, st.file, Keyword.get(meta, :line, st.line), name, v)
+        Tonic.Eval.Modules.record_attribute_value(st.module, st.file, record_line(meta, st), name, v)
         {:ok, st}
 
       _ ->
@@ -553,10 +618,9 @@ defmodule Tonic.Eval do
       Tonic.Eval.Modules.macro?(mod, :__using__, 1) ->
         {opts_v, st} = expr(opts, st)
         ast = Tonic.Eval.Modules.call_macro(mod, :__using__, [opts_v], env_of(st))
-        expr(ast, st)
+        eval_expansion(ast, meta, st)
 
       true ->
-        _ = meta
         {:ok, st}
     end
   end
@@ -788,6 +852,13 @@ defmodule Tonic.Eval do
 
   ## Calls
 
+  defp remote_call(module, fun, args, _meta, st)
+       when (module == Kernel and fun in [:function_exported?, :macro_exported?]) or
+              (module == :erlang and fun == :function_exported) do
+    {vals, st} = exprs(args, st)
+    {exported?(fun, vals), st}
+  end
+
   defp remote_call(Kernel, fun, args, meta, st) do
     if kernel_macro(fun, length(args)) do
       special_or_local(fun, meta, args, st)
@@ -795,6 +866,38 @@ defmodule Tonic.Eval do
       {vals, st} = exprs(args, st)
       {apply(Kernel, fun, vals), st}
     end
+  end
+
+  # Interpreted modules are loaded as far as the code being evaluated can tell.
+  defp remote_call(Code, fun, [module_ast], _meta, st) when fun in [:ensure_loaded?, :ensure_loaded, :ensure_compiled, :ensure_loaded!, :ensure_compiled!] do
+    {module, st} = expr(module_ast, st)
+
+    if Tonic.Eval.Modules.loaded?(module) do
+      value =
+        case fun do
+          :ensure_loaded? -> true
+          bang when bang in [:ensure_loaded!, :ensure_compiled!] -> module
+          _ -> {:module, module}
+        end
+
+      {value, st}
+    else
+      {apply(Code, fun, [module]), st}
+    end
+  end
+
+  defp remote_call(Module, fun, args, _meta, st) when fun in [:defines?, :definitions_in, :open?, :has_attribute?] do
+    {vals, st} = exprs(args, st)
+    value =
+      case {fun, vals} do
+        {:defines?, [mod, {name, arity}]} -> {name, arity} in Tonic.Eval.Modules.definitions_in(mod)
+        {:defines?, [mod, {name, arity}, kind]} -> {name, arity} in Tonic.Eval.Modules.definitions_in(mod, kind)
+        {:definitions_in, [mod]} -> Tonic.Eval.Modules.definitions_in(mod)
+        {:definitions_in, [mod, kind]} -> Tonic.Eval.Modules.definitions_in(mod, kind)
+        {:open?, [mod]} -> Tonic.Eval.Modules.loaded?(mod)
+        {:has_attribute?, [mod, name]} -> :ets.member(Tonic.Eval.Modules.table(), {:attr, mod, name})
+      end
+    {value, st}
   end
 
   defp remote_call(Module, fun, args, _meta, st) when fun in [:get_attribute, :put_attribute, :delete_attribute, :register_attribute] do
@@ -816,7 +919,7 @@ defmodule Tonic.Eval do
     cond do
       Tonic.Eval.Modules.macro?(mod, fun, arity) ->
         ast = Tonic.Eval.Modules.call_macro(mod, fun, args, env_of(%{st | line: Keyword.get(meta, :line, st.line)}))
-        expr(ast, st)
+        eval_expansion(ast, meta, st)
 
       true ->
         {vals, st} = exprs(args, st)
@@ -861,31 +964,33 @@ defmodule Tonic.Eval do
     end
   end
 
-  # %Struct{...} in a definition is expanded when it is compiled.
-  defp check_struct_literals(ast, st) do
-    Macro.prewalk(ast, fn
-      {:%, _, [{:__aliases__, _, _} = a, {:%{}, _, kvs}]} = node when is_list(kvs) ->
-        mod = expand_alias(a, st)
+  # %Struct{...} in a definition is expanded when it is compiled; patterns
+  # (clause heads, the left of = and <-) may omit enforced keys.
+  defp check_struct_literals({:%, _, [{:__aliases__, _, _} = a, {:%{}, _, kvs}]}, st) when is_list(kvs) do
+    mod = expand_alias(a, st)
 
-        if is_atom(mod) and Tonic.Eval.Modules.struct_fields(mod) != nil and Keyword.keyword?(kvs) do
-          check_enforced(mod, Keyword.keys(kvs))
-        end
+    if is_atom(mod) and Tonic.Eval.Modules.struct_fields(mod) != nil and Keyword.keyword?(kvs) do
+      check_enforced(mod, Keyword.keys(kvs))
+    end
 
-        node
-
-      {:%, _, [{:__MODULE__, _, ctx}, {:%{}, _, kvs}]} = node when is_atom(ctx) and is_list(kvs) ->
-        if Tonic.Eval.Modules.struct_fields(st.module) != nil and Keyword.keyword?(kvs) do
-          check_enforced(st.module, Keyword.keys(kvs))
-        end
-
-        node
-
-      other ->
-        other
-    end)
-
-    :ok
+    check_struct_literals(kvs, st)
   end
+
+  defp check_struct_literals({:%, _, [{:__MODULE__, _, ctx}, {:%{}, _, kvs}]}, st) when is_atom(ctx) and is_list(kvs) do
+    if Tonic.Eval.Modules.struct_fields(st.module) != nil and Keyword.keyword?(kvs) do
+      check_enforced(st.module, Keyword.keys(kvs))
+    end
+
+    check_struct_literals(kvs, st)
+  end
+
+  defp check_struct_literals({:->, _, [_patterns, body]}, st), do: check_struct_literals(body, st)
+  defp check_struct_literals({op, _, [_pattern, value]}, st) when op in [:=, :<-], do: check_struct_literals(value, st)
+  defp check_struct_literals({:quote, _, _}, _st), do: :ok
+  defp check_struct_literals({left, _, args}, st) when is_list(args), do: check_struct_literals([left | args], st)
+  defp check_struct_literals({left, right}, st), do: check_struct_literals([left, right], st)
+  defp check_struct_literals(list, st) when is_list(list), do: Enum.each(list, &check_struct_literals(&1, st))
+  defp check_struct_literals(_, _st), do: :ok
 
   defp define(kind, head, body, meta, st) do
     {head, guard} =
@@ -906,7 +1011,7 @@ defmodule Tonic.Eval do
       end
 
     expanded_head = if guard == true, do: head, else: {:when, meta, [head, guard]}
-    Tonic.Eval.Modules.record_definition(st.module, st.file, Keyword.get(meta, :line, st.line), {kind, meta, [expanded_head, body]})
+    Tonic.Eval.Modules.record_definition(st.module, st.file, record_line(meta, st), {kind, meta, [expanded_head, body]})
 
     args = if kind in [:defmacro, :defmacrop], do: [{:tonic_caller, [], nil} | args], else: args
 
@@ -922,9 +1027,9 @@ defmodule Tonic.Eval do
 
     env = %{aliases: st.aliases, imports: st.imports, file: st.file, super_target: Tonic.Eval.Modules.prepare_override(st.module, name, arity), macro_function: kind in [:defmacro, :defmacrop]}
 
-    if body_ast != nil and kind in [:def, :defp], do: check_struct_literals(body_ast, st)
+    if body != nil and kind in [:def, :defp], do: check_struct_literals(body_ast, st)
 
-    if body_ast != nil do
+    if body != nil do
       Tonic.Eval.Modules.add_clause(st.module, kind, name, arity, {plain, guard, body_ast, env})
     end
 
@@ -977,18 +1082,36 @@ defmodule Tonic.Eval do
 
   defp unquote_fragments({:unquote, _, [e]}, st) do
     {v, _} = expr(e, st)
-    escape(v)
+    fragment(v)
   end
 
   defp unquote_fragments({:@, _, [{name, _, ctx}]}, %{in_module: true} = st) when is_atom(name) and is_atom(ctx),
     do: escape(Tonic.Eval.Modules.get_attribute(st.module, name))
 
   defp unquote_fragments({a, m, args}, st) when is_list(args),
-    do: {unquote_fragments(a, st), m, Enum.map(args, &unquote_fragments(&1, st))}
+    do: {unquote_fragments(a, st), m, splice_fragments(args, st)}
+
 
   defp unquote_fragments({a, b}, st), do: {unquote_fragments(a, st), unquote_fragments(b, st)}
-  defp unquote_fragments(list, st) when is_list(list), do: Enum.map(list, &unquote_fragments(&1, st))
+  defp unquote_fragments(list, st) when is_list(list), do: splice_fragments(list, st)
   defp unquote_fragments(other, _st), do: other
+
+  defp splice_fragments(list, st) do
+    Enum.flat_map(list, fn
+      {:unquote_splicing, _, [e]} ->
+        {v, _} = expr(e, st)
+        Enum.map(v, &fragment/1)
+
+      item ->
+        [unquote_fragments(item, st)]
+    end)
+  end
+
+  # Quoted code is inserted as is; other values are escaped.
+  defp fragment({name, meta, args} = ast) when (is_atom(name) or is_tuple(name)) and is_list(meta) and (is_atom(args) or is_list(args)), do: ast
+  defp fragment(list) when is_list(list), do: Enum.map(list, &fragment/1)
+  defp fragment({a, b}), do: {fragment(a), fragment(b)}
+  defp fragment(v), do: escape(v)
 
   @doc false
   def escape(v) when is_tuple(v) and tuple_size(v) == 2, do: {escape(elem(v, 0)), escape(elem(v, 1))}
@@ -1026,7 +1149,7 @@ defmodule Tonic.Eval do
 
     case result do
       {:tonic_value, v} -> v
-      :tonic_nomatch -> :erlang.error(:function_clause, args)
+      :tonic_nomatch -> raise FunctionClauseError, module: mod, function: name, arity: length(args), args: args
     end
   end
 
@@ -1067,6 +1190,11 @@ defmodule Tonic.Eval do
     {a, st} = expr(attrs, st)
     {s, _st} = expr(stack, st)
     :erlang.raise(:error, m.exception(a), s)
+  end
+
+  defp special_or_local(fun, _meta, [_, _, _] = args, st) when fun in [:function_exported?, :macro_exported?] do
+    {vals, st} = exprs(args, st)
+    {exported?(fun, vals), st}
   end
 
   defp special_or_local(:is_nil, _meta, [a], st) do
@@ -1177,15 +1305,36 @@ defmodule Tonic.Eval do
     cond do
       st.module != nil and Tonic.Eval.Modules.macro?(st.module, name, arity, true) ->
         ast = Tonic.Eval.Modules.call_macro(st.module, name, args, env_of(st), true)
-        expr(ast, st)
+        eval_expansion(ast, meta, st)
 
-      st.module != nil and Tonic.Eval.Modules.defines?(st.module, name, arity) ->
+      # Module bodies cannot call the module's own functions, so imported
+      # macros win there (Plug.Router's `match _` beside its match/2).
+      st.module != nil and Tonic.Eval.Modules.defines?(st.module, name, arity) and
+          not (st.function == nil and imported_macro?(name, arity, st)) ->
         {vals, st} = exprs(args, st)
         {Tonic.Eval.Modules.apply(st.module, name, vals, true), st}
 
       true ->
         call_import(name, args, arity, meta, st)
     end
+  end
+
+  # Interpreted modules export what they define.
+  defp exported?(:macro_exported?, [module, name, arity]) do
+    Tonic.Eval.Modules.macro?(module, name, arity) or macro_exported?(module, name, arity)
+  end
+
+  defp exported?(_, [module, name, arity]) do
+    Tonic.Eval.Modules.defines?(module, name, arity, false) or function_exported?(module, name, arity)
+  end
+
+  defp imported_macro?(name, arity, st) do
+    Enum.any?(st.imports, fn {mod, opts} ->
+      only = Keyword.get(opts, :only)
+      permitted = only in [nil, :macros] or (is_list(only) and {name, arity} in only)
+      permitted and {name, arity} not in Keyword.get(opts, :except, []) and
+        Tonic.Eval.Modules.macro?(mod, name, arity)
+    end)
   end
 
   defp call_import(name, args, arity, meta, st) do
@@ -1209,7 +1358,7 @@ defmodule Tonic.Eval do
       {mod, :macro} ->
         caller = env_of(%{st | line: Keyword.get(meta, :line, st.line)})
         ast = Tonic.Eval.Modules.call_macro(mod, name, args, caller)
-        expr(ast, st)
+        eval_expansion(ast, meta, st)
 
       {mod, :function} ->
         {vals, st} = exprs(args, st)
@@ -1353,11 +1502,12 @@ defmodule Tonic.Eval do
   end
 
   defp for_expr(args, st) do
-    {gens, [opts]} =
-      case List.last(args) do
-        kw when is_list(kw) -> Enum.split(args, -1)
-        _ -> {args, [[]]}
-      end
+    {opts, gens} =
+      args
+      |> Enum.reverse()
+      |> Enum.split_while(&Keyword.keyword?/1)
+
+    {gens, opts} = {Enum.reverse(gens), opts |> Enum.reverse() |> Enum.concat()}
 
     into = Keyword.get(opts, :into)
     uniq = Keyword.get(opts, :uniq, false)
@@ -1672,6 +1822,17 @@ defmodule Tonic.Eval do
     v
   end
 
+  # Mod.unquote(name)(args): a remote call whose name is unquoted.
+  defp do_quote({{{:., dot_meta, [left, :unquote]}, _, [name]}, meta, args}, %{quote_unquote: true} = st) when is_list(args) do
+    {fun, _} = expr(name, st)
+    {{:., dot_meta, [do_quote(left, st), fun]}, meta, quote_list(args, st)}
+  end
+
+  defp do_quote({{:., dot_meta, [left, :unquote]}, meta, [name]}, %{quote_unquote: true} = st) do
+    {fun, _} = expr(name, st)
+    {{:., dot_meta, [do_quote(left, st), fun]}, meta, []}
+  end
+
   defp do_quote({:__aliases__, _meta, [h | t] = args}, st) when is_atom(h) do
     case List.keyfind(st.aliases, Module.concat([h]), 0) do
       {_, mod} -> {:__aliases__, [alias: Module.concat([mod | t])], args}
@@ -1695,8 +1856,9 @@ defmodule Tonic.Eval do
     {name, meta, quote_list(args, st)}
   end
 
-  defp do_quote({left, _meta, args}, st) when is_list(args) do
-    {do_quote(left, st), [], quote_list(args, st)}
+  defp do_quote({left, meta, args}, st) when is_list(args) do
+    meta = if Keyword.get(meta, :no_parens), do: [no_parens: true], else: []
+    {do_quote(left, st), meta, quote_list(args, st)}
   end
 
   defp do_quote({a, b}, st), do: {do_quote(a, st), do_quote(b, st)}
@@ -1795,7 +1957,7 @@ defmodule Tonic.Eval do
           {t, s, u, sg, name}
 
         {:size, _, [n]} ->
-          {v, _} = expr(n, st)
+          {v, _} = expr(unpin(n), st)
           {t, v, u, sg, e}
 
         {:unit, _, [n]} ->
@@ -1994,6 +2156,28 @@ defmodule Tonic.Eval do
 
   defp mt({:<>, _, _}, _, _st), do: :error
 
+  defp mt({:++, _, [prefix, rest]}, v, st) when is_list(v) do
+    pats =
+      if is_list(prefix) do
+        prefix
+      else
+        {value, _} = expr(prefix, st)
+        Enum.map(value, &Macro.escape/1)
+      end
+
+    count = length(pats)
+
+    case Enum.split(v, count) do
+      {head, tail} when length(head) == count ->
+        with {:ok, st} <- mt_list(pats, head, st), do: mt(rest, tail, st)
+
+      _ ->
+        :error
+    end
+  end
+
+  defp mt({:++, _, _}, _, _st), do: :error
+
   defp mt({:when, meta, _}, _v, st), do: compile_error(st, meta, "invalid pattern")
 
   defp mt({name, meta, args} = pattern, value, st) when is_atom(name) and is_list(args) do
@@ -2180,11 +2364,13 @@ defmodule Tonic.Eval.Modules do
   def create(mod, file) do
     t = tab()
     # redefinition replaces the previous version
-    for {{_, ^mod, _, _} = k, _, _} <- :ets.tab2list(t), do: :ets.delete(t, k)
+    for entry <- :ets.tab2list(t), match?({_, ^mod, _, _}, elem(entry, 0)), do: :ets.delete(t, elem(entry, 0))
     :ets.match_delete(t, {{:attr, mod, :_}, :_})
     :ets.match_delete(t, {{:accumulate, mod, :_}, :_})
     :ets.delete(t, {:struct, mod})
     :ets.delete(t, {:enforce, mod})
+    :ets.delete(t, {:source_definitions, mod})
+    :ets.match_delete(t, {{:attribute_value, mod, :_, :_, :_}, :_})
     :ets.insert(t, {{:mod, mod}, file})
     :ok
   end
@@ -2243,15 +2429,26 @@ defmodule Tonic.Eval.Modules do
     |> Enum.map(fn {_, _, definition} -> definition end)
   end
 
+  # Every value an attribute (or module-level binding) takes on a line, in
+  # evaluation order: one line can hold a whole macro expansion.
   def record_attribute_value(mod, file, line, name, value) do
-    :ets.insert(tab(), {{:attribute_value, mod, file, line, name}, value})
+    key = {:attribute_value, mod, file, line, name}
+
+    values =
+      case :ets.lookup(tab(), key) do
+        [{_, values}] -> values
+        [] -> []
+      end
+
+    :ets.insert(tab(), {key, values ++ [value]})
     :ok
   end
 
-  def attribute_value(mod, file, line, name) do
+  def attribute_value(mod, file, line, name, index \\ nil) do
     case :ets.lookup(tab(), {:attribute_value, mod, file, line, name}) do
-      [{_, value}] -> value
-      [] -> raise CompileError, file: file, line: line, description: "no compile-time snapshot available for @#{name}"
+      [{_, values}] when is_integer(index) and index < length(values) -> Enum.at(values, index)
+      [{_, values}] when values != [] -> List.last(values)
+      _ -> raise CompileError, file: file, line: line, description: "no compile-time snapshot available for @#{name}"
     end
   end
 
@@ -2281,10 +2478,47 @@ defmodule Tonic.Eval.Modules do
   defp callback_target(mod, default), do: {mod, default}
 
   defp check_load_error(mod) do
+    if Map.has_key?(Process.get(:tonic_macro_load_errors) || %{}, mod), do: retry_load(mod)
     if error = Map.get(Process.get(:tonic_macro_load_errors) || %{}, mod), do: raise(CompileError, description: error)
   end
 
+  # A module whose load failed (often because a module it needs at compile
+  # time came later in the load order) is loaded again on first use.
+  def retry_load(mod) do
+    case Map.pop(Process.get(:tonic_macro_retries) || %{}, mod) do
+      {nil, _} -> :ok
+      {retry, rest} ->
+        Process.put(:tonic_macro_retries, rest)
+        retry.()
+    end
+  end
+
   def loaded?(mod), do: is_atom(mod) and :ets.member(tab(), {:mod, mod})
+
+  def table, do: tab()
+
+  defp info(mod, :module), do: mod
+  defp info(mod, :functions), do: Enum.sort(definitions_in(mod, :def))
+  defp info(mod, :macros), do: Enum.sort(definitions_in(mod, :defmacro))
+  defp info(mod, :struct), do: if(fields = struct_fields(mod), do: Enum.map(fields, fn {field, _} -> %{field: field, default: nil} end))
+  defp info(mod, :attributes) do
+    persisted = for {{:persist, ^mod, name}, true} <- :ets.match_object(tab(), {{:persist, mod, :_}, :_}), do: name
+
+    for name <- [:behaviour | persisted], value = get_attribute(mod, name), value not in [nil, []] do
+      {name, List.wrap(value)}
+    end
+  end
+  defp info(_mod, :compile), do: []
+  defp info(_mod, :md5), do: nil
+  defp info(_mod, :deprecated), do: []
+  defp info(_mod, key), do: raise(ArgumentError, "unknown __info__ key #{inspect(key)}")
+
+  def definitions_in(mod, kind \\ nil) do
+    for {{:def, ^mod, name, arity}, k, _} <- :ets.match_object(tab(), {{:def, mod, :_, :_}, :_, :_}),
+        kind == nil or k == kind do
+      if k in [:defmacro, :defmacrop], do: {name, arity - 1}, else: {name, arity}
+    end
+  end
 
   def make_overridable(mod, behaviour) when is_atom(behaviour) do
     callbacks = List.wrap(get_attribute(behaviour, :callback)) ++ List.wrap(get_attribute(behaviour, :macrocallback))
@@ -2344,13 +2578,15 @@ defmodule Tonic.Eval.Modules do
   end
 
   def put_attribute(mod, name, value) do
-    accumulated = name in [:before_compile, :after_compile, :on_definition, :callback, :macrocallback] or :ets.member(tab(), {:accumulate, mod, name})
+    accumulated = name in [:before_compile, :after_compile, :on_definition, :callback, :macrocallback, :behaviour] or :ets.member(tab(), {:accumulate, mod, name})
     value = if accumulated, do: [value | (get_attribute(mod, name) || [])], else: value
     :ets.insert(tab(), {{:attr, mod, name}, value})
     :ok
   end
 
   def register_attribute(mod, name, opts) do
+    if opts[:persist], do: :ets.insert(tab(), {{:persist, mod, name}, true})
+
     if opts[:accumulate] do
       :ets.insert(tab(), {{:accumulate, mod, name}, true})
       if get_attribute(mod, name) == nil, do: :ets.insert(tab(), {{:attr, mod, name}, []})
@@ -2441,6 +2677,9 @@ defmodule Tonic.Eval.Modules do
 
       {:defp, clauses} when private ->
         Tonic.Eval.run_function(clauses, args, mod, fun)
+
+      _ when fun == :__info__ and arity == 1 ->
+        if loaded?(mod), do: info(mod, hd(args)), else: Kernel.apply(mod, fun, args)
 
       _ ->
         case {struct_fields(mod), fun, args} do

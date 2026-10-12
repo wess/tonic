@@ -128,6 +128,11 @@ fn g() -> &'static Globals {
     })
 }
 
+/// The tokio runtime processes and their I/O run on.
+pub fn runtime() -> tokio::runtime::Handle {
+    g().rt.get().expect("runtime").clone()
+}
+
 pub fn argv() -> Vec<String> {
     g().argv.lock().clone()
 }
@@ -486,12 +491,12 @@ fn finish_process(ctx: &mut Ctx, r: Term, is_main: bool) {
     } else {
         ctx.flush_pending_args();
         let kind = ctx.exc_kind;
-        let rs = ctx.exc_reason;
         if kind == atom(a::EXIT_KIND) {
-            rs
+            ctx.exc_reason
         } else {
             // Report the crash like the BEAM logger does.
             if !is_main {
+                let rs = ctx.exc_reason;
                 let msg = crate::bif_misc::format_exit_message(ctx, kind, rs);
                 let text = format!(
                     "\n{} [error] Process #PID<0.{}.0> raised an exception\n{}",
@@ -502,6 +507,9 @@ fn finish_process(ctx: &mut Ctx, r: Term, is_main: bool) {
                 let text = if crate::bif_more::stdout_is_tty() { format!("\x1b[31m{}\x1b[0m\n", text) } else { format!("{}\n", text) };
                 crate::io::stdout_write(text.as_bytes());
             }
+            // Formatting runs Elixir code: the collector may have moved the
+            // reason since it was read.
+            let rs = ctx.exc_reason;
             if kind == atom(a::THROW) {
                 let base = ctx.roots.len();
                 ctx.roots.push(rs);
@@ -884,6 +892,7 @@ pub unsafe extern "C" fn tonic_start(
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(threads.max(1))
         .enable_time()
+        .enable_io()
         .thread_stack_size(8 * 1024 * 1024)
         .build()
         .expect("tokio runtime");

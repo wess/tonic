@@ -17,6 +17,8 @@ pub mod exc;
 pub mod heap;
 pub mod io;
 pub mod map;
+pub mod net;
+pub mod nif;
 pub mod num;
 pub mod re;
 pub mod ustr;

@@ -61,9 +61,11 @@ Git commits, pushes, and tags remain user-owned under the shared project guidanc
   runtime configuration, and supervised services—not only isolated functions.
 - [ ] Strengthen environment/target, optional dependency, protocol, and stale
   cache coverage across project and dependency sources.
-- [ ] Decide and document support for umbrella roots, `rebar3` dependencies,
-  custom compilers, and packages requiring native libraries before implementing
-  those build paths.
+- [ ] Decide and document support for umbrella roots and custom compilers.
+- [ ] Turn `examples/helloweb` into an automated test: build it, exercise the
+  HTTP endpoints, and compare with the BEAM.
+- [ ] Refresh `licenses/cargo` for the crates tokio's `net` feature added
+  (mio, socket2, ...).
 
 ## Larger runtime decisions
 
@@ -71,7 +73,9 @@ These are outside the current release. They need explicit design work and
 dedicated interoperability tests before any compatibility claims.
 
 - [ ] Define a ports and external-process interface.
-- [ ] Decide whether to support NIFs or provide a separate native extension API.
+- [ ] Extend the `erl_nif` subset (maps, monitors, select, dirty schedulers) and
+  release resources when no term references them.
+- [ ] SSL and UDP sockets.
 - [ ] Define the scope of distributed-node support and BEAM interoperability.
 - [ ] Decide how dynamic module loading and hot code replacement would work
   with native compilation.

@@ -123,7 +123,9 @@ pub fn eval(e: &E, vars: &Vars, attrs: &HashMap<String, E>) -> Option<E> {
         K::Int(_) | K::Float(_) | K::Atom(_) | K::Str(_) | K::Alias(_) => Some(e.clone()),
         K::Capture(body)
             if matches!(&body.k, K::Bin { op, l, r } if op == "/"
-                && matches!(&l.k, K::Remote { recv, args, .. } if args.is_empty() && matches!(recv.k, K::Atom(_) | K::Alias(_)))
+                && (matches!(&l.k, K::Remote { recv, args, .. } if args.is_empty() && matches!(recv.k, K::Atom(_) | K::Alias(_)))
+                    || matches!(&l.k, K::Var(_))
+                    || matches!(&l.k, K::Call { args, .. } if args.is_empty()))
                 && matches!(r.k, K::Int(_))) =>
         {
             Some(e.clone())
@@ -602,6 +604,30 @@ pub fn subst_unquote(e: &E, vars: &Vars, attrs: &HashMap<String, E>) -> E {
                 .with_line(line),
                 _ => {
                     let mut all = vec![head];
+                    all.extend(rest);
+                    K::Call {
+                        name: name.clone(),
+                        args: all,
+                        parens: *parens,
+                    }
+                    .with_line(line)
+                }
+            }
+        }
+        K::Call { name, args, parens } if name == "__unquote_remote__" && args.len() >= 2 => {
+            let recv = subst_unquote(&args[0], vars, attrs);
+            let head = subst_unquote(&args[1], vars, attrs);
+            let rest = splice(&args[2..]);
+            match head.k {
+                K::Atom(a) => K::Remote {
+                    recv: Box::new(recv),
+                    name: a,
+                    args: rest,
+                    parens: true,
+                }
+                .with_line(line),
+                _ => {
+                    let mut all = vec![recv, head];
                     all.extend(rest);
                     K::Call {
                         name: name.clone(),

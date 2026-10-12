@@ -64,27 +64,17 @@ fn executable_declarations_fail_explicitly() {
         (
             "local",
             "defmodule Broken do\n  missing()\nend",
-            "unsupported module-level call missing/0",
-        ),
-        (
-            "remote",
-            "defmodule Broken do\n  IO.puts(:discarded)\nend",
-            "unsupported module-level call IO.puts/1",
+            "undefined function missing/0",
         ),
         (
             "assignment",
             "defmodule Broken do\n  x = missing()\nend",
-            "unsupported module-level assignment",
-        ),
-        (
-            "onload",
-            "defmodule Broken do\n  @on_load :init\n  def init(), do: :ok\nend",
-            "@on_load callbacks are not supported",
+            "undefined function missing/0",
         ),
         (
             "for",
             "defmodule Broken do\n  for x <- unknown(), do: x\nend",
-            "unsupported module-level for",
+            "undefined function unknown/0",
         ),
     ] {
         let output = run_case(name, source);
@@ -96,6 +86,17 @@ fn executable_declarations_fail_explicitly() {
             "missing source location: {stderr}"
         );
     }
+}
+
+#[test]
+fn module_bodies_run_at_compile_time_and_on_load_at_startup() {
+    let output = run_case(
+        "bodies",
+        "defmodule Body do\n  IO.puts(:compile_time)\n  @on_load :init\n  def init() do\n    IO.puts(:loaded)\n    :ok\n  end\nend\nIO.puts(:runtime)\n",
+    );
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("compile_time"));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "loaded\nruntime\n");
 }
 
 #[test]

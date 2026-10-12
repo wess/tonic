@@ -60,3 +60,7 @@ registry.ex registry.ex
 macro.ex macro.ex
 inspect.ex inspect.ex
 inspect_algebra.ex inspect/algebra.ex
+eex.ex ../../eex/lib/eex.ex
+eexcompiler.ex ../../eex/lib/eex/compiler.ex
+eexengine.ex ../../eex/lib/eex/engine.ex
+eexsmartengine.ex ../../eex/lib/eex/smart_engine.ex

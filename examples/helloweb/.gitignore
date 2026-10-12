@@ -1,0 +1,5 @@
+/_build/
+/deps/
+*.db
+*.db-shm
+*.db-wal

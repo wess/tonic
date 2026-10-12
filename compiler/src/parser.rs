@@ -444,6 +444,25 @@ impl Parser {
                         t.line,
                     );
                 }
+                T::Op("(")
+                    if !t.sp
+                        && matches!(&e.k, K::Remote { name, parens: true, args, .. } if name == "unquote" && args.len() == 1) =>
+                {
+                    // `Mod.unquote(name)(args)` in generated code
+                    self.pos += 1;
+                    let K::Remote { recv, args: head, .. } = e.k else { unreachable!() };
+                    let mut args = vec![*recv];
+                    args.extend(head);
+                    args.extend(self.paren_args()?);
+                    e = E::new(
+                        K::Call {
+                            name: "__unquote_remote__".into(),
+                            args,
+                            parens: true,
+                        },
+                        t.line,
+                    );
+                }
                 T::Op("[") if !t.sp => {
                     self.pos += 1;
                     self.nl_ign.push(true);

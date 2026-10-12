@@ -495,25 +495,37 @@ pub fn format_exit_message(ctx: &mut Ctx, kind: Term, reason: Term) -> String {
 /// `Code.require_file/2` frame Elixir shows).
 pub fn format_exit_message_x(ctx: &mut Ctx, kind: Term, reason: Term, main: bool) -> String {
     if let Some(fp) = crate::sched::lookup_fun(atom(a::TONIC_INTERNAL), atom(a::FORMAT_EXIT), 2) {
-        let saved = (ctx.exc_kind, ctx.exc_reason, ctx.exc_stack);
-        let stack = if ctx.exc_stack == 0 { NIL_LIST } else { ctx.exc_stack };
+        // The exception is kept in roots: formatting may collect (moving it)
+        // or raise (replacing it).
         let base = ctx.roots.len();
-        ctx.roots.push(reason);
-        let k = ctx.tuple(&[kind, stack, boolean(main)]);
-        let reason = ctx.roots[base];
-        ctx.roots.truncate(base);
-        let args = [k, reason];
+        let stack = if ctx.exc_stack == 0 { NIL_LIST } else { ctx.exc_stack };
+        ctx.roots.extend_from_slice(&[ctx.exc_kind, ctx.exc_reason, stack, reason]);
+        let k = ctx.tuple(&[kind, ctx.roots[base + 2], boolean(main)]);
+        let args = [k, ctx.roots[base + 3]];
         let r = unsafe {
             crate::sched::tonic_call_fnptr(ctx, fp as *const std::ffi::c_void, 2, args.as_ptr())
         };
+        let had_stack = ctx.roots[base + 2] != NIL_LIST;
+        let restore = |ctx: &mut Ctx| {
+            ctx.exc_kind = ctx.roots[base];
+            ctx.exc_reason = ctx.roots[base + 1];
+            ctx.exc_stack = if had_stack { ctx.roots[base + 2] } else { 0 };
+        };
         if r != NONE && is_binary(r) {
-            return String::from_utf8_lossy(bin_bytes(r)).into_owned();
+            let text = String::from_utf8_lossy(bin_bytes(r)).into_owned();
+            restore(ctx);
+            ctx.roots.truncate(base);
+            return text;
         }
-        ctx.exc_kind = saved.0;
-        ctx.exc_reason = saved.1;
-        ctx.exc_stack = saved.2;
+        restore(ctx);
+        ctx.roots.truncate(base);
     }
-    format!("** ({}) {}", atoms::name(atom_idx(kind)), debug_term(reason))
+    let stack = if ctx.exc_stack == 0 { NIL_LIST } else { ctx.exc_stack };
+    if stack == NIL_LIST {
+        format!("** ({}) {}", atoms::name(atom_idx(kind)), debug_term(reason))
+    } else {
+        format!("** ({}) {}\n    {}", atoms::name(atom_idx(kind)), debug_term(reason), debug_term(stack))
+    }
 }
 
 /// Minimal term printer for diagnostics.

@@ -116,6 +116,16 @@ impl Expander {
             }
             if let Some(bq) = o.kw_get("bind_quoted") {
                 q.unquote = false;
+                let literal = matches!(&bq.k, K::List(items, None) if items.iter().all(|it| matches!(&it.k, K::Tuple(kv) if kv.len() == 2 && matches!(kv[0].k, K::Atom(_)))));
+                if !literal {
+                    let bindings = self.expr(bq, cx)?;
+                    let b = q.q(&mut ExUnq { ex: self, cx }, body)?;
+                    return Ok(CE::DynCall(
+                        Box::new(CE::atom("Elixir.Tonic.Internal")),
+                        "bind_quoted".into(),
+                        vec![bindings, CE::atom(&q.ctx), b],
+                    ));
+                }
                 let mut exprs = Vec::new();
                 if let K::List(items, _) = &bq.k {
                     for it in items {
@@ -370,6 +380,21 @@ impl Quoter {
             K::Call { name, args, parens } => {
                 if self.unquote && name == "unquote" && args.len() == 1 {
                     return u.unquote(&args[0]);
+                }
+                if name == "__unquote_call__" && !args.is_empty() {
+                    let head = self.q(u, &args[0])?;
+                    let a = self.arg_list(u, &args[1..])?;
+                    return Ok(triple(head, nil(), a));
+                }
+                if name == "__unquote_remote__" && args.len() >= 2 {
+                    let r = match &args[0].k {
+                        K::Atom(m) => CE::atom(m),
+                        _ => self.q(u, &args[0])?,
+                    };
+                    let f = if self.unquote { u.unquote(&args[1])? } else { self.q(u, &args[1])? };
+                    let dot = triple(CE::atom("."), nil(), list(vec![r, f]));
+                    let a = self.arg_list(u, &args[2..])?;
+                    return Ok(triple(dot, nil(), a));
                 }
                 if name == "__block__" {
                     let a = self.arg_list(u, args)?;

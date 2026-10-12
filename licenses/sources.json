@@ -212,6 +212,19 @@
       "sha256": "32ee79cec19af7a604b2d198daea5575402e73ee030b8d21602a89d6299b2d9d"
     },
     {
+      "file": "lib/erl/genstatem.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gen_statem.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Tonic integration and native-runtime adaptations; source notices preserved.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gen_statem.erl": "18bdbe3015c939d3497858838d66e6914835189ab1e382518d8269d76b2e578c"
+      },
+      "sha256": "58c5989999842f4c3b4f98d67ed14a34c3c860e62be719ae428a66c0b53d0019"
+    },
+    {
       "file": "lib/erl/include/elixir.hrl",
       "version": "1.18.3",
       "upstream": [

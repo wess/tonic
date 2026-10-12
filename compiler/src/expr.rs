@@ -674,6 +674,7 @@ impl Expander {
                             "refute_receive__",
                             "dbg_value",
                             "tonic__",
+                            "tonic_caller",
                         ]
                         .iter()
                         .any(|p| k.starts_with(p))
@@ -805,6 +806,16 @@ impl Expander {
                             | "update_in" | "get_in" | "var!" | "binding",
                             _,
                         ) => return self.call(name, args, parens, line, cx),
+                        // Operator macros keep their evaluation rules (short
+                        // circuits, patterns) when called as Kernel.op(a, b).
+                        ("||" | "&&" | "and" | "or" | "in" | "|>" | "<>" | ".." | "=~", 2) => {
+                            let e = E::bin(name, args[0].clone(), args[1].clone(), line);
+                            return self.expr(&e, cx);
+                        }
+                        ("!" | "not", 1) => {
+                            let e = E::new(K::Un { op: name.to_string(), e: Box::new(args[0].clone()) }, line);
+                            return self.expr(&e, cx);
+                        }
                         _ => {}
                     }
                 }
@@ -1147,7 +1158,11 @@ impl Expander {
         // Hygiene: variables written in the template belong to the macro.
         self.hyg_counter += 1;
         let quoted = hygienize(&quoted, self.hyg_counter);
-        Ok(unquote_subst(&quoted, &b))
+        let expanded = unquote_subst(&quoted, &b);
+        match resolve_unquote_calls(&expanded) {
+            Some(expanded) => Ok(expanded),
+            None => self.host_expand(m, name, args, line, cx),
+        }
     }
 
     /// For `put_in(a.b[:c], v)` style macros: returns (root, keys list).
@@ -1160,11 +1175,13 @@ impl Expander {
                     keys.push(self.expr(key, cx)?);
                     cur = (**inner).clone();
                 }
+                // Like Kernel's path macros, `data.key()` is a field too:
+                // expansions printed by the macro host may carry parentheses.
                 K::Remote {
                     recv,
                     name,
                     args,
-                    parens: false,
+                    ..
                 } if args.is_empty() && !matches!(recv.k, K::Alias(_) | K::Atom(_)) => {
                     keys.push(CE::Call(
                         FunKey::new("Elixir.Access", "key!", 1),
@@ -2897,6 +2914,20 @@ impl Expander {
                 cx.macro_context = saved_context;
                 self.pat(&result?, cx, b)
             }
+            K::Remote { recv, name, args, .. }
+                if matches!(&recv.k, K::Alias(a) if self.macros.contains_key(&(resolve_alias(&cx.env, a), name.clone(), args.len()))) =>
+            {
+                // remote macro in a pattern (e.g. a record macro)
+                let m = match &recv.k {
+                    K::Alias(a) => resolve_alias(&cx.env, a),
+                    _ => unreachable!(),
+                };
+                let saved_context = cx.macro_context;
+                cx.macro_context = Some("match");
+                let result = self.macro_ast(&m, name, args, line, cx);
+                cx.macro_context = saved_context;
+                self.pat(&result?, cx, b)
+            }
             K::Block(es) if es.len() == 1 => self.pat(&es[0], cx, b),
             K::Call { name, args, .. }
                 if name == "var!" && (args.len() == 1 || args.len() == 2) =>
@@ -3637,5 +3668,42 @@ fn is_hygienic_name(k: &str) -> bool {
     match k.rfind("__h") {
         Some(i) => !k[i + 3..].is_empty() && k[i + 3..].chars().all(|c| c.is_ascii_digit()),
         None => false,
+    }
+}
+
+/// `unquote(name)(args)` and `Mod.unquote(name)(args)` once `name` is known.
+fn resolve_unquote_calls(e: &E) -> Option<E> {
+    let mut unresolved = false;
+    let out = map_expr(e, &mut |x: &E| match &x.k {
+        K::Call { name, args, .. } if name == "__unquote_call__" && !args.is_empty() => {
+            let rest: Vec<E> = args[1..].iter().map(|a| resolve_unquote_calls(a).unwrap_or_else(|| a.clone())).collect();
+            match &args[0].k {
+                K::Atom(f) => Some(E::new(K::Call { name: f.clone(), args: rest, parens: true }, x.line)),
+                _ => {
+                    unresolved = true;
+                    Some(x.clone())
+                }
+            }
+        }
+        K::Call { name, args, .. } if name == "__unquote_remote__" && args.len() >= 2 => {
+            let recv = resolve_unquote_calls(&args[0]).unwrap_or_else(|| args[0].clone());
+            let rest: Vec<E> = args[2..].iter().map(|a| resolve_unquote_calls(a).unwrap_or_else(|| a.clone())).collect();
+            match &args[1].k {
+                K::Atom(f) => Some(E::new(
+                    K::Remote { recv: Box::new(recv), name: f.clone(), args: rest, parens: true },
+                    x.line,
+                )),
+                _ => {
+                    unresolved = true;
+                    Some(x.clone())
+                }
+            }
+        }
+        _ => None,
+    });
+    if unresolved {
+        None
+    } else {
+        Some(out)
     }
 }

@@ -14,14 +14,17 @@ defmodule Tonic.ProjectBridge do
 
       applications =
         Enum.map(deps, fn dep ->
-          if dep.manager != :mix,
+          unless dep.manager in [:mix, :rebar3],
             do:
               Mix.raise(
                 "Tonic cannot compile #{dep.app}: unsupported dependency build manager #{inspect(dep.manager)}"
               )
 
           Mix.Dep.in_dependency(dep, fn _ ->
-            metadata = application(dep.app, dep.deps)
+            metadata =
+              if dep.manager == :rebar3,
+                do: rebar(dep.app, dep.deps),
+                else: application(dep.app, dep.deps)
 
             matches =
               cond do
@@ -41,7 +44,7 @@ defmodule Tonic.ProjectBridge do
                   "Tonic dependency #{dep.app}: version #{metadata.version} does not match requirement #{inspect(dep.requirement)}. Run mix deps.get in this project"
                 )
 
-            metadata
+            %{metadata | sources: Enum.reject(metadata.sources, &mix_source?/1)}
           end)
         end)
 
@@ -82,6 +85,7 @@ defmodule Tonic.ProjectBridge do
 
       metadata = [
         app: Atom.to_string(app),
+        native_sources: Enum.flat_map(applications ++ [current], & &1.native),
         inputs: [configuration] ++ sources ++ runtime_inputs ++ [entry],
         macro_inputs: sources,
         config_inputs: [configuration]
@@ -122,7 +126,7 @@ defmodule Tonic.ProjectBridge do
   defp application(app, children) do
     config = Mix.Project.config()
     compilers = config[:compilers] || Mix.compilers()
-    unsupported = compilers -- [:yecc, :leex, :erlang, :elixir, :app, :tonic]
+    unsupported = compilers -- [:yecc, :leex, :erlang, :elixir, :app, :tonic, :elixir_make]
 
     unless unsupported == [],
       do:
@@ -134,7 +138,7 @@ defmodule Tonic.ProjectBridge do
       Path.wildcard(Path.join(root, "priv/**/*"))
       |> Enum.filter(&(Path.extname(&1) in [".so", ".dylib", ".dll"]))
 
-    unless native == [],
+    unless native == [] or :elixir_make in compilers,
       do:
         Mix.raise(
           "Tonic cannot compile #{app}: NIF/native libraries are unsupported: #{Enum.join(native, ", ")}"
@@ -154,6 +158,7 @@ defmodule Tonic.ProjectBridge do
         )
 
     sources = files(root, elixir_paths, ".ex") ++ files(root, erlang_paths, ".erl")
+    native = native_sources(app, root, compilers)
     project = Mix.Project.get()
 
     properties =
@@ -183,8 +188,83 @@ defmodule Tonic.ProjectBridge do
         String.to_charlist(config[:description] || Atom.to_string(app))
       )
       |> Keyword.put(:vsn, String.to_charlist(config[:version] || "0.0.0"))
+      |> Keyword.put(:tonic_priv_dir, String.to_charlist(Path.join(root, "priv")))
 
-    [app: app, version: config[:version] || "0.0.0", spec: spec, sources: sources] |> Map.new()
+    [app: app, version: config[:version] || "0.0.0", spec: spec, sources: sources, native: native]
+    |> Map.new()
+  end
+
+  # NIF libraries built by elixir_make are compiled from their C sources and
+  # linked into the executable. Each entry is "source\tflag\tflag...".
+  defp native_sources(app, root, compilers) do
+    sources = Path.wildcard(Path.join(root, "c_src/**/*.c")) |> Enum.sort()
+    nif? = Enum.any?(sources, &(File.read!(&1) =~ "ERL_NIF_INIT"))
+
+    cond do
+      nif? ->
+        includes = for dir <- Enum.uniq(Enum.map(sources, &Path.dirname/1)), do: "-I" <> dir
+        flags = includes ++ makefile_defines(root)
+        for source <- sources, do: Enum.join([source | flags], "\t")
+
+      :elixir_make in compilers ->
+        Mix.raise("Tonic cannot compile #{app}: elixir_make builds without NIF C sources in c_src/ are unsupported")
+
+      true ->
+        []
+    end
+  end
+
+  # -D options the dependency's Makefile adds to CFLAGS.
+  defp makefile_defines(root) do
+    makefile = Enum.find(["Makefile", "GNUmakefile", "makefile"], &File.regular?(Path.join(root, &1)))
+
+    if makefile do
+      Regex.scan(~r/^\s*CFLAGS\s*[+:?]?=(.*)$/m, File.read!(Path.join(root, makefile)))
+      |> Enum.flat_map(fn [_, value] -> Regex.scan(~r/-D[A-Za-z0-9_]+(?:=[^\s"']+)?/, value) end)
+      |> Enum.map(&hd/1)
+      |> Enum.reject(&String.starts_with?(&1, "-DSTATIC_ERLANG_NIF"))
+      |> Enum.uniq()
+    else
+      []
+    end
+  end
+
+  # Mix tasks shipped by dependencies need Mix, which a native program lacks.
+  defp mix_source?(path), do: String.contains?(path, "/lib/mix/")
+
+  defp rebar(app, children) do
+    root = File.cwd!()
+
+    native =
+      Path.wildcard(Path.join(root, "c_src/**/*")) ++
+        Path.wildcard(Path.join(root, "priv/**/*.{so,dylib,dll}"))
+
+    unless native == [],
+      do:
+        Mix.raise(
+          "Tonic cannot compile #{app}: NIF/native libraries are unsupported: #{Enum.join(native, ", ")}"
+        )
+
+    {:ok, [{:application, ^app, properties}]} =
+      root
+      |> Path.join("src/#{app}.app.src")
+      |> String.to_charlist()
+      |> :file.consult()
+
+    required = properties[:applications] || []
+
+    deps =
+      for dep <- children, dep.app not in required, Keyword.get(dep.opts, :runtime, true),
+          do: dep.app
+
+    spec =
+      properties
+      |> Keyword.take([:description, :vsn, :mod, :env, :registered, :applications, :optional_applications, :included_applications])
+      |> Keyword.put(:applications, required ++ deps)
+      |> Keyword.put(:tonic_priv_dir, String.to_charlist(Path.join(root, "priv")))
+
+    [app: app, version: to_string(properties[:vsn]), spec: spec, sources: files(root, ["src"], ".erl"), native: []]
+    |> Map.new()
   end
 
   defp files(root, paths, extension) do

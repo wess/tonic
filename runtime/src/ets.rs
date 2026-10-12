@@ -27,6 +27,8 @@ struct Table {
     kind: Kind,
     keypos: usize,
     owner: u64,
+    /// Process that inherits the table (with this data) when the owner exits.
+    heir: Option<(u64, Fragment)>,
     protection: u64,
     /// Set/bag: buckets keyed by the exact hash of the key; ordered_set: a
     /// single bucket (0) kept sorted.
@@ -104,6 +106,7 @@ pub extern "C" fn tn_ets_new(c: *mut Ctx, name: Term, opts: Term) -> Term {
     let mut named = false;
     let mut keypos = 1usize;
     let mut protection = a("protected");
+    let mut heir = None;
     let mut l = opts;
     while is_cons(l) {
         let o = head(l);
@@ -127,6 +130,9 @@ pub extern "C" fn tn_ets_new(c: *mut Ctx, name: Term, opts: Term) -> Term {
                 _ => return ctx.badarg_args(&[(2, "invalid options")]),
             }
         } else if is_tuple(o) && tuple_size(o) == 3 && tuple_get(o, 0) == a("heir") {
+            if is_pid(tuple_get(o, 1)) {
+                heir = Some((pid_id(tuple_get(o, 1)), ctx.to_fragment(tuple_get(o, 2))));
+            }
         } else {
             return ctx.badarg_args(&[(2, "invalid options")]);
         }
@@ -152,6 +158,7 @@ pub extern "C" fn tn_ets_new(c: *mut Ctx, name: Term, opts: Term) -> Term {
         kind,
         keypos,
         owner,
+        heir,
         protection,
         buckets: HashMap::new(),
         sorted: Vec::new(),
@@ -169,15 +176,45 @@ pub extern "C" fn tn_ets_new(c: *mut Ctx, name: Term, opts: Term) -> Term {
     tid_term(ctx, &t)
 }
 
-/// Remove all tables owned by a process that exited.
-pub fn owner_exited(pid: u64) {
+/// `{:"ETS-TRANSFER", tab, from, data}` for the table's new owner.
+fn transfer(t: &Table, to: u64, from: u64, data: Fragment) {
+    let mut env = crate::nif::Env::new(std::ptr::null_mut(), std::ptr::null_mut());
+    let tid = if t.named {
+        atom(t.name)
+    } else {
+        let p = env.alloc(2);
+        unsafe {
+            *p = header(T_REF, 1);
+            *p.add(1) = t.ref_id;
+        }
+        p as Term
+    };
+    let data = env.adopt(data);
+    let message = env.tuple(&[atom(atoms::intern("ETS-TRANSFER")), tid, pid(from), data]);
+    crate::sched::send_fragment(to, env.export(message));
+}
+
+/// Tables owned by a process that exited pass to their heir, or are removed.
+pub fn owner_exited(dead_pid: u64) {
     let mut r = reg().lock();
-    let dead: Vec<u64> = r
+    let owned: Vec<u64> = r
         .tables
         .iter()
-        .filter(|(_, t)| t.lock().owner == pid)
+        .filter(|(_, t)| t.lock().owner == dead_pid)
         .map(|(id, _)| *id)
         .collect();
+    let mut dead = Vec::new();
+    for id in owned {
+        let t = r.tables[&id].clone();
+        let mut t = t.lock();
+        match t.heir.as_ref().map(|(h, f)| (*h, crate::sched::clone_fragment(f))) {
+            Some((heir, data)) if heir != dead_pid && crate::sched::is_alive(heir) => {
+                t.owner = heir;
+                transfer(&t, heir, dead_pid, data);
+            }
+            _ => dead.push(id),
+        }
+    }
     for id in dead {
         if let Some(t) = r.tables.remove(&id) {
             let t = t.lock();
@@ -741,4 +778,39 @@ pub extern "C" fn tn_ets_update_counter(c: *mut Ctx, tab: Term, key: Term, ops: 
     insert_one(ctx, &mut t, newobj, false);
     let mut v: Vec<Term> = results.into_iter().map(small).collect();
     ctx.list_from_vec(&mut v)
+}
+
+#[no_mangle]
+pub extern "C" fn tn_ets_give_away(c: *mut Ctx, tab: Term, to: Term, data: Term) -> Term {
+    let ctx = cx(c);
+    let Some(t) = find(tab) else {
+        return ctx.badarg_args(&[(1, NO_TABLE)]);
+    };
+    let me = ctx.pid();
+    if !is_pid(to) || pid_id(to) == me || !crate::sched::is_alive(pid_id(to)) {
+        return ctx.badarg_args(&[(2, "not a living local process")]);
+    }
+    let mut t = t.lock();
+    if t.owner != me {
+        return ctx.badarg_args(&[(1, "not the owner of the table")]);
+    }
+    t.owner = pid_id(to);
+    let data = ctx.to_fragment(data);
+    transfer(&t, pid_id(to), me, data);
+    TRUE
+}
+
+/// `{:heir, pid, data}` or `{:heir, :none}` (other options are accepted as is).
+#[no_mangle]
+pub extern "C" fn tn_ets_set_heir(c: *mut Ctx, tab: Term, heir: Term, data: Term) -> Term {
+    let ctx = cx(c);
+    let Some(t) = find(tab) else {
+        return ctx.badarg_args(&[(1, NO_TABLE)]);
+    };
+    let mut t = t.lock();
+    if t.owner != ctx.pid() {
+        return ctx.badarg_args(&[(1, "not the owner of the table")]);
+    }
+    t.heir = if is_pid(heir) { Some((pid_id(heir), ctx.to_fragment(data))) } else { None };
+    TRUE
 }

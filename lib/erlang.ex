@@ -507,6 +507,8 @@ defmodule :rand do
 end
 
 defmodule :erlang do
+  def decode_packet(type, bin, opts), do: Tonic.Packet.decode(type, bin, opts)
+
   # Functions of the :erlang module that are not runtime intrinsics.
 
   def fun_info(fun) when is_function(fun) do
@@ -939,6 +941,30 @@ defmodule :crypto do
   def hash_init(type), do: {:tonic_hash, type, []}
   def hash_update({:tonic_hash, type, acc}, data), do: {:tonic_hash, type, [acc, data]}
   def hash_final({:tonic_hash, type, acc}), do: hash(type, acc)
+  def hash_equals(a, b) when byte_size(a) == byte_size(b), do: exor_bin(a, b) == :binary.copy(<<0>>, byte_size(a))
+  def hash_equals(_, _), do: :erlang.error(:badarg)
+
+  def pbkdf2_hmac(digest, password, salt, iterations, length) do
+    password = IO.iodata_to_binary(password)
+    size = byte_size(hash(digest, ""))
+    blocks = div(length + size - 1, size)
+
+    for(index <- 1..blocks, into: <<>>, do: pbkdf2_block(digest, password, salt, iterations, index))
+    |> binary_part(0, length)
+  end
+
+  defp pbkdf2_block(digest, password, salt, iterations, index) do
+    first = mac(:hmac, digest, password, [salt, <<index::32>>])
+
+    {_, block} =
+      Enum.reduce(2..iterations//1, {first, first}, fn _, {previous, acc} ->
+        next = mac(:hmac, digest, password, previous)
+        {next, exor_bin(acc, next)}
+      end)
+
+    block
+  end
+
   def exor(a, b), do: :crypto.exor_bin(IO.iodata_to_binary(a), IO.iodata_to_binary(b))
   def exor_bin(a, b), do: for({x, y} <- Enum.zip(:binary.bin_to_list(a), :binary.bin_to_list(b)), into: <<>>, do: <<Bitwise.bxor(x, y)>>)
 end
@@ -1080,8 +1106,19 @@ defmodule :ets do
   def whereis(name), do: :tonic.ets_whereis(name)
   def all, do: :tonic.ets_all()
   def rename(tab, name), do: :tonic.ets_rename(tab, name)
-  def give_away(_tab, _pid, _data), do: true
-  def setopts(_tab, _opts), do: true
+  def give_away(tab, pid, data), do: :tonic.ets_give_away(tab, pid, data)
+
+  def setopts(tab, opts) do
+    for opt <- List.wrap(opts) do
+      case opt do
+        {:heir, pid, data} -> :tonic.ets_set_heir(tab, pid, data)
+        {:heir, :none} -> :tonic.ets_set_heir(tab, :none, nil)
+        _ -> true
+      end
+    end
+
+    true
+  end
   def safe_fixtable(_tab, _fix), do: true
 
   def info(tab) do
@@ -1332,7 +1369,13 @@ defmodule :code do
   def is_loaded(module), do: if(Code.ensure_loaded?(module), do: {:file, :in_memory}, else: false)
   def ensure_loaded(module), do: if(Code.ensure_loaded?(module), do: {:module, module}, else: {:error, :nofile})
   def get_object_code(_module), do: :error
-  def priv_dir(_app), do: {:error, :bad_name}
+  # Applications built from a Mix project keep their priv directory's path.
+  def priv_dir(app) when is_atom(app) do
+    case :application.tonic_priv_dir(app) do
+      nil -> {:error, :bad_name}
+      dir -> dir
+    end
+  end
   def lib_dir, do: ~c"/usr/lib/erlang/lib"
 
   # Modules are compiled into the executable: nothing to purge or delete.
@@ -1502,4 +1545,84 @@ defmodule :elixir_import do
       {:unquote_splicing, 1}, {:with, :_}, {:{}, :_}
     ] or {name, :_} in [{:%{}, :_}, {:<<>>, :_}, {:__aliases__, :_}, {:__block__, :_}, {:fn, :_}, {:for, :_}, {:super, :_}, {:with, :_}, {:{}, :_}]
   end
+end
+
+defmodule :atomics do
+  # Arrays of integers in a shared ETS table, keyed by {ref, index}.
+  @tab :"$tonic_atomics"
+
+  def tab do
+    if :ets.whereis(@tab) == :undefined do
+      parent = self()
+
+      spawn(fn ->
+        try do
+          :ets.new(@tab, [:set, :public, :named_table, write_concurrency: true])
+        rescue
+          _ -> :ok
+        end
+
+        Kernel.send(parent, :tonic_atomics_ready)
+
+        receive do
+          :tonic_never -> :ok
+        end
+      end)
+
+      receive do
+        :tonic_atomics_ready -> :ok
+      end
+    end
+
+    @tab
+  end
+
+  def new(arity, opts) when is_integer(arity) and arity > 0 and is_list(opts) do
+    ref = make_ref()
+    signed = Keyword.get(opts, :signed, true)
+    :ets.insert(tab(), {{ref, :info}, arity, signed})
+    for index <- 1..arity, do: :ets.insert(tab(), {{ref, index}, 0})
+    ref
+  end
+
+  def put(ref, index, value), do: (:ets.insert(tab(), {{ref, check(ref, index)}, value}); :ok)
+  def get(ref, index), do: :ets.lookup_element(tab(), {ref, check(ref, index)}, 2)
+  def add(ref, index, incr), do: (add_get(ref, index, incr); :ok)
+  def add_get(ref, index, incr), do: :ets.update_counter(tab(), {ref, check(ref, index)}, incr)
+  def sub(ref, index, decr), do: add(ref, index, -decr)
+  def sub_get(ref, index, decr), do: add_get(ref, index, -decr)
+
+  def exchange(ref, index, value) do
+    old = get(ref, index)
+    put(ref, index, value)
+    old
+  end
+
+  def compare_exchange(ref, index, expected, desired) do
+    case get(ref, index) do
+      ^expected -> put(ref, index, desired) && :ok
+      actual -> actual
+    end
+  end
+
+  def info(ref) do
+    [{_, size, _}] = :ets.lookup(tab(), {ref, :info})
+    %{size: size, max: 18_446_744_073_709_551_615, min: 0, memory: size * 8}
+  end
+
+  defp check(ref, index) do
+    case :ets.lookup(tab(), {ref, :info}) do
+      [{_, size, _}] when is_integer(index) and index >= 1 and index <= size -> index
+      _ -> :erlang.error(:badarg)
+    end
+  end
+end
+
+defmodule :counters do
+  def new(size, _opts), do: :atomics.new(size, signed: true)
+  def add(ref, index, incr), do: :atomics.add(ref, index, incr)
+  def sub(ref, index, decr), do: :atomics.sub(ref, index, decr)
+  def get(ref, index), do: :atomics.get(ref, index)
+  def put(ref, index, value), do: :atomics.put(ref, index, value)
+  def info(ref), do: Map.take(:atomics.info(ref), [:size, :memory])
 end

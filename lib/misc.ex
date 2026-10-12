@@ -119,17 +119,17 @@ defmodule System do
   def cwd, do: :tonic.file_cwd()
   def cwd!, do: :tonic.file_cwd()
 
+  # Units as parts per second (an integer unit is one); the result is floored.
   def convert_time_unit(time, from, to) do
-    f = unit_ns(normalize_unit(from))
-    t = unit_ns(normalize_unit(to))
-    div(time * f, t)
+    Integer.floor_div(time * per_second(normalize_unit(to)), per_second(normalize_unit(from)))
   end
 
-  defp unit_ns(:second), do: 1_000_000_000
-  defp unit_ns(:millisecond), do: 1_000_000
-  defp unit_ns(:microsecond), do: 1_000
-  defp unit_ns(:nanosecond), do: 1
-  defp unit_ns(:native), do: 1
+  defp per_second(:second), do: 1
+  defp per_second(:millisecond), do: 1_000
+  defp per_second(:microsecond), do: 1_000_000
+  defp per_second(:nanosecond), do: 1_000_000_000
+  defp per_second(:native), do: 1_000_000_000
+  defp per_second(parts) when is_integer(parts) and parts > 0, do: parts
 
   defp normalize_unit(:seconds), do: :second
   defp normalize_unit(:milliseconds), do: :millisecond
@@ -1692,6 +1692,54 @@ defmodule Code do
   def ensure_loaded?(module), do: :tonic.module_loaded(module)
   def ensure_loaded(module), do: if(:tonic.module_loaded(module), do: {:module, module}, else: {:error, :nofile})
   def ensure_compiled(module), do: ensure_loaded(module)
+
+  def ensure_loaded!(module) do
+    case ensure_loaded(module) do
+      {:module, module} -> module
+      {:error, reason} -> raise ArgumentError, "could not load module #{inspect(module)} due to reason #{inspect(reason)}"
+    end
+  end
+
+  def ensure_compiled!(module) do
+    case ensure_compiled(module) do
+      {:module, module} -> module
+      {:error, reason} -> raise ArgumentError, "could not load module #{inspect(module)} due to reason #{inspect(reason)}"
+    end
+  end
+
+  def can_await_module_compilation?, do: false
+
+  @compiler_options [
+    docs: true,
+    debug_info: true,
+    ignore_already_consolidated: false,
+    ignore_module_conflict: false,
+    infer_signatures: true,
+    on_undefined_variable: :raise,
+    parser_options: [],
+    relative_paths: true,
+    no_warn_undefined: [],
+    tracers: [],
+    warnings_as_errors: false
+  ]
+
+  def compiler_options do
+    Map.new(Keyword.merge(@compiler_options, :persistent_term.get({Code, :compiler_options}, [])))
+  end
+
+  def compiler_options(options) do
+    previous = Map.take(compiler_options(), Keyword.keys(options))
+    Enum.each(options, fn {key, value} -> put_compiler_option(key, value) end)
+    previous
+  end
+
+  def get_compiler_option(key), do: Map.get(compiler_options(), key)
+
+  def put_compiler_option(key, value) do
+    current = :persistent_term.get({Code, :compiler_options}, [])
+    :persistent_term.put({Code, :compiler_options}, Keyword.put(current, key, value))
+    :ok
+  end
 
   def eval_string(string, binding \\ [], opts \\ [])
 

@@ -17,6 +17,8 @@ mod exunit;
 mod lexer;
 mod macrohost;
 mod order;
+mod native;
+mod nif;
 mod parser;
 mod prelude;
 mod project;
@@ -203,6 +205,7 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
     let redefines_stdlib = !c.redefined.is_empty();
     let exunit_modules: Vec<String> = c.exunit_modules.clone();
     c.finalize_uses();
+    c.bind_nifs();
     let script = std::mem::take(&mut c.script);
     let te = std::time::Instant::now();
     let mut ex = expand::Expander::new(c);
@@ -434,8 +437,11 @@ fn build(o: &Opts, ir: &str, prelude: Option<&Path>, out: &Path) -> Result<(), S
         eprintln!("tonic: llvm {:?}", t0.elapsed());
     }
     let rt = find_runtime()?;
+    let natives: Vec<String> = o.projects.iter().flat_map(|p| p.native_sources.iter().cloned()).collect();
+    let nif_objects = native::objects(&natives, &cc, &cache_dir())?;
     let mut cmd = Command::new(&cc);
     cmd.arg(&obj);
+    cmd.args(&nif_objects);
     if let Some(p) = prelude {
         cmd.arg(p);
     }

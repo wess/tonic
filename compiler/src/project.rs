@@ -9,6 +9,8 @@ pub struct Project {
     pub inputs: Vec<String>,
     pub macro_inputs: Vec<String>,
     pub config_inputs: Vec<String>,
+    /// NIF C sources with their compiler flags ("source\tflag...").
+    pub native_sources: Vec<String>,
     scratch: PathBuf,
 }
 
@@ -58,6 +60,7 @@ pub fn load(input: &str) -> Result<Option<Project>, String> {
         inputs: vec![],
         macro_inputs: vec![],
         config_inputs: vec![],
+        native_sources: vec![],
         scratch,
     };
     let bridge = project.scratch.join("project.exs");
@@ -95,5 +98,6 @@ pub fn load(input: &str) -> Result<Option<Project>, String> {
     project.inputs = strings(data.kw_get("inputs"), "inputs")?;
     project.macro_inputs = strings(data.kw_get("macro_inputs"), "macro_inputs")?;
     project.config_inputs = strings(data.kw_get("config_inputs"), "config_inputs")?;
+    project.native_sources = strings(data.kw_get("native_sources"), "native_sources")?;
     Ok(Some(project))
 }

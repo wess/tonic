@@ -583,11 +583,16 @@ unsafe impl Send for Fragment {}
 
 /// Words needed to copy `t` out of the region [lo, hi).
 pub fn copy_size(t: Term, lo: usize, hi: usize) -> usize {
+    copy_size_by(t, &|a| a >= lo && a < hi)
+}
+
+/// Words needed to copy the objects of `t` for which `inside` holds.
+pub fn copy_size_by<F: Fn(usize) -> bool>(t: Term, inside: &F) -> usize {
     let mut total = 0usize;
     let mut stack: Vec<Term> = vec![t];
     while let Some(mut t) = stack.pop() {
         loop {
-            if !is_ptr(t) || (t as usize) < lo || (t as usize) >= hi {
+            if !is_ptr(t) || !inside(t as usize) {
                 break;
             }
             let h = hdr(t);
@@ -644,7 +649,12 @@ pub fn copy_size(t: Term, lo: usize, hi: usize) -> usize {
 /// Copy `t` (objects in [lo,hi)) into memory starting at `*free`; returns new term.
 /// Caller guarantees enough room (see `copy_size`).
 pub unsafe fn copy_term(t: Term, lo: usize, hi: usize, free: &mut *mut u64) -> Term {
-    if !is_ptr(t) || (t as usize) < lo || (t as usize) >= hi {
+    copy_term_by(t, &|a| a >= lo && a < hi, free)
+}
+
+/// Copy the objects of `t` for which `inside` holds (see `copy_size_by`).
+pub unsafe fn copy_term_by<F: Fn(usize) -> bool>(t: Term, inside: &F, free: &mut *mut u64) -> Term {
+    if !is_ptr(t) || !inside(t as usize) {
         return t;
     }
     let h = hdr(t);
@@ -663,14 +673,14 @@ pub unsafe fn copy_term(t: Term, lo: usize, hi: usize, free: &mut *mut u64) -> T
                     *prev.add(2) = cell as u64;
                 }
                 let hd = word(cur, 1);
-                *cell.add(1) = copy_term(hd, lo, hi, free);
+                *cell.add(1) = copy_term_by(hd, inside, free);
                 let tl = word(cur, 2);
                 prev = cell;
-                if is_ptr(tl) && (tl as usize) >= lo && (tl as usize) < hi && boxed_tag(tl) == T_CONS {
+                if is_ptr(tl) && inside(tl as usize) && boxed_tag(tl) == T_CONS {
                     cur = tl;
                     continue;
                 }
-                *cell.add(2) = copy_term(tl, lo, hi, free);
+                *cell.add(2) = copy_term_by(tl, inside, free);
                 break;
             }
             first as u64
@@ -683,7 +693,7 @@ pub unsafe fn copy_term(t: Term, lo: usize, hi: usize, free: &mut *mut u64) -> T
                 *dst.add(1) = 0;
             }
             for i in 1..=n {
-                *dst.add(i) = copy_term(word(t, i), lo, hi, free);
+                *dst.add(i) = copy_term_by(word(t, i), inside, free);
             }
             dst as u64
         }
@@ -692,7 +702,7 @@ pub unsafe fn copy_term(t: Term, lo: usize, hi: usize, free: &mut *mut u64) -> T
             *free = dst.add(3);
             *dst = h;
             *dst.add(1) = word(t, 1);
-            *dst.add(2) = copy_term(word(t, 2), lo, hi, free);
+            *dst.add(2) = copy_term_by(word(t, 2), inside, free);
             dst as u64
         }
         T_MAPNODE | T_HAMT => {
@@ -700,7 +710,7 @@ pub unsafe fn copy_term(t: Term, lo: usize, hi: usize, free: &mut *mut u64) -> T
             *free = dst.add(1 + n);
             *dst = h;
             for i in 1..=n {
-                *dst.add(i) = copy_term(word(t, i), lo, hi, free);
+                *dst.add(i) = copy_term_by(word(t, i), inside, free);
             }
             dst as u64
         }
@@ -712,7 +722,7 @@ pub unsafe fn copy_term(t: Term, lo: usize, hi: usize, free: &mut *mut u64) -> T
             *dst.add(2) = word(t, 2);
             *dst.add(3) = word(t, 3);
             for i in 4..=n {
-                *dst.add(i) = copy_term(word(t, i), lo, hi, free);
+                *dst.add(i) = copy_term_by(word(t, i), inside, free);
             }
             dst as u64
         }
@@ -749,6 +759,16 @@ impl Ctx {
         let mut free = buf.as_mut_ptr();
         let root = unsafe { copy_term(t, lo, hi, &mut free) };
         Fragment { buf, root }
+    }
+
+    /// Copy the objects of `t` for which `inside` holds into this heap.
+    pub fn copy_in_by<F: Fn(usize) -> bool>(&mut self, t: Term, inside: &F) -> Term {
+        let words = copy_size_by(t, inside);
+        self.reserve(words);
+        let mut free = self.hp;
+        let r = unsafe { copy_term_by(t, inside, &mut free) };
+        self.hp = free;
+        r
     }
 
     /// Copy a fragment's term into this heap.

@@ -242,7 +242,7 @@ impl Expander {
                 }
             }
         }
-        if !m.is_prelude || m.name == "Elixir.Record" {
+        if !m.is_prelude || m.name == "Elixir.Record" || m.name == "Elixir.EEx" {
             self.gen_runtime_macros(&m);
         }
         if let Some(fields) = &m.struct_fields {

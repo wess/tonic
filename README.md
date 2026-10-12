@@ -156,9 +156,15 @@ mix tonic.build
 ```
 
 Fetching a package does not establish native compatibility. Packages must use
-language and runtime APIs implemented by Tonic. Unsupported custom compilers,
-NIF libraries, non-Mix dependency build managers, and lexer/parser generation
+language and runtime APIs implemented by Tonic. `rebar3` dependencies are
+compiled from their Erlang sources, and C NIFs built with `elixir_make` are
+compiled from `c_src/` and linked into the executable (see the
+[compatibility report](docs/compatibility.md)). Other custom compilers,
+prebuilt native libraries, other build managers, and lexer/parser generation
 fail explicitly. Umbrella applications must be built from each child project.
+
+`examples/helloweb` is a Plug, Bandit and Ecto (SQLite) service that builds to
+a single native executable.
 
 ## Architecture
 
@@ -265,8 +271,9 @@ definition and before-compilation hooks but does not run after-compilation hooks
 
 * Compile-time execution uses Tonic's evaluator and bundled library, so it is
   limited to the language and APIs implemented here. It is not a BEAM VM.
-* No BEAM hot code loading, distributed nodes, ports, or arbitrary NIF loading.
-  Process and system introspection cover a subset of Erlang's APIs.
+* No BEAM hot code loading, distributed nodes, ports, SSL or UDP. NIFs must be
+  C sources compiled into the executable, using the implemented `erl_nif`
+  subset. Process and system introspection cover a subset of Erlang's APIs.
 * Mix project loading requires installed Mix. Native compilation supports
   fetched sources, not arbitrary BEAM dependencies or custom package build tasks.
 * Map iteration order and anonymous-function identifiers can differ from

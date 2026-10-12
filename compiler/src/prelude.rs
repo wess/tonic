@@ -30,6 +30,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("ex/logger_formatter.ex", include_str!("../../lib/ex/logger_formatter.ex")),
     ("erl/gen.erl", include_str!("../../lib/erl/gen.erl")),
     ("erl/gen_server.erl", include_str!("../../lib/erl/gen_server.erl")),
+    ("erl/genstatem.erl", include_str!("../../lib/erl/genstatem.erl")),
     ("erl/gen_event.erl", include_str!("../../lib/erl/gen_event.erl")),
     ("erl/elixir_tokenizer.erl", include_str!("../../lib/erl/elixir_tokenizer.erl")),
     ("erl/elixir_interpolation.erl", include_str!("../../lib/erl/elixir_interpolation.erl")),
@@ -107,6 +108,12 @@ pub const FILES: &[(&str, &str)] = &[
     ("ex/ex_unit_capture_io.ex", include_str!("../../lib/ex/ex_unit_capture_io.ex")),
     ("ex/ex_unit_capture_log.ex", include_str!("../../lib/ex/ex_unit_capture_log.ex")),
     ("logger.ex", include_str!("../../lib/logger.ex")),
+    ("net.ex", include_str!("../../lib/net.ex")),
+    ("packet.ex", include_str!("../../lib/packet.ex")),
+    ("ex/eexengine.ex", include_str!("../../lib/ex/eexengine.ex")),
+    ("ex/eexsmartengine.ex", include_str!("../../lib/ex/eexsmartengine.ex")),
+    ("ex/eexcompiler.ex", include_str!("../../lib/ex/eexcompiler.ex")),
+    ("ex/eex.ex", include_str!("../../lib/ex/eex.ex")),
 ];
 
 /// Erlang include files available to `-include`/`-include_lib` (by basename).

@@ -256,6 +256,28 @@ end
 defmodule Tonic.Internal do
   @moduledoc false
 
+  # A module's @on_load callback, run when the program starts.
+  def on_load(module, callback) do
+    result =
+      try do
+        apply(module, callback, [])
+      catch
+        kind, reason -> {kind, reason}
+      end
+
+    unless result == :ok do
+      IO.puts(:stderr, "[error] The on_load function for module #{inspect(module)} returned:\n#{inspect(result)}")
+    end
+
+    :ok
+  end
+
+  # `quote bind_quoted: bindings` whose bindings are only known at runtime.
+  def bind_quoted(bindings, context, body) do
+    assignments = for {name, value} <- bindings, do: {:=, [], [{name, [], context}, value]}
+    {:__block__, [], assignments ++ [body]}
+  end
+
   def format_exit({kind, stack, main?}, reason) do
     stack =
       if main? do

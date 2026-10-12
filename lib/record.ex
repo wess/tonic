@@ -4,7 +4,29 @@ defmodule Record do
   defmacro defrecordp(name, fields), do: Record.definitions(:defmacrop, name, name, fields)
   defmacro defrecordp(name, tag, fields), do: Record.definitions(:defmacrop, name, tag, fields)
 
+  # OTP header records, as Record.extract/2 reads them from the headers.
+  @otp_records %{
+    {"kernel/include/file.hrl", :file_info} =>
+      [:size, :type, :access, :atime, :mtime, :ctime, :mode, :links, :major_device, :minor_device, :inode, :uid, :gid],
+    {"kernel/include/file.hrl", :file_descriptor} => [:module, :data]
+  }
+
+  def extract(name, opts) when is_atom(name) and is_list(opts) do
+    source = opts[:from_lib] || opts[:from]
+
+    case Map.fetch(@otp_records, {source, name}) do
+      {:ok, fields} -> Enum.map(fields, &{&1, :undefined})
+      :error -> raise ArgumentError, "no record #{name} found at #{source}"
+    end
+  end
+
+  def extract_all(opts) when is_list(opts) do
+    source = opts[:from_lib] || opts[:from]
+    for {{^source, name}, _} <- @otp_records, do: {name, extract(name, opts)}
+  end
+
   def definitions(kind, name, tag, fields) do
+    fields = if literal_fields?(fields), do: fields, else: elem(Code.eval_quoted(fields), 0)
     fields = Enum.map(fields, fn
       field when is_atom(field) -> {field, nil}
       {field, default} when is_atom(field) -> {field, default}
@@ -20,6 +42,16 @@ defmodule Record do
       {kind, [], [{name, [], arguments}, [do: call]]}
     end)
   end
+
+  defp literal_fields?(fields) when is_list(fields) do
+    Enum.all?(fields, fn
+      field when is_atom(field) -> true
+      {field, _} when is_atom(field) -> true
+      _ -> false
+    end)
+  end
+
+  defp literal_fields?(_), do: false
 
   def expand(tag, fields, [], context), do: expand(tag, fields, [[]], context)
   def expand(_tag, fields, [field], _context) when is_atom(field) do

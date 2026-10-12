@@ -79,6 +79,15 @@ pub struct Collector {
     pub redefined: Vec<String>,
     /// Modules that use ExUnit.Case, in definition order.
     pub exunit_modules: Vec<String>,
+    /// Modules with an `@on_load` callback (see nif.rs).
+    pub on_load: Vec<String>,
+    /// Module-level attribute writes and assignments seen per (module, file,
+    /// line, name): the macro host keeps every value a line produces in
+    /// evaluation order, and lookups ask for the matching occurrence.
+    occurrences: HashMap<(String, String, u32, String), usize>,
+    /// Modules with module-level code only the macro host ran: their host
+    /// load must have succeeded.
+    host_run: HashSet<String>,
 }
 
 pub fn elixir_name(a: &str) -> String {
@@ -121,6 +130,9 @@ impl Collector {
             prelude: false,
             redefined: Vec::new(),
             exunit_modules: Vec::new(),
+            on_load: Vec::new(),
+            occurrences: HashMap::new(),
+            host_run: HashSet::new(),
         }
     }
 
@@ -238,6 +250,43 @@ impl Collector {
                             }
                         }
                         return Ok(());
+                    }
+                }
+                // `for protocol <- [...] do defimpl protocol, ... end` at top level.
+                "for" if !prelude && args.len() == 2 && args[1].kw_get("do").is_some() && defines_modules(&args[1]) => {
+                    if let K::Bin { op, l, r } = &args[0].k {
+                        if op == "<-" {
+                            let empty = crate::ctime::Vars::new();
+                            let collection = match crate::ctime::eval(r, &empty, attrs) {
+                                Some(value) => value,
+                                None => crate::macrohost::evaluate(r, &env.file, e.line)?,
+                            };
+                            let items = crate::ctime::elements(&collection).ok_or_else(|| {
+                                format!("{}:{}: top-level for: generator is not a list", env.file, e.line)
+                            })?;
+                            let body = block_stmts(args[1].kw_get("do").unwrap());
+                            for item in items {
+                                let mut bound = crate::ctime::Vars::new();
+                                if !crate::ctime::bind(l, &item, &mut bound) {
+                                    continue;
+                                }
+                                for statement in &body {
+                                    let statement = substitute_vars(statement, &bound);
+                                    if let K::Bin { op, l: pattern, r: value } = &statement.k {
+                                        if op == "=" {
+                                            let value = match crate::ctime::eval(value, &bound, attrs) {
+                                                Some(value) => value,
+                                                None => crate::macrohost::evaluate(value, &env.file, statement.line)?,
+                                            };
+                                            crate::ctime::bind(pattern, &value, &mut bound);
+                                            continue;
+                                        }
+                                    }
+                                    self.top_stmt(statement, env, attrs, prelude)?;
+                                }
+                            }
+                            return Ok(());
+                        }
                     }
                 }
                 "alias" | "import" | "require" => {
@@ -605,6 +654,9 @@ impl Collector {
             }
         }
         self.exunit_finish(name, env, attrs)?;
+        if self.host_run.remove(name) {
+            crate::macrohost::check_loaded(name, &env.file, body_line)?;
+        }
         let m = self.mods.get_mut(name).unwrap();
         m.env = Some(Rc::new(env.clone()));
         Ok(())
@@ -834,6 +886,69 @@ impl Collector {
         crate::ctime::eval(definition.body.as_ref()?, &bindings, attrs)
     }
 
+    fn next_occurrence(&mut self, module: &str, file: &str, line: u32, name: &str) -> usize {
+        let count = self
+            .occurrences
+            .entry((module.to_string(), file.to_string(), line, name.to_string()))
+            .or_insert(0);
+        *count += 1;
+        *count - 1
+    }
+
+    /// Processes a module-level macro expansion. Executable code the native
+    /// collector cannot evaluate falls back to the definitions the macro host
+    /// generated while loading the same source lines.
+    fn expanded_stmt(
+        &mut self,
+        module: &str,
+        expansion: E,
+        call: &E,
+        env: &mut ModEnv,
+        attrs: &mut HashMap<String, E>,
+    ) -> R<()> {
+        if !self.prelude && fragment_definition(&expansion) {
+            // Definitions built from unquote fragments of runtime-computed
+            // quoted code come from the host, which evaluated them; the rest
+            // of the expansion (attributes, imports, ...) is processed here.
+            let mut last = call.line;
+            map_expr(call, &mut |node| {
+                last = last.max(node.line);
+                None
+            });
+            let definitions =
+                crate::macrohost::comprehension_definitions(module, &env.file, call.line, last)?;
+            self.module_stmt_inner(module, without_definitions(&expansion), env, attrs)?;
+            return self.module_stmt_inner(module, definitions, env, attrs);
+        }
+        let saved = attrs.clone();
+        let result = if nested_definition(&expansion) {
+            Err("unsupported module-level definition inside an expression".to_string())
+        } else {
+            self.module_stmt_inner(module, expansion, env, attrs)
+        };
+        match result {
+            Err(error)
+                if !self.prelude
+                    && (error.contains("unsupported module-level")
+                        || error.contains("@tonic_binding")) =>
+            {
+                // Occurrence counts stay: the host recorded what the failed
+                // pass counted.
+                *attrs = saved;
+                let mut last = call.line;
+                map_expr(call, &mut |node| {
+                    last = last.max(node.line);
+                    None
+                });
+                match crate::macrohost::comprehension_definitions(module, &env.file, call.line, last) {
+                    Ok(definitions) => self.module_stmt_inner(module, definitions, env, attrs),
+                    Err(fallback) => Err(format!("{}:{}: {}\n{}", env.file, call.line, error, fallback)),
+                }
+            }
+            result => result,
+        }
+    }
+
     pub(crate) fn module_stmt_inner(
         &mut self,
         module: &str,
@@ -850,15 +965,25 @@ impl Collector {
                     .map(|n| (n.to_string(), v.clone()))
             })
             .collect();
-        let s = if matches!(&s.k, K::Call { name, .. } if matches!(name.as_str(), "def" | "defp" | "defmacro" | "defmacrop" | "defguard" | "defguardp" | "defdelegate"))
-            && has_unquote(&s)
-        {
+        let definition = matches!(&s.k, K::Call { name, .. } if DEFINITIONS.contains(&name.as_str()));
+        if definition && !self.prelude && unquotes_code(&s, &vars, attrs) {
+            // Spliced quoted code must stay code; the host built this definition.
+            let mut last = line;
+            map_expr(&s, &mut |node| {
+                last = last.max(node.line);
+                None
+            });
+            let definitions = crate::macrohost::generated_definitions(module, &env.file, line, last)?;
+            return self.module_stmt_inner(module, definitions, env, attrs);
+        }
+        let s = if definition && has_unquote(&s) {
             crate::ctime::subst_unquote(&s, &vars, attrs)
         } else {
             s
         };
         match &s.k {
             K::Bin { op, l, r } if op == "=" => {
+                let occurrence = self.next_occurrence(module, &env.file, line, "tonic_binding");
                 if let Some((value, generated)) = crate::ctime::unroll_reduce(r, &vars, attrs) {
                     for (statement, bindings) in generated {
                         self.module_stmt_inner(
@@ -883,7 +1008,7 @@ impl Collector {
                 let value = match crate::ctime::eval(r, &vars, attrs) {
                     Some(value) => Some(value),
                     None if !self.prelude => Some(
-                        crate::macrohost::attribute_value(module, "tonic_binding", &env.file, line)
+                        crate::macrohost::attribute_value(module, "tonic_binding", &env.file, line, occurrence)
                             .map_err(|error| {
                                 format!(
                                     "{}:{}: unsupported module-level assignment: {}",
@@ -893,6 +1018,12 @@ impl Collector {
                     ),
                     None => None,
                 };
+                // Closures and other runtime values stay in the macro host,
+                // which evaluates later module-level code that uses them.
+                if matches!(&value, Some(E { k: K::Call { name, .. }, .. }) if name == "__tonic_runtime_binding__")
+                {
+                    return Ok(());
+                }
                 match value {
                     Some(v) => {
                         let mut out = crate::ctime::Vars::new();
@@ -908,7 +1039,12 @@ impl Collector {
                 return Err(format!("{}:{}: unsupported module-level assignment: expression cannot be evaluated at compile time", env.file, line));
             }
             K::Call { name, args, .. } if name == "for" && !args.is_empty() => {
-                match crate::ctime::unroll_for(args, &vars, attrs) {
+                // Quoted code computed by the loop cannot be spliced natively
+                // (it would become data); the host has the definitions.
+                let unrolled = crate::ctime::unroll_for(args, &vars, attrs).filter(|items| {
+                    self.prelude || !items.iter().any(|(_, bound)| bound.values().any(quoted_code))
+                });
+                match unrolled {
                     Some(items) => {
                         for (stmt, env_vars) in items {
                             let saved: Vec<(String, Option<E>)> = env_vars
@@ -932,6 +1068,16 @@ impl Collector {
                             }
                             r?;
                         }
+                    }
+                    None if !self.prelude => {
+                        let mut last = line;
+                        map_expr(&s, &mut |node| {
+                            last = last.max(node.line);
+                            None
+                        });
+                        let definitions =
+                            crate::macrohost::comprehension_definitions(module, &env.file, line, last)?;
+                        return self.module_stmt_inner(module, definitions, env, attrs);
                     }
                     None => return Err(format!("{}:{}: unsupported module-level for: generator cannot be evaluated at compile time", env.file, line)),
                 }
@@ -1115,6 +1261,7 @@ impl Collector {
                         };
                         let mut inspect_opts: Option<E> = None;
                         let mut all_opts: Vec<(E, E)> = Vec::new();
+                        let mut deriving: Vec<(String, E)> = Vec::new();
                         for it in items {
                             let (target, opts) = match &it.k {
                                 K::Tuple(t) if t.len() == 2 => (t[0].clone(), Some(t[1].clone())),
@@ -1123,6 +1270,12 @@ impl Collector {
                             };
                             if let K::Alias(a) = &target.k {
                                 let full = resolve_alias(env, a);
+                                let any = format!("{}.Any", full);
+                                if !self.prelude && self.defines_macro(&any, "__deriving__", 3) {
+                                    deriving.push((any, opts.clone().unwrap_or_else(|| E::list(vec![], line))));
+                                    continue;
+                                }
+                                let m = self.mods.get_mut(module).unwrap();
                                 if let Some(o) = &opts {
                                     all_opts.push((target.clone(), o.clone()));
                                 }
@@ -1132,7 +1285,7 @@ impl Collector {
                                 m.derive.push(full);
                             }
                         }
-                        if !m.derive.is_empty() {
+                        if !self.mods[module].derive.is_empty() {
                             for (t, o) in all_opts {
                                 let def_args = vec![
                                     E::call("__derive_opts__", vec![t], line),
@@ -1161,6 +1314,10 @@ impl Collector {
                                 E::list(vec![E::tuple(vec![E::atom("do", line), o], line)], line),
                             ];
                             self.add_def(module, "def", &def_args, env, attrs, line)?;
+                        }
+                        for (implementation, options) in deriving {
+                            let derived = crate::macrohost::derive(&implementation, module, &options, &env.file, line)?;
+                            self.module_stmt_inner(module, derived, env, attrs)?;
                         }
                     }
                 }
@@ -1243,6 +1400,16 @@ impl Collector {
                     }
                 }
                 "@" => {}
+                // `try do ... after ... end` around definitions (Ecto's schema/2):
+                // the body defines; the macro host already ran the `after` part.
+                "try" if args.len() == 1
+                    && args[0].kw_get("rescue").is_none()
+                    && args[0].kw_get("catch").is_none() =>
+                {
+                    if let Some(body) = args[0].kw_get("do") {
+                        self.module_stmt_inner(module, body.clone(), env, attrs)?;
+                    }
+                }
                 _ => {
                     if self.exunit_stmt(module, name, args, env, attrs, line)? {
                         return Ok(());
@@ -1270,9 +1437,15 @@ impl Collector {
                             &env.aliases,
                             line,
                         )?;
-                        return self.module_stmt_inner(module, e, env, attrs);
+                        return self.expanded_stmt(module, e, &s, env, attrs);
                     }
-                    if crate::ctime::eval(&s, &vars, attrs).is_none() {
+                    // Module bodies run at compile time: the macro host has run this
+                    // call, and its effects reach the program through attributes and
+                    // definitions read back from the host.
+                    if !self.prelude && crate::ctime::eval(&s, &vars, attrs).is_none() {
+                        self.host_run.insert(module.to_string());
+                    }
+                    if self.prelude && crate::ctime::eval(&s, &vars, attrs).is_none() {
                         return Err(format!(
                             "{}:{}: unsupported module-level call {}/{}",
                             env.file,
@@ -1285,23 +1458,28 @@ impl Collector {
             },
             K::Un { op, e } if op == "@" => {
                 if let K::Call { name, args, .. } = &e.k {
+                    let occurrence = if args.len() == 1
+                        && !matches!(name.as_str(), "callback" | "macrocallback" | "spec" | "type" | "typep" | "opaque")
+                    {
+                        self.next_occurrence(module, &env.file, line, name)
+                    } else {
+                        0
+                    };
                     match name.as_str() {
                         "doc" | "moduledoc" | "spec" | "impl" | "type" | "typep" | "opaque"
                         | "typedoc" | "since" | "deprecated" | "behaviour" | "dialyzer"
                         | "optional_callbacks" | "external_resource" | "vsn" => {}
                         "compile" => {
                             fn hint(value: &E) -> bool {
+                                // Optimisation and warning options are hints; only
+                                // parse/core transformations change the program.
+                                let transform = |name: &str| {
+                                    matches!(name, "parse_transform" | "core_transform")
+                                };
                                 match &value.k {
-                                    K::Atom(name) => matches!(
-                                        name.as_str(),
-                                        "inline"
-                                            | "no_inline"
-                                            | "debug_info"
-                                            | "no_debug_info"
-                                            | "bin_opt_info"
-                                    ),
+                                    K::Atom(name) => !transform(name),
                                     K::Tuple(items) if items.len() == 2 => {
-                                        matches!(&items[0].k, K::Atom(name) if matches!(name.as_str(), "inline" | "no_inline" | "no_warn_undefined"))
+                                        matches!(&items[0].k, K::Atom(name) if !transform(name))
                                     }
                                     K::List(items, None) => items.iter().all(hint),
                                     _ => false,
@@ -1312,10 +1490,28 @@ impl Collector {
                             }
                         }
                         "on_load" => {
-                            return Err(format!(
-                                "{}:{}: @on_load callbacks are not supported by Tonic",
-                                env.file, line
-                            ))
+                            let callback = args.first().and_then(|value| match &value.k {
+                                K::Atom(name) => Some(name.clone()),
+                                K::Tuple(items) if items.len() == 2 && matches!(items[1].k, K::Int(ref n) if n == "0") => {
+                                    match &items[0].k {
+                                        K::Atom(name) => Some(name.clone()),
+                                        _ => None,
+                                    }
+                                }
+                                _ => None,
+                            });
+                            match callback {
+                                Some(callback) if !self.prelude => {
+                                    self.on_load.push(module.to_string());
+                                    self.script.push((crate::nif::on_load_call(module, &callback, line), Rc::new(env.clone())));
+                                }
+                                _ => {
+                                    return Err(format!(
+                                        "{}:{}: @on_load expects a zero-arity function name",
+                                        env.file, line
+                                    ))
+                                }
+                            }
                         }
                         "callback" | "macrocallback" => {
                             if let Some(spec) = args.first() {
@@ -1395,7 +1591,7 @@ impl Collector {
                                     match self.constant_attribute(&expression, env, &vars, attrs) {
                                         Some(value) => value,
                                         None if !self.prelude => crate::macrohost::attribute_value(
-                                            module, name, &env.file, line,
+                                            module, name, &env.file, line, occurrence,
                                         )?,
                                         None => {
                                             return Err(format!(
@@ -1428,6 +1624,21 @@ impl Collector {
                     K::Alias(a) => resolve_alias(env, a),
                     _ => unreachable!(),
                 };
+                // `Mod.__info__(:module)` only records a compile-time dependency.
+                if name == "__info__" && args.len() == 1 {
+                    return Ok(());
+                }
+                // Attribute bookkeeping happens in the macro host, which runs
+                // the module body and answers attribute reads.
+                if !self.prelude
+                    && target == "Elixir.Module"
+                    && matches!(
+                        name.as_str(),
+                        "register_attribute" | "put_attribute" | "delete_attribute" | "add_doc"
+                    )
+                {
+                    return Ok(());
+                }
                 if target == "Elixir.Enum" && matches!(name.as_str(), "each" | "map") && args.len() == 2 {
                     let mut last = line;
                     map_expr(&s, &mut |node| { last = last.max(node.line); None });
@@ -1445,9 +1656,12 @@ impl Collector {
                         &env.aliases,
                         line,
                     )?;
-                    return self.module_stmt_inner(module, e, env, attrs);
+                    return self.expanded_stmt(module, e, &s, env, attrs);
                 }
-                if crate::ctime::eval(&s, &vars, attrs).is_none() {
+                if !self.prelude && crate::ctime::eval(&s, &vars, attrs).is_none() {
+                    self.host_run.insert(module.to_string());
+                }
+                if self.prelude && crate::ctime::eval(&s, &vars, attrs).is_none() {
                     return Err(format!(
                         "{}:{}: unsupported module-level call {}.{}/{}",
                         env.file,
@@ -1459,7 +1673,10 @@ impl Collector {
                 }
             }
             _ => {
-                if crate::ctime::eval(&s, &vars, attrs).is_none() {
+                if !self.prelude && crate::ctime::eval(&s, &vars, attrs).is_none() {
+                    self.host_run.insert(module.to_string());
+                }
+                if self.prelude && crate::ctime::eval(&s, &vars, attrs).is_none() {
                     return Err(format!(
                         "{}:{}: unsupported executable module-level expression",
                         env.file, line
@@ -1777,6 +1994,112 @@ def child_spec(arg) do
 end
 "#;
 
+fn defines_modules(e: &E) -> bool {
+    let mut found = false;
+    map_expr(e, &mut |node| {
+        if matches!(&node.k, K::Call { name, .. } if matches!(name.as_str(), "defmodule" | "defprotocol" | "defimpl")) {
+            found = true;
+        }
+        None
+    });
+    found
+}
+
+/// Replaces variables bound by a compile-time loop with their values.
+fn substitute_vars(e: &E, bound: &crate::ctime::Vars) -> E {
+    map_expr(e, &mut |node| match &node.k {
+        K::Var(name) => bound.get(name).cloned(),
+        _ => None,
+    })
+}
+
+/// Whether an unquote fragment of `e` inserts a value that is quoted code.
+fn unquotes_code(e: &E, vars: &crate::ctime::Vars, attrs: &HashMap<String, E>) -> bool {
+    let mut found = false;
+    map_expr(e, &mut |x| match &x.k {
+        K::Call { name, .. } if name == "quote" => Some(x.clone()),
+        K::Call { name, args, .. } if (name == "unquote" || name == "unquote_splicing") && args.len() == 1 => {
+            if crate::ctime::eval(&args[0], vars, attrs).map(|v| quoted_code(&v)).unwrap_or(false) {
+                found = true;
+            }
+            Some(x.clone())
+        }
+        _ => None,
+    });
+    found
+}
+
+/// A value that looks like quoted code: `{name, meta, context_or_args}`.
+fn quoted_code(e: &E) -> bool {
+    match &e.k {
+        K::Tuple(items) if items.len() == 3 => {
+            (matches!(items[0].k, K::Atom(_) | K::Tuple(_)) && matches!(items[1].k, K::List(..)) && matches!(items[2].k, K::Atom(_) | K::List(..)))
+                || items.iter().any(quoted_code)
+        }
+        K::Tuple(items) => items.iter().any(quoted_code),
+        K::List(items, _) => items.iter().any(quoted_code),
+        K::Map(pairs) => pairs.iter().any(|(k, v)| quoted_code(k) || quoted_code(v)),
+        _ => false,
+    }
+}
+
+const DEFINITIONS: &[&str] = &[
+    "def", "defp", "defmacro", "defmacrop", "defguard", "defguardp", "defdelegate",
+];
+
+/// A module-level definition that uses `unquote`/`unquote_splicing` fragments.
+fn fragment_definition(e: &E) -> bool {
+    block_stmts(e).iter().any(|statement| match &statement.k {
+        K::Block(_) => fragment_definition(statement),
+        K::Call { name, .. } if DEFINITIONS.contains(&name.as_str()) => {
+            let mut found = false;
+            map_expr(statement, &mut |x| match &x.k {
+                K::Call { name, .. } if name == "quote" => Some(x.clone()),
+                K::Call { name, .. } if name == "unquote" || name == "unquote_splicing" => {
+                    found = true;
+                    Some(x.clone())
+                }
+                _ => None,
+            });
+            found
+        }
+        _ => false,
+    })
+}
+
+fn without_definitions(e: &E) -> E {
+    let statements = block_stmts(e)
+        .iter()
+        .filter(|s| !matches!(&s.k, K::Call { name, .. } if DEFINITIONS.contains(&name.as_str())))
+        .map(|s| match &s.k {
+            K::Block(_) => without_definitions(s),
+            _ => s.clone(),
+        })
+        .collect();
+    E::new(K::Block(statements), e.line)
+}
+
+/// A `def` inside a `case`, `cond` or similar expression at module level.
+fn nested_definition(e: &E) -> bool {
+    let definition = |x: &E| {
+        matches!(&x.k, K::Call { name, .. } if matches!(name.as_str(), "def" | "defp" | "defmacro" | "defmacrop"))
+    };
+    match &e.k {
+        K::Block(es) | K::List(es, None) => es.iter().any(nested_definition),
+        K::Call { name, args, .. } if matches!(name.as_str(), "case" | "cond" | "with" | "try" | "receive") => {
+            let mut found = false;
+            for a in args {
+                map_expr(a, &mut |x| {
+                    found |= definition(x);
+                    None
+                });
+            }
+            found
+        }
+        _ => false,
+    }
+}
+
 pub fn block_stmts(e: &E) -> Vec<E> {
     match &e.k {
         K::Block(es) => es.clone(),
@@ -1813,6 +2136,15 @@ pub fn unquote_subst(e: &E, b: &HashMap<String, E>) -> E {
 fn struct_fields(e: &E, attrs: &HashMap<String, E>, file: &str) -> R<Vec<(String, E)>> {
     let mut w = Vec::new();
     let e = subst_attrs(e, attrs, &mut w, file);
+    // Module-level variables used in field defaults.
+    let e = map_expr(&e, &mut |x| match &x.k {
+        K::Var(name) => attrs.get(&format!("\u{0}var:{}", name)).cloned(),
+        _ => None,
+    });
+    let e = match &e.k {
+        K::List(..) => e,
+        _ => crate::ctime::eval(&e, &crate::ctime::Vars::new(), attrs).unwrap_or(e),
+    };
     let mut out = Vec::new();
     if let K::List(items, _) = &e.k {
         for it in items {

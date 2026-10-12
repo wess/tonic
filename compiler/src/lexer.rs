@@ -199,7 +199,9 @@ impl<'a> Lexer<'a> {
                 }
             }
             // Operator words used as function names: `def in(...)`, `x.not()`.
-            let after_def = matches!(self.toks.last().map(|t| &t.t), Some(T::Ident(d)) if d == "def" || d == "defp" || d == "defmacro" || d == "defdelegate")
+            // `def not value` keeps the operator.
+            let after_def = (matches!(self.toks.last().map(|t| &t.t), Some(T::Ident(d)) if d == "def" || d == "defp" || d == "defmacro" || d == "defdelegate")
+                && self.peek() == b'(')
                 || matches!(self.toks.last().map(|t| &t.t), Some(T::Op(".")));
             if after_def && matches!(name.as_str(), "in" | "and" | "or" | "not" | "when") {
                 self.push(T::Ident(name), line, sp);
