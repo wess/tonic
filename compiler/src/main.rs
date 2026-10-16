@@ -439,6 +439,17 @@ fn find_runtime() -> Result<PathBuf, String> {
     Err("could not find libtonic_rt.a (set TONIC_RUNTIME)".into())
 }
 
+/// One macOS deployment target for every object tonic compiles and links,
+/// so the linker sees consistent versions (and stays quiet).
+pub fn target_flags() -> Vec<String> {
+    if cfg!(target_os = "macos") {
+        let version = std::env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "14.0".into());
+        vec![format!("-mmacosx-version-min={}", version)]
+    } else {
+        Vec::new()
+    }
+}
+
 fn link_flags() -> Vec<&'static str> {
     if cfg!(target_os = "macos") {
         // clang links libSystem (libc, libm) itself; naming it again makes ld warn
@@ -473,6 +484,7 @@ fn build_in(o: &Opts, ir: &str, prelude: Option<&Path>, out: &Path, tmp: &Path) 
     std::fs::write(&ll, ir).map_err(|e| e.to_string())?;
     let t0 = std::time::Instant::now();
     let st = Command::new(&cc)
+        .args(target_flags())
         .arg(&o.opt)
         .arg("-c")
         .arg("-Wno-override-module")
@@ -491,6 +503,7 @@ fn build_in(o: &Opts, ir: &str, prelude: Option<&Path>, out: &Path, tmp: &Path) 
     let natives: Vec<String> = o.projects.iter().flat_map(|p| p.native_sources.iter().cloned()).collect();
     let nif_objects = native::objects(&natives, &cc, &cache::dir())?;
     let mut cmd = Command::new(&cc);
+    cmd.args(target_flags());
     cmd.arg(&obj);
     cmd.args(&nif_objects);
     if let Some(p) = prelude {
@@ -691,6 +704,7 @@ fn prelude_object(
     std::fs::write(&ll, &ir).map_err(|e| e.to_string())?;
     let cc = std::env::var("TONIC_CC").unwrap_or_else(|_| "clang".into());
     let st = Command::new(&cc)
+        .args(target_flags())
         .arg("-O2")
         .arg("-c")
         .arg("-Wno-override-module")

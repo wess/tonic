@@ -1,3 +1,5 @@
-
 [env]
 PCRE2_SYS_STATIC = "1"
+# the documented macOS baseline (tools/release.py uses the same); without it
+# cc builds PCRE2 for the SDK version and every link warns about it
+MACOSX_DEPLOYMENT_TARGET = "14.0"

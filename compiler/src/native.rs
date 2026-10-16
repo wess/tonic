@@ -51,13 +51,15 @@ fn compile(entry: &str, cc: &str, include: &PathBuf, dir: &PathBuf) -> Result<Pa
     let source = parts.next().unwrap_or_default();
     let flags: Vec<&str> = parts.collect();
     let text = std::fs::read(source).map_err(|e| format!("{}: {}", source, e))?;
-    let key = digest(&[&text, flags.join(" ").as_bytes(), HEADER.as_bytes(), cc.as_bytes(), source.as_bytes()]);
+    let target = crate::target_flags().join(" ");
+    let key = digest(&[&text, flags.join(" ").as_bytes(), HEADER.as_bytes(), cc.as_bytes(), source.as_bytes(), target.as_bytes()]);
     let object = dir.join(format!("{}.o", key));
     if object.is_file() {
         return Ok(object);
     }
     let tmp = dir.join(format!("{}.{}.o", key, std::process::id()));
     let output = Command::new(cc)
+        .args(crate::target_flags())
         .args(["-c", "-O2", "-w", "-fPIC", "-DNDEBUG=1"])
         .arg(format!("-I{}", include.display()))
         .args(&flags)
