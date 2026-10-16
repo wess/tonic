@@ -123,21 +123,7 @@ pub extern "C" fn tn_bin_concat(c: *mut Ctx, x: Term, y: Term) -> Term {
         let _ = bad;
         return ctx.badarg("expected binary argument in <> operator");
     }
-    let (lx, ly) = (bin_len(x), bin_len(y));
-    if lx == 0 {
-        return y;
-    }
-    if ly == 0 {
-        return x;
-    }
-    let mut r = [x, y];
-    ctx.reserve_with(2 + (lx + ly + 7) / 8, &mut r);
-    let (t, d) = ctx.bin_alloc_nogc(lx + ly);
-    unsafe {
-        std::ptr::copy_nonoverlapping(bin_bytes(r[0]).as_ptr(), d, lx);
-        std::ptr::copy_nonoverlapping(bin_bytes(r[1]).as_ptr(), d.add(lx), ly);
-    }
-    t
+    ctx.bin_append(x, y)
 }
 
 /// Concatenate `n` binaries laid out in memory.
@@ -158,6 +144,18 @@ pub extern "C" fn tn_bin_concat_n(c: *mut Ctx, parts: *const Term, n: u64) -> Te
     }
     // The parts live in the caller's frame slots, so they are rooted and
     // updated if a GC happens during allocation.
+    if n >= 2 && total >= 64 {
+        // `acc <> a <> b`: append the rest to the first part, in place when it
+        // is the newest view of a writable buffer
+        let mut acc = unsafe { *parts };
+        for i in 1..n {
+            let base = ctx.roots.len();
+            ctx.roots.push(acc);
+            acc = ctx.bin_append(ctx.roots[base], unsafe { *parts.add(i) });
+            ctx.roots.truncate(base);
+        }
+        return acc;
+    }
     let (t, d) = ctx.bin_alloc(total);
     let mut off = 0;
     for i in 0..n {
@@ -673,20 +671,6 @@ pub extern "C" fn tn_bs_utfn_bits(_c: *mut Ctx, cp: Term, flags: u64) -> Term {
     small(if flags & 0xff == BS_UTF32 { 32 } else if v > 0xFFFF { 32 } else { 16 })
 }
 
-#[no_mangle]
-pub extern "C" fn tn_utf8_len(_c: *mut Ctx, cp: Term) -> Term {
-    let v = small_val(cp);
-    small(if v < 0x80 {
-        1
-    } else if v < 0x800 {
-        2
-    } else if v < 0x10000 {
-        3
-    } else {
-        4
-    })
-}
-
 /// Does `lit` appear at bit offset `off` in `b`?
 #[no_mangle]
 pub extern "C" fn tn_bs_lit(_c: *mut Ctx, b: Term, off: Term, lit: Term) -> Term {
@@ -736,21 +720,6 @@ pub fn decode_utf8(s: &[u8]) -> Option<(u32, usize)> {
 // ---------------------------------------------------------------------------
 // Graphemes (approximation of extended grapheme clusters)
 // ---------------------------------------------------------------------------
-
-fn is_extend(cp: u32) -> bool {
-    matches!(cp,
-        0x0300..=0x036F | 0x0483..=0x0489 | 0x0591..=0x05BD | 0x0610..=0x061A |
-        0x064B..=0x065F | 0x0670 | 0x06D6..=0x06DC | 0x06DF..=0x06E4 |
-        0x0900..=0x0903 | 0x093A..=0x094F | 0x0951..=0x0957 | 0x0962..=0x0963 |
-        0x0E31 | 0x0E34..=0x0E3A | 0x0E47..=0x0E4E |
-        0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x200C | 0x20D0..=0x20FF |
-        0xFE00..=0xFE0F | 0xFE20..=0xFE2F | 0x1F3FB..=0x1F3FF | 0xE0020..=0xE007F |
-        0xE0100..=0xE01EF)
-}
-
-fn is_regional(cp: u32) -> bool {
-    (0x1F1E6..=0x1F1FF).contains(&cp)
-}
 
 /// Split into extended grapheme cluster byte ranges (UAX #29). Invalid UTF-8
 /// bytes form single graphemes.
@@ -860,68 +829,6 @@ pub extern "C" fn tn_bin_to_list(c: *mut Ctx, b: Term) -> Term {
     ctx.list_from_vec(&mut v)
 }
 
-fn to_str(t: Term) -> String {
-    String::from_utf8_lossy(bin_bytes(t)).into_owned()
-}
-
-/// mode: 0 = upcase, 1 = downcase, 2 = capitalize; ascii: only ASCII
-#[no_mangle]
-pub extern "C" fn tn_str_case(c: *mut Ctx, b: Term, mode: Term, ascii: Term) -> Term {
-    let ctx = cx(c);
-    if !is_binary(b) {
-        return ctx.badarg("argument error");
-    }
-    let s = to_str(b);
-    let ascii = ascii == TRUE;
-    let r = match small_val(mode) {
-        0 => {
-            if ascii {
-                s.to_ascii_uppercase()
-            } else {
-                s.to_uppercase()
-            }
-        }
-        1 => {
-            if ascii {
-                s.to_ascii_lowercase()
-            } else {
-                s.to_lowercase()
-            }
-        }
-        _ => {
-            let bytes = s.as_bytes();
-            let gs = graphemes(bytes);
-            if gs.is_empty() {
-                String::new()
-            } else {
-                let first = std::str::from_utf8(&bytes[gs[0].0..gs[0].1]).unwrap_or("");
-                let rest = std::str::from_utf8(&bytes[gs[0].1..]).unwrap_or("");
-                let mut out = String::new();
-                // Titlecase approximation.
-                let mut chars = first.chars();
-                if let Some(ch) = chars.next() {
-                    let up: String = match ch {
-                        'ǆ' | 'ǅ' | 'Ǆ' => "ǅ".to_string(),
-                        'ǉ' | 'ǈ' | 'Ǉ' => "ǈ".to_string(),
-                        'ǌ' | 'ǋ' | 'Ǌ' => "ǋ".to_string(),
-                        'ß' => "Ss".to_string(),
-                        _ => ch.to_uppercase().collect(),
-                    };
-                    out.push_str(&up);
-                    out.extend(chars);
-                }
-                if ascii {
-                    out.push_str(&rest.to_ascii_lowercase());
-                } else {
-                    out.push_str(&rest.to_lowercase());
-                }
-                out
-            }
-        }
-    };
-    ctx.str(&r)
-}
-
 fn is_ws(cp: u32) -> bool {
     matches!(cp, 0x09..=0x0D | 0x20 | 0x85 | 0xA0 | 0x1680 | 0x2000..=0x200A |
         0x2028 | 0x2029 | 0x202F | 0x205F | 0x3000)
@@ -957,34 +864,6 @@ pub extern "C" fn tn_str_trim(c: *mut Ctx, b: Term, mode: Term) -> Term {
                 Some((cp, _)) if is_ws(cp) => end = k,
                 _ => break,
             }
-        }
-    }
-    ctx.sub_binary(b, start, end - start)
-}
-
-/// String.trim(s, to_trim) family — removes repeated occurrences of `t`.
-#[no_mangle]
-pub extern "C" fn tn_str_trim_str(c: *mut Ctx, b: Term, t: Term, mode: Term) -> Term {
-    let ctx = cx(c);
-    if !is_binary(b) || !is_binary(t) {
-        return ctx.badarg("argument error");
-    }
-    let bytes = bin_bytes(b);
-    let tb = bin_bytes(t);
-    if tb.is_empty() {
-        return b;
-    }
-    let m = small_val(mode);
-    let mut start = 0;
-    let mut end = bytes.len();
-    if m == 0 || m == 1 {
-        while end - start >= tb.len() && &bytes[start..start + tb.len()] == tb {
-            start += tb.len();
-        }
-    }
-    if m == 0 || m == 2 {
-        while end - start >= tb.len() && &bytes[end - tb.len()..end] == tb {
-            end -= tb.len();
         }
     }
     ctx.sub_binary(b, start, end - start)
@@ -1046,123 +925,6 @@ pub fn find_sub(h: &[u8], n: &[u8]) -> Option<usize> {
     h.windows(n.len()).position(|w| w == n)
 }
 
-#[no_mangle]
-pub extern "C" fn tn_str_contains(c: *mut Ctx, b: Term, p: Term) -> Term {
-    let ctx = cx(c);
-    if !is_binary(b) {
-        return ctx.badarg("argument error");
-    }
-    let pats = match patterns(p) {
-        Some(p) => p,
-        None => return ctx.badarg("argument error"),
-    };
-    let h = bin_bytes(b);
-    boolean(pats.iter().any(|p| find_sub(h, p).is_some()))
-}
-
-#[no_mangle]
-pub extern "C" fn tn_str_starts_with(c: *mut Ctx, b: Term, p: Term) -> Term {
-    let ctx = cx(c);
-    if !is_binary(b) {
-        return ctx.badarg("argument error");
-    }
-    let pats = match patterns(p) {
-        Some(p) => p,
-        None => return ctx.badarg("argument error"),
-    };
-    let h = bin_bytes(b);
-    boolean(pats.iter().any(|p| h.starts_with(p)))
-}
-
-#[no_mangle]
-pub extern "C" fn tn_str_ends_with(c: *mut Ctx, b: Term, p: Term) -> Term {
-    let ctx = cx(c);
-    if !is_binary(b) {
-        return ctx.badarg("argument error");
-    }
-    let pats = match patterns(p) {
-        Some(p) => p,
-        None => return ctx.badarg("argument error"),
-    };
-    let h = bin_bytes(b);
-    boolean(pats.iter().any(|p| h.ends_with(p)))
-}
-
-/// String.split(s, pattern, parts, trim)
-#[no_mangle]
-pub extern "C" fn tn_str_split(c: *mut Ctx, b: Term, p: Term, parts: Term, trim: Term) -> Term {
-    let ctx = cx(c);
-    if !is_binary(b) {
-        return ctx.badarg("argument error");
-    }
-    let pats = match patterns(p) {
-        Some(p) => p,
-        None => return ctx.badarg("argument error"),
-    };
-    let h = bin_bytes(b).to_vec();
-    let trim = trim == TRUE;
-    let max_parts = if is_small(parts) && small_val(parts) > 0 {
-        small_val(parts) as usize
-    } else {
-        usize::MAX
-    };
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
-    if pats.iter().all(|p| p.is_empty()) {
-        // Split into graphemes: ["", "a", "b", ""] semantics.
-        let gs = graphemes(&h);
-        let mut out: Vec<(usize, usize)> = Vec::new();
-        if max_parts == 1 {
-            out.push((0, h.len()));
-        } else {
-            out.push((0, 0));
-            for (i, g) in gs.iter().enumerate() {
-                if out.len() + 1 == max_parts {
-                    out.push((g.0, h.len()));
-                    break;
-                }
-                out.push(*g);
-                if i == gs.len() - 1 {
-                    out.push((h.len(), h.len()));
-                }
-            }
-            if gs.is_empty() {
-                out.push((0, 0));
-            }
-        }
-        ranges = out;
-    } else {
-        let mut start = 0;
-        loop {
-            if ranges.len() + 1 >= max_parts {
-                ranges.push((start, h.len()));
-                break;
-            }
-            match find_first(&h, start, &pats) {
-                Some((pos, len)) => {
-                    ranges.push((start, pos));
-                    start = pos + len;
-                }
-                None => {
-                    ranges.push((start, h.len()));
-                    break;
-                }
-            }
-        }
-    }
-    if trim {
-        ranges.retain(|(s, e)| e > s);
-    }
-    let bi = ctx.push(b);
-    let base = ctx.roots.len();
-    for &(s, e) in &ranges {
-        let piece = ctx.sub_binary(ctx.get(bi), s, e - s);
-        ctx.roots.push(piece);
-    }
-    let l = ctx.list_from_roots(base, ranges.len(), NIL_LIST);
-    ctx.truncate(bi);
-    l
-}
-
 /// String.split/1 — on unicode whitespace, dropping empties.
 #[no_mangle]
 pub extern "C" fn tn_str_split_ws(c: *mut Ctx, b: Term) -> Term {
@@ -1198,53 +960,6 @@ pub extern "C" fn tn_str_split_ws(c: *mut Ctx, b: Term) -> Term {
     let l = ctx.list_from_roots(base, ranges.len(), NIL_LIST);
     ctx.truncate(bi);
     l
-}
-
-/// String.replace with binary replacement. global: true/false
-#[no_mangle]
-pub extern "C" fn tn_str_replace(c: *mut Ctx, b: Term, p: Term, r: Term, global: Term) -> Term {
-    let ctx = cx(c);
-    if !is_binary(b) || !is_binary(r) {
-        return ctx.badarg("argument error");
-    }
-    let pats = match patterns(p) {
-        Some(p) => p,
-        None => return ctx.badarg("argument error"),
-    };
-    let h = bin_bytes(b);
-    let rep = bin_bytes(r);
-    let mut out = Vec::with_capacity(h.len());
-    if pats.iter().all(|p| p.is_empty()) {
-        // Insert replacement between every grapheme (and at ends).
-        let gs = graphemes(h);
-        out.extend_from_slice(rep);
-        for (s, e) in gs {
-            out.extend_from_slice(&h[s..e]);
-            if global == TRUE {
-                out.extend_from_slice(rep);
-            }
-        }
-        if global != TRUE {
-            // only the first insertion
-        }
-        return ctx.binary(&out);
-    }
-    let mut start = 0;
-    loop {
-        match find_first(h, start, &pats) {
-            Some((pos, len)) => {
-                out.extend_from_slice(&h[start..pos]);
-                out.extend_from_slice(rep);
-                start = pos + len;
-                if global != TRUE {
-                    break;
-                }
-            }
-            None => break,
-        }
-    }
-    out.extend_from_slice(&h[start..]);
-    ctx.binary(&out)
 }
 
 /// :binary.matches(subject, patterns) → [{pos, len}]
@@ -1371,33 +1086,6 @@ pub extern "C" fn tn_binary_copy(c: *mut Ctx, b: Term, n: Term) -> Term {
     t
 }
 
-/// String.slice(s, start, len) on graphemes; negative start counts from end.
-#[no_mangle]
-pub extern "C" fn tn_str_slice(c: *mut Ctx, b: Term, start: Term, len: Term) -> Term {
-    let ctx = cx(c);
-    if !is_binary(b) || !is_small(start) || !is_small(len) {
-        return ctx.badarg("argument error");
-    }
-    let bytes = bin_bytes(b);
-    let gs = graphemes(bytes);
-    let n = gs.len() as i64;
-    let mut s = small_val(start);
-    let l = small_val(len);
-    if s < 0 {
-        s += n;
-        if s < 0 {
-            s = 0;
-        }
-    }
-    if l <= 0 || s >= n {
-        return empty_bin();
-    }
-    let e = (s + l).min(n);
-    let bs = gs[s as usize].0;
-    let be = gs[(e - 1) as usize].1;
-    ctx.sub_binary(b, bs, be - bs)
-}
-
 #[no_mangle]
 pub extern "C" fn tn_str_reverse(c: *mut Ctx, b: Term) -> Term {
     let ctx = cx(c);
@@ -1411,35 +1099,6 @@ pub extern "C" fn tn_str_reverse(c: *mut Ctx, b: Term) -> Term {
         out.extend_from_slice(&bytes[s..e]);
     }
     ctx.binary(&out)
-}
-
-#[no_mangle]
-pub extern "C" fn tn_str_valid(_c: *mut Ctx, b: Term) -> Term {
-    boolean(is_binary(b) && std::str::from_utf8(bin_bytes(b)).is_ok())
-}
-
-/// Next grapheme: {g, rest} | nil
-#[no_mangle]
-pub extern "C" fn tn_str_next_grapheme(c: *mut Ctx, b: Term) -> Term {
-    let ctx = cx(c);
-    if !is_binary(b) {
-        return ctx.badarg("argument error");
-    }
-    let bytes = bin_bytes(b);
-    if bytes.is_empty() {
-        return NIL;
-    }
-    let gs = graphemes(bytes);
-    let (s, e) = gs[0];
-    let total = bytes.len();
-    let bi = ctx.push(b);
-    let g = ctx.sub_binary(ctx.get(bi), s, e - s);
-    let gi = ctx.push(g);
-    let rest = ctx.sub_binary(ctx.get(bi), e, total - e);
-    let ri = ctx.push(rest);
-    let t = ctx.tuple(&[ctx.get(gi), ctx.get(ri)]);
-    ctx.truncate(bi);
-    t
 }
 
 // ---------------------------------------------------------------------------
@@ -1497,15 +1156,6 @@ pub fn escape(s: &[u8], quote: u8) -> String {
         i += l;
     }
     out
-}
-
-/// Inspect of a binary: `"..."` when printable, `<<1, 2>>` otherwise (single line).
-#[no_mangle]
-pub extern "C" fn tn_inspect_escape(c: *mut Ctx, b: Term, quote: Term) -> Term {
-    let ctx = cx(c);
-    let q = small_val(quote) as u8;
-    let s = escape(bin_bytes(b), q);
-    ctx.str(&s)
 }
 
 fn is_ident_start(c: char) -> bool {
@@ -1722,67 +1372,6 @@ pub extern "C" fn tn_fun_info(c: *mut Ctx, f: Term) -> Term {
         (fi.module, fi.name)
     };
     ctx.tuple(&[m, n, small(closure_arity(f) as i64)])
-}
-
-/// Integer.to_string(i, base) for inspect
-#[no_mangle]
-pub extern "C" fn tn_int_to_string(c: *mut Ctx, i: Term, base: Term) -> Term {
-    crate::bif_core::tn_integer_to_binary(c, i, base)
-}
-
-/// String.pad_leading/trailing(s, count, padding) — mode 0 leading, 1 trailing
-#[no_mangle]
-pub extern "C" fn tn_str_pad(c: *mut Ctx, b: Term, count: Term, pad: Term, mode: Term) -> Term {
-    let ctx = cx(c);
-    if !is_binary(b) || !is_small(count) || !is_binary(pad) {
-        return ctx.badarg("argument error");
-    }
-    let bytes = bin_bytes(b);
-    let n = graphemes(bytes).len() as i64;
-    let want = small_val(count);
-    if want <= n {
-        return b;
-    }
-    let pb = bin_bytes(pad);
-    let pg = graphemes(pb);
-    if pg.is_empty() {
-        return ctx.badarg("argument error");
-    }
-    let need = (want - n) as usize;
-    let mut padding = Vec::new();
-    for i in 0..need {
-        let (s, e) = pg[i % pg.len()];
-        padding.extend_from_slice(&pb[s..e]);
-    }
-    let mut out = Vec::with_capacity(bytes.len() + padding.len());
-    if small_val(mode) == 0 {
-        out.extend_from_slice(&padding);
-        out.extend_from_slice(bytes);
-    } else {
-        out.extend_from_slice(bytes);
-        out.extend_from_slice(&padding);
-    }
-    ctx.binary(&out)
-}
-
-/// Collect graphemes-or-codepoints index: String.at
-#[no_mangle]
-pub extern "C" fn tn_str_at(c: *mut Ctx, b: Term, idx: Term) -> Term {
-    let ctx = cx(c);
-    if !is_binary(b) || !is_small(idx) {
-        return ctx.badarg("argument error");
-    }
-    let bytes = bin_bytes(b);
-    let gs = graphemes(bytes);
-    let mut i = small_val(idx);
-    if i < 0 {
-        i += gs.len() as i64;
-    }
-    if i < 0 || i as usize >= gs.len() {
-        return NIL;
-    }
-    let (s, e) = gs[i as usize];
-    ctx.sub_binary(b, s, e - s)
 }
 
 /// Build a charlist-to-binary for List.to_string etc. (chardata)

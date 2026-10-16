@@ -158,10 +158,6 @@ impl Expander {
 }
 
 impl Expander {
-    /// Quoted form of a macro call argument (caller code: nil context).
-    pub fn quote_macro_arg(&mut self, e: &E, _cx: &mut Cx) -> R<CE> {
-        quote_literal(e)
-    }
 }
 
 /// Evaluates `unquote` fragments while quoting.

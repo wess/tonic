@@ -313,6 +313,24 @@ impl Cheney {
     }
 }
 
+/// Appends producing at least this many bytes go to a writable buffer.
+const APPEND_MIN: usize = 64;
+
+/// The buffer `x` can be extended in place by `extra` bytes: `x` views all of
+/// it and it has room.
+fn writable_base(x: Term, extra: usize) -> Option<Term> {
+    if boxed_tag(x) != T_SUBBIN || word(x, 2) != 0 {
+        return None;
+    }
+    let base = word(x, 1);
+    if boxed_tag(base) != T_WBUF {
+        return None;
+    }
+    let used = word(base, 1) as usize;
+    let cap = (size_of_hdr(hdr(base)) as usize - 1) * 8;
+    (word(x, 3) as usize == used && cap - used >= extra).then_some(base)
+}
+
 /// Size in words of the boxed object `t` (including header and padding).
 #[inline]
 pub fn obj_words(t: Term) -> usize {
@@ -482,7 +500,8 @@ impl Ctx {
         } else {
             (b, 0)
         };
-        if boff == 0 && off == 0 && len == bin_len(base) {
+        // a writable buffer is never handed out: it may grow under later views
+        if boff == 0 && off == 0 && boxed_tag(base) == T_BINARY && len == bin_len(base) {
             return base;
         }
         // Small slices are cheaper as copies (and don't pin large bases).
@@ -503,6 +522,71 @@ impl Ctx {
             *p.add(2) = (boff + off) as u64;
             *p.add(3) = len as u64;
         }
+        p as Term
+    }
+
+    /// `x <> y`. Appending to the newest view of a writable buffer writes in
+    /// place, so building a binary by repeated appends is linear, as with the
+    /// BEAM's append optimization. Views never change: a view covers at most
+    /// the bytes written when it was made, and writes only go past them.
+    pub fn bin_append(&mut self, x: Term, y: Term) -> Term {
+        let (lx, ly) = (bin_len(x), bin_len(y));
+        if lx == 0 {
+            return y;
+        }
+        if ly == 0 {
+            return x;
+        }
+        let mut r = [x, y];
+        if let Some(base) = writable_base(x, ly) {
+            let _ = base;
+            self.reserve_with(4, &mut r);
+            let base = word(r[0], 1);
+            unsafe {
+                let used = word(base, 1) as usize;
+                let data = (base as *mut u64).add(2) as *mut u8;
+                std::ptr::copy(bin_bytes(r[1]).as_ptr(), data.add(used), ly);
+                *(base as *mut u64).add(1) = (used + ly) as u64;
+                return self.subbin_nogc(base, used + ly);
+            }
+        }
+        let total = lx + ly;
+        if total < APPEND_MIN {
+            self.reserve_with(2 + (total + 7) / 8, &mut r);
+            let (t, d) = self.bin_alloc_nogc(total);
+            unsafe {
+                std::ptr::copy_nonoverlapping(bin_bytes(r[0]).as_ptr(), d, lx);
+                std::ptr::copy_nonoverlapping(bin_bytes(r[1]).as_ptr(), d.add(lx), ly);
+            }
+            return t;
+        }
+        let cap = (total * 2).max(256);
+        self.reserve_with(2 + cap / 8 + 4, &mut r);
+        let (base, d) = self.wbuf_alloc_nogc(cap, total);
+        unsafe {
+            std::ptr::copy_nonoverlapping(bin_bytes(r[0]).as_ptr(), d, lx);
+            std::ptr::copy_nonoverlapping(bin_bytes(r[1]).as_ptr(), d.add(lx), ly);
+            self.subbin_nogc(base, total)
+        }
+    }
+
+    /// A writable buffer with `cap` bytes of room, `used` of them in use.
+    fn wbuf_alloc_nogc(&mut self, cap: usize, used: usize) -> (Term, *mut u8) {
+        let words = 2 + (cap + 7) / 8;
+        let p = self.alloc_nogc(words);
+        unsafe {
+            *p = header(T_WBUF, (words - 1) as u64);
+            *p.add(1) = used as u64;
+            (p as Term, p.add(2) as *mut u8)
+        }
+    }
+
+    unsafe fn subbin_nogc(&mut self, base: Term, len: usize) -> Term {
+        let p = self.alloc_nogc(4);
+        *p = header(T_SUBBIN, 3);
+        *p.add(1) = base;
+        *p.add(2) = 0;
+        *p.add(3) = len as u64;
         p as Term
     }
 

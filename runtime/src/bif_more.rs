@@ -169,20 +169,23 @@ pub extern "C" fn tn_float_to_binary_opts(c: *mut Ctx, f: Term, opts: Term) -> T
         return ctx.badarg_args(&[(1, "not a float")]);
     }
     let x = float_val(f);
-    let mut decimals: Option<usize> = None;
-    let mut scientific: Option<usize> = None;
+    // as in OTP's do_float_to_charbuf: one precision shared by decimals and
+    // scientific, the last format option wins
+    let mut precision: i64 = 20;
+    let mut fixed = false;
     let mut compact = false;
     let mut short = false;
     let mut l = opts;
     while is_cons(l) {
         let o = head(l);
         if is_tuple(o) && tuple_size(o) == 2 && is_atom(tuple_get(o, 0)) && is_small(tuple_get(o, 1)) {
-            let n = small_val(tuple_get(o, 1)).max(0) as usize;
             match atoms::name(atom_idx(tuple_get(o, 0))) {
-                "decimals" => decimals = Some(n.min(253)),
-                "scientific" => scientific = Some(n.min(249)),
+                "decimals" => fixed = true,
+                "scientific" => fixed = false,
                 _ => return ctx.badarg_args(&[(2, "invalid option in list")]),
             }
+            precision = small_val(tuple_get(o, 1));
+            short = false;
         } else if o == atom(atoms::intern("compact")) {
             compact = true;
         } else if o == atom(atoms::intern("short")) {
@@ -193,20 +196,69 @@ pub extern "C" fn tn_float_to_binary_opts(c: *mut Ctx, f: Term, opts: Term) -> T
         l = tail(l);
     }
     let s = if short {
-        num::float_to_string(x)
-    } else if let Some(d) = decimals {
-        let mut s = format!("{:.*}", d, x);
-        if compact && s.contains('.') {
-            while s.ends_with('0') && !s.ends_with(".0") {
-                s.pop();
-            }
-        }
-        s
+        Some(num::float_to_string(x))
+    } else if fixed {
+        fixed_decimals(x, precision, compact)
+    } else if precision >= 0 {
+        Some(erl_scientific(x, precision as usize))
     } else {
-        let d = scientific.unwrap_or(20);
-        erl_scientific(x, d)
+        None
     };
-    ctx.str(&s)
+    match s {
+        // OTP formats into a 256-byte buffer and fails when it does not fit
+        Some(s) if s.len() < 256 => ctx.str(&s),
+        _ => ctx.badarg("argument error"),
+    }
+}
+
+/// Port of OTP's sys_double_to_chars_fast: values up to 2^53 with fewer
+/// than 19 decimals are rounded half away from zero on the binary value
+/// scaled by 10^decimals; anything else is printf("%.*f").
+fn fixed_decimals(f: f64, decimals: i64, compact: bool) -> Option<String> {
+    const POW10: [f64; 19] = [
+        1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18,
+    ];
+    if decimals < 0 {
+        return None;
+    }
+    let neg = f.is_sign_negative();
+    let af = f.abs();
+    if af > (1u64 << 53) as f64 || decimals as usize >= POW10.len() {
+        if decimals >= 256 {
+            return None;
+        }
+        let s = format!("{:.*}", decimals as usize, f);
+        if s.len() >= 256 {
+            return None;
+        }
+        return Some(if compact { trim_trailing_zeros(&s) } else { s });
+    }
+    let d = decimals as usize;
+    let mut out = String::new();
+    if neg {
+        out.push('-');
+    }
+    if d > 0 {
+        let int_f = af.floor();
+        let frac_f = ((af - int_f) * POW10[d]).round();
+        let (int_part, frac_part) = if frac_f >= POW10[d] { (int_f as u64 + 1, 0) } else { (int_f as u64, frac_f as u64) };
+        out.push_str(&format!("{}.{:0>width$}", int_part, frac_part, width = d));
+        if compact {
+            out = trim_trailing_zeros(&out);
+        }
+    } else {
+        out.push_str(&format!("{}", af.round() as u64));
+    }
+    Some(out)
+}
+
+/// OTP's find_first_trailing_zero: drop trailing zeros, keeping one after a '.'.
+fn trim_trailing_zeros(s: &str) -> String {
+    let mut t = s.trim_end_matches('0').to_string();
+    if t.ends_with('.') {
+        t.push('0');
+    }
+    t
 }
 
 fn erl_scientific(x: f64, d: usize) -> String {

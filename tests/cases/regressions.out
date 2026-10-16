@@ -1,0 +1,61 @@
+{[{:b, 1}, :a], {[], 0}, ["DYN", {:b, 1}, :a]}
+[{"/", :index}, {"/x", :x}]
+{{"HELLO", []}, {"A B", ~c"xy"}, ["a", "b", "c"], 42, -42, 7}
+[1]
+~c"ab"
+[2, 5]
+["ab", "c"]
+[192757651696438.12, 1524698487110590.2, 0.30000000000000004]
+{2.5, 0, 1, "3"}
+{0.125, 2, 4, "0.13"}
+{0.045, 2, 4, "0.05"}
+{1.45, 1, 3, "1.5"}
+{-2.5, 0, 2, "-3"}
+{1.0e22, 0, 23, "1"}
+{1.0, 253, 255, "1.0"}
+ArgumentError
+ArgumentError
+ArgumentError
+[false, true, nil, 2]
+SystemLimitError
+SystemLimitError
+{0, -1, 0}
+{"aGVsbG8gd29ybGQ=", "hi", "__4"}
+{[{3, 4}, {2, :x}, {1, 2}, {0, 1}], [{0, 1}, {1, 2}, {3, 4}]}
+[{2025, 1}, {2020, 53}, {2026, 42}]
+{[1, 4, 7, 10], [10, 6, 2], [1]}
+ArgumentError
+{System.EnvError,
+ "could not fetch environment variable \"TONIC_SURELY_UNSET\" because it is not set"}
+"lo"
+3723000
+[{:k, 3000, :x}]
+[7, 6]
+1180591620717411303425
+ArgumentError
+{[1, 2, 3], [4, 5, 6], ~c"\a", :"$end_of_table"}
+4000
+{18446744073709551615, 18446744073709551615, 18446744073709551615}
+{0, 6000}
+true
+false
+:noproc
+{{:regressions_watched, :nonode@nohost}, :normal}
+{{:regressions_nobody, :nonode@nohost}, :noproc}
+:send_local
+{:ok, :cancel}
+{:error, :badarg}
+{101, "bc", "bd", "bce", false}
+true
+{10893, "3CBD6B056CF84C19971CA7DB55927422"}
+true
+{[1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000], true, false}
+:hit
+{42, {~c"12", [2, 4], [3]},
+ {[id: 1, name: "n"], [id: 3, name: "x"], :user, :record}}
+{%{7 => :b, 1.5 => :a}, [-1, 3, 2.0], MapSet.new([1, 2, 1.0])}
+{[area: 1, name: 2], Regressions.Shape}
+{[255, <<1::size(3)>>], <<1, 3::size(2)>>}
+{[cb: 1], Regressions.Second}
+ArgumentError
+[ArgumentError, [{1, 1}], ArgumentError]

@@ -229,16 +229,20 @@ impl Parser {
                 str_or_interp(ps, line)
             }
             T::Charlist(parts) => E::new(K::Charlist(self.interp_parts(parts)?), line),
-            T::Sigil { ch, parts, mods } => {
+            T::Sigil { name, parts, mods } => {
                 let ps = self.interp_parts(parts)?;
-                E::new(
-                    K::Sigil {
-                        ch,
-                        parts: ps,
-                        mods,
-                    },
-                    line,
-                )
+                match name.as_str() {
+                    "s" | "S" | "c" | "C" | "w" | "W" | "r" | "R" | "D" | "T" | "N" | "U" => E::new(
+                        K::Sigil {
+                            ch: name.chars().next().unwrap(),
+                            parts: ps,
+                            mods,
+                        },
+                        line,
+                    ),
+                    // any other sigil is a call: ~x(text)m is sigil_x(<<"text">>, ~c"m")
+                    _ => sigil_call(&name, ps, mods, line),
+                }
             }
             T::CapArg(n) => E::new(K::CapArg(n), line),
             T::Ident(name) => self.ident_expr(name, line, nd)?,
@@ -1220,7 +1224,7 @@ pub fn describe(t: &T) -> String {
         T::AtomInterp(_) => "atom".into(),
         T::Str(_) => "string".into(),
         T::Charlist(_) => "charlist".into(),
-        T::Sigil { ch, .. } => format!("~{}", ch),
+        T::Sigil { name, .. } => format!("~{}", name),
         T::Ident(n) => n.clone(),
         T::Alias(n) => n.clone(),
         T::KwKey(k) => format!("{}:", k),
@@ -1242,4 +1246,29 @@ pub fn parse_source(src: &str, file: &str) -> PResult<Vec<E>> {
     let toks = tokenize(src, file, 1)?;
     let mut p = Parser::new(toks, file);
     p.parse_file()
+}
+
+/// `~x(text)mods` as the call Elixir makes of it: the text as a `<<>>`
+/// binary (interpolated parts converted to strings), the modifiers as a
+/// charlist.
+fn sigil_call(name: &str, parts: Vec<IPart>, mods: String, line: u32) -> E {
+    let segment = if parts.iter().all(|p| matches!(p, IPart::Lit(_))) {
+        let bytes = parts.into_iter().flat_map(|p| match p {
+            IPart::Lit(b) => b,
+            _ => vec![],
+        });
+        E::new(K::Str(bytes.collect()), line)
+    } else {
+        E::bin("::", E::new(K::Interp(parts), line), E::new(K::Var("binary".into()), line), line)
+    };
+    let text = E::new(K::Bits(vec![segment]), line);
+    let mods = E::new(K::Charlist(vec![IPart::Lit(mods.into_bytes())]), line);
+    E::new(
+        K::Call {
+            name: format!("sigil_{}", name),
+            args: vec![text, mods],
+            parens: true,
+        },
+        line,
+    )
 }

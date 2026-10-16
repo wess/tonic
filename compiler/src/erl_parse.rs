@@ -73,7 +73,6 @@ pub enum Form {
     Record(String, Vec<(String, Option<X>)>),
     Function(String, usize, Vec<Cl>, u32),
     ExportAll,
-    NoAutoImport(Vec<(String, usize)>),
     Import(String, Vec<(String, usize)>),
     Other,
 }
@@ -242,25 +241,12 @@ impl Parser {
                     }
                 }
                 "compile" => {
-                    // look for export_all / no_auto_import
+                    // export_all; no_auto_import needs nothing since locals already shadow BIFs
                     let st = self.pos;
                     self.skip_form();
                     let toks = &self.toks[st..self.pos];
                     if toks.iter().any(|t| matches!(&t.t, T::Atom(a) if a == "export_all")) {
                         return Ok(Form::ExportAll);
-                    }
-                    if let Some(i) = toks.iter().position(|t| matches!(&t.t, T::Atom(a) if a == "no_auto_import")) {
-                        let mut fas = Vec::new();
-                        let mut j = i;
-                        while j + 2 < toks.len() {
-                            if let (T::Atom(f), T::P(sl), T::Int(n)) = (&toks[j].t, &toks[j + 1].t, &toks[j + 2].t) {
-                                if sl == "/" {
-                                    fas.push((f.clone(), *n as usize));
-                                }
-                            }
-                            j += 1;
-                        }
-                        return Ok(Form::NoAutoImport(fas));
                     }
                     Ok(Form::Other)
                 }
@@ -583,13 +569,19 @@ impl Parser {
                 };
                 self.pos += 1;
                 let v = self.expr()?;
+                // map comprehension: #{K => V || Q}
+                if base.is_none() && pairs.is_empty() && !exact && self.is("||") {
+                    self.pos += 1;
+                    let qs = self.qualifiers()?;
+                    self.expect("}")?;
+                    return Ok(x(XK::MC(Box::new(k), Box::new(v), qs), line));
+                }
                 pairs.push((k, exact, v));
                 if self.is(",") {
                     self.pos += 1;
                 }
             }
             self.pos += 1;
-            // map comprehension: #{K => V || Q}
             return Ok(x(XK::Map(base.map(Box::new), pairs), line));
         }
         let rname = match self.next().t {

@@ -39,33 +39,13 @@ pub fn set_config_inputs(files: Vec<String>) {
     let _ = CONFIGS.set(files);
 }
 
-fn cache_key() -> Result<String, String> {
-    use std::hash::{Hash, Hasher};
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let bytes = std::fs::read(&exe).map_err(|e| e.to_string())?;
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut h);
-    let runtime = crate::find_runtime()?;
-    std::fs::read(&runtime)
-        .map_err(|e| format!("{}: {}", runtime.display(), e))?
-        .hash(&mut h);
-    Ok(format!("{:016x}", h.finish()))
-}
-
-fn cache_dir() -> PathBuf {
-    if let Ok(d) = std::env::var("TONIC_CACHE") {
-        return PathBuf::from(d);
-    }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".cache").join("tonic")
-}
-
 /// The host executable, built on first use.
 fn host_exe() -> Result<PathBuf, String> {
-    let dir = cache_dir();
-    let key = cache_key()?;
+    let dir = crate::cache::dir();
+    let key = crate::cache::toolchain_key(&crate::find_runtime()?)?;
     let path = dir.join(format!("macrohost-{}", key));
     if path.exists() {
+        crate::cache::touch(&path);
         return Ok(path);
     }
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -94,7 +74,7 @@ fn host_exe() -> Result<PathBuf, String> {
         ));
     }
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
-
+    crate::cache::prune("macrohost", &key);
     Ok(path)
 }
 
@@ -594,8 +574,8 @@ fn definitions_request(module: &str, file: &str, first: u32, last: u32, allow_em
     Ok(E::new(K::Block(crate::parser::parse_source(&source, file)?), first))
 }
 
-/// Captures the value of an attribute at its original declaration, without repeating effects.
-/// The value of `@name` (or "tonic_binding": a module-level assignment) set
+/// Captures the value of an attribute at its original declaration, without
+/// repeating effects: the value of `@name` (or "tonic_binding": a module-level assignment) set
 /// by the `occurrence`-th such statement on `line`.
 pub fn attribute_value(module: &str, name: &str, file: &str, line: u32, occurrence: usize) -> R<E> {
     let canonical = std::fs::canonicalize(file)

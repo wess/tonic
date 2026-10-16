@@ -120,7 +120,47 @@ fn shortest_digits(f: f64) -> (String, i32) {
     let digits: String = mant.chars().filter(|c| *c != '.').collect();
     let digits = digits.trim_end_matches('0').to_string();
     let digits = if digits.is_empty() { "0".to_string() } else { digits };
-    (digits, exp + 1)
+    (tie_to_even(f.abs(), digits, exp), exp + 1)
+}
+
+/// When the value lies exactly halfway between two shortest candidates,
+/// Rust rounds up while OTP's Ryu-based printer picks the even last digit.
+fn tie_to_even(f: f64, digits: String, exp: i32) -> String {
+    let n = digits.len();
+    // n+1 significant digits; a tie needs the extra digit to be an exact 5
+    let probe = format!("{:.*e}", n, f);
+    let (pm, pe) = probe.split_once('e').unwrap();
+    if !pm.ends_with('5') || pe.parse::<i32>() != Ok(exp) {
+        return digits;
+    }
+    // exact decimal expansion (every double's is finite)
+    let exact = format!("{:.*e}", 1100, f);
+    let (em, _) = exact.split_once('e').unwrap();
+    let ed: String = em.chars().filter(|c| *c != '.').collect();
+    let ed = ed.trim_end_matches('0');
+    if ed.len() != n + 1 || !ed.ends_with('5') {
+        return digits;
+    }
+    let lo = ed[..n].to_string();
+    let Some(hi) = increment(&lo) else { return digits };
+    let even = |d: &str| (d.as_bytes()[d.len() - 1] - b'0') % 2 == 0;
+    let pick = if even(&lo) { lo } else { hi };
+    let pick = pick.trim_end_matches('0');
+    if pick.is_empty() { digits } else { pick.to_string() }
+}
+
+/// Decimal digit string plus one in the last place; None if it would grow.
+fn increment(d: &str) -> Option<String> {
+    let mut b = d.as_bytes().to_vec();
+    for i in (0..b.len()).rev() {
+        if b[i] == b'9' {
+            b[i] = b'0';
+        } else {
+            b[i] += 1;
+            return Some(String::from_utf8(b).unwrap());
+        }
+    }
+    None
 }
 
 /// Format like `Float.to_string/1` (float_to_binary(F, [short])).
@@ -205,6 +245,15 @@ pub fn float_inspect(f: f64) -> String {
 
 pub enum ArithErr {
     BadArith,
+    SystemLimit,
+}
+
+/// Largest integer magnitude the BEAM represents, in bits.
+pub const MAX_INT_BITS: u64 = 4_194_240;
+
+/// Whether shifting a nonzero `x` left by `s` bits exceeds the BEAM's limit.
+fn shift_too_big(x: &BigInt, s: u64) -> bool {
+    x.bits() > 0 && x.bits().saturating_add(s) > MAX_INT_BITS
 }
 
 pub fn add(ctx: &mut Ctx, a: Term, b: Term) -> Result<Term, ArithErr> {
@@ -383,6 +432,9 @@ pub fn bitop(ctx: &mut Ctx, op: u8, a: Term, b: Term) -> Result<Term, ArithErr> 
                 if y < 62 && (x.unsigned_abs() >> (62 - y)) == 0 {
                     x << y
                 } else {
+                    if shift_too_big(&to_big(a), y as u64) {
+                        return Err(ArithErr::SystemLimit);
+                    }
                     let r = to_big(a) << (y as usize);
                     return Ok(from_big(ctx, &r));
                 }
@@ -411,13 +463,22 @@ pub fn bitop(ctx: &mut Ctx, op: u8, a: Term, b: Term) -> Result<Term, ArithErr> 
         b'|' => x | to_big(b),
         b'^' => x ^ to_big(b),
         b'<' | b'>' => {
-            let s = to_big(b).to_i64().ok_or(ArithErr::BadArith)?;
-            let left = (op == b'<') == (s >= 0);
-            let s = s.unsigned_abs() as usize;
+            let sb = to_big(b);
+            let left = (op == b'<') == (sb.sign() != num_bigint::Sign::Minus);
+            let s = match sb.magnitude().to_u64() {
+                Some(s) => s,
+                None if left && x.bits() > 0 => return Err(ArithErr::SystemLimit),
+                None => u64::MAX,
+            };
             if left {
-                x << s
+                if shift_too_big(&x, s) {
+                    return Err(ArithErr::SystemLimit);
+                }
+                x << (s as usize)
+            } else if s >= x.bits() + 1 {
+                if x.sign() == num_bigint::Sign::Minus { BigInt::from(-1) } else { BigInt::from(0) }
             } else {
-                x >> s
+                x >> (s as usize)
             }
         }
         _ => unreachable!(),

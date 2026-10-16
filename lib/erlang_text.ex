@@ -52,6 +52,21 @@ defmodule :lists do
   defp seq_loop(1, x, l), do: [x | l]
   defp seq_loop(0, _, l), do: l
 
+  def seq(first, last, inc)
+      when is_integer(first) and is_integer(last) and is_integer(inc) and
+             ((inc > 0 and first - inc <= last) or (inc < 0 and first - inc >= last)) do
+    n = div(last - first + inc, inc)
+    seq_loop(n, inc * (n - 1) + first, inc, [])
+  end
+
+  def seq(same, same, 0) when is_integer(same), do: [same]
+  def seq(first, last, inc), do: :erlang.error(:badarg, [first, last, inc])
+
+  defp seq_loop(n, x, d, l) when n >= 4, do: seq_loop(n - 4, x - 4 * d, d, [x - 3 * d, x - 2 * d, x - d, x | l])
+  defp seq_loop(n, x, d, l) when n >= 2, do: seq_loop(n - 2, x - 2 * d, d, [x - d, x | l])
+  defp seq_loop(1, x, _, l), do: [x | l]
+  defp seq_loop(0, _, _, l), do: l
+
   def sum(l), do: sum(l, 0)
 
   defp sum([h | t], acc), do: sum(t, acc + h)

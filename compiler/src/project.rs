@@ -44,6 +44,8 @@ pub fn load(input: &str) -> Result<Option<Project>, String> {
         path.parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."))
+    } else if path.is_dir() {
+        return Err(format!("{} is a directory without a mix.exs", input));
     } else {
         return Ok(None);
     };

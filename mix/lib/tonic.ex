@@ -33,11 +33,48 @@ defmodule Tonic do
     :ok
   end
 
+  # nouse_stdio moves the port's pipes to fds 3/4, so tonic and the program it
+  # runs write straight to the caller's stdout and stderr. Port programs do not
+  # see the BEAM's stdin, so it is copied into a FIFO the program reads instead;
+  # closing the FIFO at end of input gives the program a real EOF.
   def command(args) do
-    {_, status} =
-      System.cmd(executable(), args, into: IO.stream(:stdio, :line))
+    fifo = Path.join(System.tmp_dir!(), "tonicstdin#{System.unique_integer([:positive])}")
+    {_, 0} = System.cmd("mkfifo", [fifo])
 
-    status
+    try do
+      port =
+        Port.open({:spawn_executable, System.find_executable("sh")}, [
+          :nouse_stdio,
+          :exit_status,
+          :binary,
+          args: ["-c", ~s(f=$1; shift; exec "$@" < "$f"), "sh", fifo, executable() | args]
+        ])
+
+      forwarder = spawn(fn -> forward(fifo) end)
+
+      receive do
+        {^port, {:exit_status, status}} ->
+          Process.exit(forwarder, :kill)
+          status
+      end
+    after
+      File.rm(fifo)
+    end
+  end
+
+  defp forward(fifo) do
+    {:ok, out} = File.open(fifo, [:write, :raw, :binary])
+    copy(out)
+  end
+
+  defp copy(out) do
+    case IO.binread(:stdio, 65_536) do
+      data when is_binary(data) ->
+        if :file.write(out, data) == :ok, do: copy(out), else: File.close(out)
+
+      _ ->
+        File.close(out)
+    end
   end
 
   defp config, do: Mix.Project.config()[:tonic] || []

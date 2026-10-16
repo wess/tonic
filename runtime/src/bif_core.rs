@@ -25,6 +25,7 @@ macro_rules! arith2 {
                     "" => ctx.badarith(),
                     op => ctx.badarith_op(op, &[a, b]),
                 },
+                Err(ArithErr::SystemLimit) => ctx.system_limit(),
             }
         }
     };
@@ -64,7 +65,10 @@ macro_rules! bitop {
         #[no_mangle]
         pub extern "C" fn $name(c: *mut Ctx, a: Term, b: Term) -> Term {
             let ctx = cx(c);
-            num::bitop(ctx, $op, a, b).unwrap_or_else(|_| {
+            num::bitop(ctx, $op, a, b).unwrap_or_else(|e| {
+                if matches!(e, num::ArithErr::SystemLimit) {
+                    return ctx.system_limit();
+                }
                 let name = match $op {
                     b'&' => "band",
                     b'|' => "bor",
@@ -341,7 +345,8 @@ pub extern "C" fn tn_list_to_tuple(c: *mut Ctx, l: Term) -> Term {
 #[no_mangle]
 pub extern "C" fn tn_make_tuple(c: *mut Ctx, n: Term, v: Term) -> Term {
     let ctx = cx(c);
-    if !is_small(n) || small_val(n) < 0 {
+    // the BEAM's largest tuple has 2^24 - 1 elements
+    if !is_small(n) || small_val(n) < 0 || small_val(n) > 16_777_215 {
         return ctx.badarg_args(&[(1, "out of range")]);
     }
     let n = small_val(n) as usize;
@@ -638,36 +643,6 @@ pub extern "C" fn tn_sort_desc(c: *mut Ctx, l: Term) -> Term {
     acc
 }
 
-/// Remove duplicates keeping first occurrence (Enum.uniq on lists).
-#[no_mangle]
-pub extern "C" fn tn_list_uniq(c: *mut Ctx, l: Term) -> Term {
-    let ctx = cx(c);
-    let n = match list_len(l) {
-        Some(n) => n,
-        None => return ctx.badarg("argument error"),
-    };
-    let mut r = [l];
-    ctx.reserve_with(3 * n, &mut r);
-    let mut seen: std::collections::HashMap<u64, Vec<Term>> = std::collections::HashMap::new();
-    let mut keep: Vec<Term> = Vec::with_capacity(n);
-    let mut x = r[0];
-    while is_cons(x) {
-        let e = head(x);
-        let h = cmp::hash(e);
-        let bucket = seen.entry(h).or_default();
-        if !bucket.iter().any(|&y| cmp::eq_exact(y, e)) {
-            bucket.push(e);
-            keep.push(e);
-        }
-        x = tail(x);
-    }
-    let mut acc = NIL_LIST;
-    for &e in keep.iter().rev() {
-        acc = ctx.cons_nogc(e, acc);
-    }
-    acc
-}
-
 /// :lists.seq(from, to) — used by ranges.
 #[no_mangle]
 pub extern "C" fn tn_seq(c: *mut Ctx, from: Term, to: Term, step: Term) -> Term {
@@ -691,42 +666,6 @@ pub extern "C" fn tn_seq(c: *mut Ctx, from: Term, to: Term, step: Term) -> Term 
 }
 
 #[no_mangle]
-pub extern "C" fn tn_list_flatten(c: *mut Ctx, l: Term, tl: Term) -> Term {
-    let ctx = cx(c);
-    fn walk(x: Term, out: &mut Vec<Term>) -> bool {
-        let mut x = x;
-        while is_cons(x) {
-            let h = head(x);
-            if is_list(h) {
-                if !walk(h, out) {
-                    return false;
-                }
-            } else {
-                out.push(h);
-            }
-            x = tail(x);
-        }
-        x == NIL_LIST
-    }
-    let mut v = Vec::new();
-    if !walk(l, &mut v) {
-        return ctx.badarg("argument error");
-    }
-    let mut r = [tl];
-    ctx.reserve_with(3 * v.len(), &mut r);
-    // v may be stale if GC happened; recompute after reserve.
-    let mut r2 = [l, r[0]];
-    ctx.reserve_with(3 * v.len(), &mut r2);
-    v.clear();
-    walk(r2[0], &mut v);
-    let mut acc = r2[1];
-    for &e in v.iter().rev() {
-        acc = ctx.cons_nogc(e, acc);
-    }
-    acc
-}
-
-#[no_mangle]
 pub extern "C" fn tn_list_last(c: *mut Ctx, l: Term) -> Term {
     if !is_cons(l) {
         return cx(c).badarg("argument error");
@@ -736,31 +675,6 @@ pub extern "C" fn tn_list_last(c: *mut Ctx, l: Term) -> Term {
         x = tail(x);
     }
     head(x)
-}
-
-/// Enum.at for lists: returns element or `default`.
-#[no_mangle]
-pub extern "C" fn tn_list_at(_c: *mut Ctx, l: Term, i: Term, default: Term) -> Term {
-    if !is_small(i) {
-        return default;
-    }
-    let mut i = small_val(i);
-    if i < 0 {
-        let n = list_len(l).unwrap_or(0) as i64;
-        i += n;
-        if i < 0 {
-            return default;
-        }
-    }
-    let mut x = l;
-    while is_cons(x) {
-        if i == 0 {
-            return head(x);
-        }
-        i -= 1;
-        x = tail(x);
-    }
-    default
 }
 
 // ---------------- maps ----------------
@@ -832,19 +746,6 @@ pub extern "C" fn tn_map_put(c: *mut Ctx, m: Term, k: Term, v: Term) -> Term {
     let ctx = cx(c);
     if !is_map(m) {
         return ctx.badmap(m);
-    }
-    map::put(ctx, m, k, v)
-}
-
-/// Update existing key; KeyError if missing (`%{m | k => v}`).
-#[no_mangle]
-pub extern "C" fn tn_map_update(c: *mut Ctx, m: Term, k: Term, v: Term) -> Term {
-    let ctx = cx(c);
-    if !is_map(m) {
-        return ctx.badmap(m);
-    }
-    if map::find(m, k).is_none() {
-        return ctx.badkey(k, m);
     }
     map::put(ctx, m, k, v)
 }
@@ -975,19 +876,6 @@ pub extern "C" fn tn_map_put_many(c: *mut Ctx, m: Term, pairs: *const Term, n: u
     r
 }
 
-/// Struct literal: `%Mod{k: v}` with defaults map; unknown keys raise KeyError.
-#[no_mangle]
-pub extern "C" fn tn_struct_build(c: *mut Ctx, defaults: Term, pairs: *const Term, n: u64) -> Term {
-    let ctx = cx(c);
-    for i in 0..n as usize {
-        let k = unsafe { *pairs.add(2 * i) };
-        if map::find(defaults, k).is_none() {
-            return ctx.badkey(k, defaults);
-        }
-    }
-    tn_map_put_many(c, defaults, pairs, n)
-}
-
 // ---------------- atoms & conversion ----------------
 
 #[no_mangle]
@@ -1045,7 +933,10 @@ pub extern "C" fn tn_integer_to_binary(c: *mut Ctx, i: Term, base: Term) -> Term
 #[no_mangle]
 pub extern "C" fn tn_binary_to_integer(c: *mut Ctx, b: Term, base: Term) -> Term {
     let ctx = cx(c);
-    if !is_binary(b) || !is_small(base) {
+    if !is_small(base) || !(2..=36).contains(&small_val(base)) {
+        return ctx.badarg_args(&[(2, "not an integer in the range 2 through 36")]);
+    }
+    if !is_binary(b) {
         return ctx.badarg("argument error");
     }
     let s = String::from_utf8_lossy(bin_bytes(b)).into_owned();
@@ -1053,44 +944,6 @@ pub extern "C" fn tn_binary_to_integer(c: *mut Ctx, b: Term, base: Term) -> Term
         Some(t) => t,
         None => ctx.badarg_args(&[(1, "not a textual representation of an integer")]),
     }
-}
-
-/// Integer.parse-like: returns {int, rest} | :error
-#[no_mangle]
-pub extern "C" fn tn_integer_parse(c: *mut Ctx, b: Term, base: Term) -> Term {
-    let ctx = cx(c);
-    if !is_binary(b) || !is_small(base) {
-        return ctx.badarg("argument error");
-    }
-    let base_n = small_val(base) as u32;
-    let bytes = bin_bytes(b);
-    let mut i = 0;
-    if i < bytes.len() && (bytes[i] == b'-' || bytes[i] == b'+') {
-        i += 1;
-    }
-    let start_digits = i;
-    while i < bytes.len() && (bytes[i] as char).is_digit(base_n) {
-        i += 1;
-    }
-    if i == start_digits {
-        return atom(a::ERROR);
-    }
-    let s = String::from_utf8_lossy(&bytes[..i]).into_owned();
-    let total = bytes.len();
-    let bi = ctx.push(b);
-    let n = match num::parse_int(ctx, &s, base_n) {
-        Some(n) => n,
-        None => {
-            ctx.truncate(bi);
-            return atom(a::ERROR);
-        }
-    };
-    let ni = ctx.push(n);
-    let rest = ctx.sub_binary(ctx.get(bi), i, total - i);
-    let ri = ctx.push(rest);
-    let t = ctx.tuple(&[ctx.get(ni), ctx.get(ri)]);
-    ctx.truncate(bi);
-    t
 }
 
 /// Float.parse-like: {float, rest} | :error
@@ -1224,30 +1077,17 @@ pub extern "C" fn tn_float_short(c: *mut Ctx, f: Term) -> Term {
 }
 
 #[no_mangle]
-pub extern "C" fn tn_float_to_binary_decimals(c: *mut Ctx, f: Term, d: Term) -> Term {
-    let ctx = cx(c);
-    if !is_float(f) || !is_small(d) {
-        return ctx.badarg("argument error");
-    }
-    let s = format!("{:.*}", small_val(d).max(0) as usize, float_val(f));
-    ctx.str(&s)
-}
-
-#[no_mangle]
-pub extern "C" fn tn_float_inspect(c: *mut Ctx, f: Term) -> Term {
-    let ctx = cx(c);
-    let s = num::float_inspect(float_val(f));
-    ctx.str(&s)
-}
-
-#[no_mangle]
 pub extern "C" fn tn_to_float(c: *mut Ctx, n: Term) -> Term {
     let ctx = cx(c);
     if is_float(n) {
         return n;
     }
     if is_integer(n) {
-        return ctx.float(num::int_to_f64(n));
+        let f = num::int_to_f64(n);
+        // floats are finite on the BEAM
+        if f.is_finite() {
+            return ctx.float(f);
+        }
     }
     ctx.badarg_args(&[(1, "not a number")])
 }
@@ -1306,38 +1146,6 @@ pub extern "C" fn tn_floor(c: *mut Ctx, n: Term) -> Term {
         return float_to_int(ctx, float_val(n).floor());
     }
     ctx.badarg_args(&[(1, "not a number")])
-}
-
-/// Float.round(f, digits) / floor / ceil with precision. mode: 0 round, 1 floor, 2 ceil
-#[no_mangle]
-pub extern "C" fn tn_float_round(c: *mut Ctx, f: Term, digits: Term, mode: Term) -> Term {
-    let ctx = cx(c);
-    if !is_float(f) || !is_small(digits) {
-        return ctx.badarg("argument error");
-    }
-    let x = float_val(f);
-    let d = small_val(digits);
-    let r = match small_val(mode) {
-        0 => {
-            // Round half away from zero using decimal string arithmetic for exactness.
-            let s = format!("{:.*}", d as usize + 3, x);
-            let v: f64 = s.parse().unwrap_or(x);
-            let p = 10f64.powi(d as i32);
-            let y = (v * p).round() / p;
-            // Use formatting to avoid representation error like 2.675 -> 2.67 vs 2.68.
-            let s2 = format!("{:.*}", d as usize, y);
-            s2.parse().unwrap_or(y)
-        }
-        1 => {
-            let p = 10f64.powi(d as i32);
-            (x * p).floor() / p
-        }
-        _ => {
-            let p = 10f64.powi(d as i32);
-            (x * p).ceil() / p
-        }
-    };
-    ctx.float(if r == 0.0 && x < 0.0 && small_val(mode) != 0 { -0.0 } else { r })
 }
 
 // ---------------- identity / misc ----------------
@@ -1671,11 +1479,6 @@ pub extern "C" fn tn_alloc(c: *mut Ctx, words: u64) -> *mut u64 {
 pub extern "C" fn tn_gc(c: *mut Ctx) -> Term {
     cx(c).gc(0);
     atom(a::OK)
-}
-
-#[no_mangle]
-pub extern "C" fn tn_gc_count(c: *mut Ctx) -> Term {
-    small(cx(c).gc_count as i64)
 }
 
 #[no_mangle]

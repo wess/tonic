@@ -1,9 +1,77 @@
+# Modified for Tonic; Erlang/OTP 27.3 source/port. Apache-2.0; see licenses/sources.json and notice.
 defmodule :timer do
   def sleep(ms), do: Process.sleep(ms)
   def seconds(s), do: s * 1000
   def minutes(m), do: m * 60_000
   def hours(h), do: h * 3_600_000
-# Modified for Tonic; Erlang/OTP 27.3 source/port. Apache-2.0; see licenses/sources.json and notice.
+  def hms(h, m, s), do: hours(h) + minutes(m) + seconds(s)
+
+  # One-shot timers are runtime timers; interval timers are processes tied to
+  # the requesting process, as OTP's timer server ties them.
+  def send_after(time, msg), do: send_after(time, self(), msg)
+
+  def send_after(time, dest, msg) when is_integer(time) and time >= 0 do
+    {:ok, {:send_local, :erlang.send_after(time, dest, msg)}}
+  end
+
+  def send_after(_, _, _), do: {:error, :badarg}
+
+  def apply_after(time, m, f, a) when is_integer(time) and time >= 0 and is_atom(m) and is_atom(f) and is_list(a) do
+    {:ok, {:once, spawn_after(time, fn -> apply(m, f, a) end)}}
+  end
+
+  def apply_after(_, _, _, _), do: {:error, :badarg}
+
+  def exit_after(time, reason), do: exit_after(time, self(), reason)
+  def exit_after(time, pid, reason), do: apply_after(time, :erlang, :exit, [pid, reason])
+  def kill_after(time), do: exit_after(time, self(), :kill)
+  def kill_after(time, pid), do: exit_after(time, pid, :kill)
+
+  def send_interval(time, msg), do: send_interval(time, self(), msg)
+
+  def send_interval(time, dest, msg) when is_integer(time) and time >= 0 do
+    {:ok, {:interval, interval(time, fn -> send(dest, msg) end)}}
+  end
+
+  def send_interval(_, _, _), do: {:error, :badarg}
+
+  def apply_interval(time, m, f, a) when is_integer(time) and time >= 0 and is_atom(m) and is_atom(f) and is_list(a) do
+    {:ok, {:interval, interval(time, fn -> spawn(m, f, a) end)}}
+  end
+
+  def apply_interval(_, _, _, _), do: {:error, :badarg}
+
+  def cancel({:send_local, ref}) when is_reference(ref), do: (:erlang.cancel_timer(ref); {:ok, :cancel})
+  def cancel({kind, pid}) when kind in [:once, :interval] and is_pid(pid), do: (Process.exit(pid, :kill); {:ok, :cancel})
+  def cancel(_), do: {:error, :badarg}
+
+  defp spawn_after(time, fun) do
+    spawn(fn ->
+      Process.sleep(time)
+      fun.()
+    end)
+  end
+
+  defp interval(time, fun) do
+    owner = self()
+
+    spawn(fn ->
+      ref = Process.monitor(owner)
+      interval_loop(time, fun, ref, System.monotonic_time(:millisecond) + time)
+    end)
+  end
+
+  defp interval_loop(time, fun, ref, next) do
+    wait = max(next - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {:DOWN, ^ref, _, _, _} -> :ok
+    after
+      wait ->
+        fun.()
+        interval_loop(time, fun, ref, next + time)
+    end
+  end
   def tc(fun) do
     t = System.monotonic_time(:microsecond)
     r = fun.()
@@ -557,8 +625,23 @@ defmodule :erlang do
   def float_to_list(float, options), do: :tonic.str_to_charlist(:erlang.float_to_binary(float, options))
   def float_to_binary(float, options), do: :tonic.float_to_binary_opts(float, options)
   def binary_to_list(binary, from, to), do: :binary.bin_to_list(binary, from - 1, to - from + 1)
-  def list_to_bitstring(list), do: :erlang.iolist_to_binary(list)
+  def list_to_bitstring(list) when is_list(list), do: bits_concat(list, <<>>)
+  def list_to_bitstring(other), do: :erlang.error(:badarg, [other])
+
+  # iolist whose elements may be bitstrings of any size
+  defp bits_concat([], acc), do: acc
+  defp bits_concat([h | t], acc) when is_integer(h) and h >= 0 and h <= 255, do: bits_concat(t, <<acc::bitstring, h>>)
+  defp bits_concat([h | t], acc) when is_bitstring(h), do: bits_concat(t, <<acc::bitstring, h::bitstring>>)
+  defp bits_concat([h | t], acc) when is_list(h), do: bits_concat(t, bits_concat(h, acc))
+  defp bits_concat(tail, acc) when is_bitstring(tail), do: <<acc::bitstring, tail::bitstring>>
+  defp bits_concat(_, _), do: :erlang.error(:badarg)
+  def binary_part(bin, {start, length}), do: :erlang.binary_part(bin, start, length)
+  def bitstring_to_list(bin) when is_bitstring(bin), do: bits_to_list(bin)
   def bitstring_to_list(bin), do: :erlang.binary_to_list(bin)
+
+  defp bits_to_list(<<byte, rest::bitstring>>), do: [byte | bits_to_list(rest)]
+  defp bits_to_list(<<>>), do: []
+  defp bits_to_list(tail), do: [tail]
   def split_binary(bin, pos), do: {:binary.part(bin, 0, pos), :binary.part(bin, pos, byte_size(bin) - pos)}
   def atom_to_binary(atom, _encoding), do: :erlang.atom_to_binary(atom)
   def binary_to_atom(bin, _encoding), do: :erlang.binary_to_atom(bin)
@@ -761,7 +844,7 @@ defmodule :erlang do
 
   defp fix_info({:group_leader, nil}), do: {:group_leader, Tonic.StdIO.pid()}
   defp fix_info(other), do: other
-  def processes, do: Process.list()
+  def processes, do: :tonic.processes()
   def halt, do: System.halt(0)
   def halt(status), do: System.halt(status)
   def halt(status, _opts), do: System.halt(status)
@@ -924,6 +1007,35 @@ defmodule :calendar do
   def day_of_the_week(y, m, d), do: rem(date_to_gregorian_days(y, m, d) + 5, 7) + 1
 
   def time_to_seconds({h, m, s}), do: h * 3600 + m * 60 + s
+
+  def iso_week_number do
+    {date, _} = local_time()
+    iso_week_number(date)
+  end
+
+  def iso_week_number({year, month, day}) do
+    d = date_to_gregorian_days({year, month, day})
+    w01 = iso_w01_1(year)
+    next = iso_w01_1(year + 1)
+
+    cond do
+      w01 <= d and d < next ->
+        {year, div(d - w01, 7) + 1}
+
+      d < w01 ->
+        long = day_of_the_week(year - 1, 1, 1) == 4 or day_of_the_week(year - 1, 12, 31) == 4
+        {year - 1, if(long, do: 53, else: 52)}
+
+      true ->
+        {year + 1, 1}
+    end
+  end
+
+  defp iso_w01_1(year) do
+    d0101 = date_to_gregorian_days(year, 1, 1)
+    dow = day_of_the_week(year, 1, 1)
+    if dow <= 4, do: d0101 - dow + 1, else: d0101 + 7 - dow + 1
+  end
   def seconds_to_time(secs), do: {div(secs, 3600), div(rem(secs, 3600), 60), rem(secs, 60)}
   def seconds_to_daystime(secs), do: {div(secs, 86400), seconds_to_time(rem(secs, 86400))}
 
@@ -1188,8 +1300,9 @@ defmodule :ets do
 
   def select(tab, ms), do: :ets.select_impl(tab2list(tab), ms)
   def select(tab, ms, limit), do: chunked(select(tab, ms), limit)
-  def select({results, :"$end_of_table"}), do: {results, :"$end_of_table"}
-  def select(:"$end_of_table"), do: :"$end_of_table"
+  def select(cont), do: continue(cont)
+  def match(cont), do: continue(cont)
+  def match_object(cont), do: continue(cont)
   def select_reverse(tab, ms), do: Enum.reverse(select(tab, ms))
   def select_count(tab, ms), do: Enum.count(:ets.select_impl(tab2list(tab), ms), &(&1 == true))
 
@@ -1222,8 +1335,19 @@ defmodule :ets do
     for obj <- objs, {:ok, r} <- [ms_run(ms, obj)], do: r
   end
 
+  # Results are computed once; the continuation carries the rest.
   defp chunked([], _limit), do: :"$end_of_table"
-  defp chunked(list, _limit), do: {list, :"$end_of_table"}
+
+  defp chunked(list, limit) when is_integer(limit) and limit > 0 do
+    {chunk, rest} = Enum.split(list, limit)
+    {chunk, {:tonic_ets_cont, rest, limit}}
+  end
+
+  defp chunked(_list, _limit), do: :erlang.error(:badarg)
+
+  defp continue({:tonic_ets_cont, rest, limit}), do: chunked(rest, limit)
+  defp continue(:"$end_of_table"), do: :"$end_of_table"
+  defp continue(_), do: :erlang.error(:badarg)
 
   defp ms_run([], _obj), do: :nomatch
 
@@ -1548,73 +1672,35 @@ defmodule :elixir_import do
 end
 
 defmodule :atomics do
-  # Arrays of integers in a shared ETS table, keyed by {ref, index}.
-  @tab :"$tonic_atomics"
-
-  def tab do
-    if :ets.whereis(@tab) == :undefined do
-      parent = self()
-
-      spawn(fn ->
-        try do
-          :ets.new(@tab, [:set, :public, :named_table, write_concurrency: true])
-        rescue
-          _ -> :ok
-        end
-
-        Kernel.send(parent, :tonic_atomics_ready)
-
-        receive do
-          :tonic_never -> :ok
-        end
-      end)
-
-      receive do
-        :tonic_atomics_ready -> :ok
-      end
-    end
-
-    @tab
-  end
-
+  # Native arrays of 64-bit cells; see runtime/src/atomics.rs.
   def new(arity, opts) when is_integer(arity) and arity > 0 and is_list(opts) do
-    ref = make_ref()
     signed = Keyword.get(opts, :signed, true)
-    :ets.insert(tab(), {{ref, :info}, arity, signed})
-    for index <- 1..arity, do: :ets.insert(tab(), {{ref, index}, 0})
-    ref
+    if not is_boolean(signed), do: :erlang.error(:badarg)
+    :tonic.atomics_new(arity, signed)
   end
 
-  def put(ref, index, value), do: (:ets.insert(tab(), {{ref, check(ref, index)}, value}); :ok)
-  def get(ref, index), do: :ets.lookup_element(tab(), {ref, check(ref, index)}, 2)
+  def new(_, _), do: :erlang.error(:badarg)
+
+  def put(ref, index, value), do: :tonic.atomics_put(ref, index, value)
+  def get(ref, index), do: :tonic.atomics_get(ref, index)
   def add(ref, index, incr), do: (add_get(ref, index, incr); :ok)
-  def add_get(ref, index, incr), do: :ets.update_counter(tab(), {ref, check(ref, index)}, incr)
-  def sub(ref, index, decr), do: add(ref, index, -decr)
-  def sub_get(ref, index, decr), do: add_get(ref, index, -decr)
+  def add_get(ref, index, incr), do: :tonic.atomics_add_get(ref, index, incr)
+  def sub(ref, index, decr) when is_integer(decr), do: add(ref, index, -decr)
+  def sub_get(ref, index, decr) when is_integer(decr), do: add_get(ref, index, -decr)
+  def exchange(ref, index, value), do: :tonic.atomics_exchange(ref, index, value)
 
-  def exchange(ref, index, value) do
-    old = get(ref, index)
-    put(ref, index, value)
-    old
-  end
-
-  def compare_exchange(ref, index, expected, desired) do
-    case get(ref, index) do
-      ^expected -> put(ref, index, desired) && :ok
-      actual -> actual
-    end
-  end
+  def compare_exchange(ref, index, expected, desired),
+    do: :tonic.atomics_compare_exchange(ref, index, expected, desired)
 
   def info(ref) do
-    [{_, size, _}] = :ets.lookup(tab(), {ref, :info})
-    %{size: size, max: 18_446_744_073_709_551_615, min: 0, memory: size * 8}
-  end
+    size = :tonic.atomics_size(ref)
 
-  defp check(ref, index) do
-    case :ets.lookup(tab(), {ref, :info}) do
-      [{_, size, _}] when is_integer(index) and index >= 1 and index <= size -> index
-      _ -> :erlang.error(:badarg)
-    end
+    {min, max} =
+      if :tonic.atomics_signed(ref),
+        do: {-9_223_372_036_854_775_808, 9_223_372_036_854_775_807},
+        else: {0, 18_446_744_073_709_551_615}
+
+    %{size: size, max: max, min: min, memory: size * 8 + 16}
   end
 end
 

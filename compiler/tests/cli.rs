@@ -1,8 +1,11 @@
+#[path = "support/process.rs"]
+mod process;
+
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 fn scratch(name: &str) -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -16,54 +19,8 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-fn output(mut command: Command) -> Output {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().unwrap();
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
-    let out = std::thread::spawn(move || {
-        use std::io::Read;
-        let mut bytes = Vec::new();
-        let mut stream = stdout;
-        stream.read_to_end(&mut bytes).unwrap();
-        bytes
-    });
-    let err = std::thread::spawn(move || {
-        use std::io::Read;
-        let mut bytes = Vec::new();
-        let mut stream = stderr;
-        stream.read_to_end(&mut bytes).unwrap();
-        bytes
-    });
-    let deadline = Instant::now() + Duration::from_secs(180);
-    let status = loop {
-        if let Some(status) = child.try_wait().unwrap() {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            #[cfg(unix)]
-            unsafe {
-                extern "C" {
-                    fn kill(pid: i32, signal: i32) -> i32;
-                }
-                kill(-(child.id() as i32), 9);
-            }
-            let _ = child.kill();
-            child.wait().unwrap();
-            panic!("command timed out: {command:?}");
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    };
-    Output {
-        status,
-        stdout: out.join().unwrap(),
-        stderr: err.join().unwrap(),
-    }
+fn output(command: Command) -> Output {
+    process::execute(command, Duration::from_secs(180))
 }
 
 fn tonic(args: &[&str]) -> Output {
@@ -267,5 +224,103 @@ IO.inspect({length(result), Enum.sum(Enum.map(result, & &1.value)), Enum.all?(re
     let result = output(command);
     success(&result);
     assert_eq!(result.stdout, b"{30, 465, true, true}\n");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn arguments_are_validated_before_compiling() {
+    let help = tonic(&["--help"]);
+    success(&help);
+    assert!(String::from_utf8_lossy(&help.stdout).contains("usage:"));
+    let unknown = tonic(&["frob"]);
+    assert_eq!(unknown.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("unknown command \"frob\""));
+    let dir = scratch("arguments");
+    let source = dir.join("keep.exs");
+    fs::write(&source, "IO.puts(1)\n").unwrap();
+    let flag = tonic(&["run", "--bogus", text(&source)]);
+    assert_eq!(flag.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&flag.stderr).contains("unknown option \"--bogus\""));
+    let missing = tonic(&["build", text(&source), "-o"]);
+    assert_eq!(missing.status.code(), Some(2));
+    let clobber = tonic(&["build", text(&source), "-o", text(&source)]);
+    assert_eq!(clobber.status.code(), Some(1));
+    assert_eq!(fs::read_to_string(&source).unwrap(), "IO.puts(1)\n");
+    let duplicate = dir.join("duplicate.exs");
+    fs::write(&duplicate, "defmodule A do\nend\ndefmodule A do\nend\n").unwrap();
+    let result = tonic(&["check", text(&duplicate)]);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("module A is already defined at"));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn orderly_script_exits_set_the_status_quietly() {
+    let dir = scratch("exits");
+    for (reason, code, quiet) in [
+        (":normal", 0, true),
+        (":shutdown", 0, true),
+        ("{:shutdown, :done}", 0, true),
+        ("{:shutdown, 7}", 7, true),
+        ("{:shutdown, 300}", 44, true),
+        (":failed", 1, false),
+    ] {
+        let script = dir.join("exit.exs");
+        fs::write(&script, format!("IO.puts(:before)\nexit({})\n", reason)).unwrap();
+        let result = tonic(&["run", text(&script)]);
+        assert_eq!(result.status.code(), Some(code), "{reason}");
+        assert_eq!(String::from_utf8_lossy(&result.stdout), "before\n");
+        assert_eq!(result.stderr.is_empty(), quiet, "{reason}: {}", String::from_utf8_lossy(&result.stderr));
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn deeply_nested_source_compiles() {
+    let dir = scratch("deep");
+    let script = dir.join("deep.exs");
+    let sum = vec!["1"; 5000].join(" + ");
+    let list: Vec<String> = (0..50_000).map(|i| i.to_string()).collect();
+    let nested = format!("{}{}", "[".repeat(5000), "]".repeat(5000));
+    fs::write(
+        &script,
+        format!("IO.puts({sum})\nIO.puts(length([{}]))\nIO.puts(length({nested}))\n", list.join(",")),
+    )
+    .unwrap();
+    let result = tonic(&["run", text(&script)]);
+    success(&result);
+    assert_eq!(String::from_utf8_lossy(&result.stdout), "5000\n50000\n1\n");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn terminated_programs_flush_output_and_leave_nothing_behind() {
+    extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+    let dir = scratch("signals");
+    let script = dir.join("forever.exs");
+    fs::write(&script, "IO.puts(\"up\")\nProcess.sleep(:infinity)\n").unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tonic"))
+        .args(["run", text(&script)])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    // piped output is buffered, but must arrive while the program runs
+    let mut line = [0u8; 3];
+    std::io::Read::read_exact(&mut stdout, &mut line).unwrap();
+    assert_eq!(&line, b"up\n");
+    let program = std::env::temp_dir().join(format!("tonic-run-{}", child.id()));
+    assert!(program.exists());
+    unsafe { kill(child.id() as i32, 15) };
+    let status = child.wait().unwrap();
+    assert_eq!(status.code(), Some(143));
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(!program.exists(), "temporary executable left behind");
+    let stray = Command::new("pgrep").args(["-f", text(&program)]).output().unwrap();
+    assert!(stray.stdout.is_empty(), "program still running after tonic exited");
     fs::remove_dir_all(dir).unwrap();
 }

@@ -2,6 +2,7 @@
 //! tonic runtime: values, garbage collection, processes (on tokio) and BIFs
 //! for compiled Elixir programs.
 
+pub mod atomics;
 pub mod atoms;
 pub mod beamhash;
 pub mod bif_bin;

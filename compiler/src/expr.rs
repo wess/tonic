@@ -1728,7 +1728,6 @@ impl Expander {
             size,
             little,
             signed,
-            unit,
         }
     }
 
@@ -1749,7 +1748,6 @@ impl Expander {
                 size: None,
                 little: false,
                 signed: false,
-                unit: 8,
             });
         }
         let val = self.expr(&v, cx)?;
@@ -1944,7 +1942,6 @@ impl Expander {
             arity,
             clauses: cs,
             params,
-            free: vec![],
             module: cx.module().to_string(),
             parent: cx.fun.clone(),
             line,
@@ -1985,6 +1982,13 @@ impl Expander {
                                         .collect();
                                     self.capture(&E::call(name, args, line), line, cx)
                                 }
+                                // a macro or guard: &is_digit/1 is &is_digit(&1)
+                                _ if arity > 0 => {
+                                    let args = (1..=arity)
+                                        .map(|i| E::new(K::CapArg(i as _), line))
+                                        .collect();
+                                    self.capture(&E::call(name, args, line), line, cx)
+                                }
                                 _ => {
                                     err(cx, line, &format!("undefined function {}/{}", name, arity))
                                 }
@@ -2013,6 +2017,20 @@ impl Expander {
                                         Target::Bif(format!("tn_{}", name)),
                                     ));
                                 }
+                                // a remote macro or guard: &M.is_digit/1 is &M.is_digit(&1)
+                                let guard = self.mods.get(&m).is_some_and(|md| md.guards.contains_key(&(name.clone(), arity)));
+                                if arity > 0 && (guard || self.macros.contains_key(&(m.clone(), name.clone(), arity))) {
+                                    let call = E::new(
+                                        K::Remote {
+                                            recv: recv.clone(),
+                                            name: name.clone(),
+                                            args: (1..=arity).map(|i| E::new(K::CapArg(i as _), line)).collect(),
+                                            parens: true,
+                                        },
+                                        line,
+                                    );
+                                    return self.capture(&call, line, cx);
+                                }
                                 return Ok(CE::FunRef(key, Target::Dynamic));
                             }
                             // &mod.fun/arity with a variable module
@@ -2034,7 +2052,6 @@ impl Expander {
                                     body,
                                 }],
                                 params: (0..arity).map(|_| self.new_var()).collect(),
-                                free: vec![],
                                 module: cx.module().to_string(),
                                 parent: cx.fun.clone(),
                                 line,
@@ -2070,7 +2087,6 @@ impl Expander {
                 body,
             }],
             params: (0..n).map(|_| self.new_var()).collect(),
-            free: vec![],
             module: cx.module().to_string(),
             parent: cx.fun.clone(),
             line,
@@ -2503,11 +2519,8 @@ impl Expander {
                     spec.is_none() || matches!(&spec, Some(E { k: K::Int(n), .. }) if n == "8");
                 if segs.len() == 1 && simple_var && (utf8 || byte) {
                     let bin = self.expr(&r, cx)?;
-                    let coll = if utf8 {
-                        CE::bif("tn_str_to_charlist", vec![bin])
-                    } else {
-                        CE::bif("tn_bin_to_list", vec![bin])
-                    };
+                    let helper = if utf8 { "gen_utf8" } else { "gen_bytes" };
+                    let coll = CE::Call(FunKey::new("Elixir.Tonic.Internal", helper, 1), vec![bin]);
                     Some((v, coll))
                 } else {
                     // General case: split the bitstring into chunks matching the
@@ -2516,7 +2529,9 @@ impl Expander {
                     let mut pat_segs: Vec<E> = segs[..segs.len() - 1].to_vec();
                     pat_segs.push(l.clone());
                     let rest = E::new(K::Var("tonic__bin_gen_rest".into()), line);
-                    let mut split_segs = pat_segs.clone();
+                    // chunks are cut by segment sizes alone; a chunk whose
+                    // literal segments differ is skipped, not the end
+                    let mut split_segs: Vec<E> = pat_segs.iter().map(size_only).collect();
                     split_segs.push(E::new(
                         K::Bin {
                             op: "::".into(),
@@ -2588,7 +2603,6 @@ impl Expander {
                     arity: 2,
                     clauses: vec![clause, skip],
                     params: vec![self.new_var(), self.new_var()],
-                    free: vec![],
                     module: cx.module().to_string(),
                     parent: cx.fun.clone(),
                     line: 0,
@@ -2755,7 +2769,6 @@ impl Expander {
                                     size: None,
                                     little: false,
                                     signed: false,
-                                    unit: 8,
                                 }),
                                 K::Bits(inner) => {
                                     for s in inner {
@@ -2783,7 +2796,6 @@ impl Expander {
                         size: None,
                         little: false,
                         signed: false,
-                        unit: 8,
                     }),
                     Pat::Bin(inner) => segs.extend(inner),
                     p => segs.push(BinSeg {
@@ -2792,7 +2804,6 @@ impl Expander {
                         size: None,
                         little: false,
                         signed: false,
-                        unit: 8,
                     }),
                 }
                 Ok(Pat::Bin(segs))
@@ -2963,9 +2974,14 @@ impl Expander {
             }
             K::Var(_) => err(cx, k.line, "illegal use of variable in map key inside match, variables can only be used as map keys in a match if they are pinned with ^"),
             _ => {
+                // pins inside a composite key (`%{{^a, ^b} => v}`) read the variables
+                let k = crate::collect::map_expr(k, &mut |node| match &node.k {
+                    K::Un { op, e } if op == "^" && matches!(e.k, K::Var(_)) => Some((**e).clone()),
+                    _ => None,
+                });
                 let saved = cx.guard;
                 cx.guard = true;
-                let r = self.expr(k, cx);
+                let r = self.expr(&k, cx);
                 cx.guard = saved;
                 r
             }
@@ -2989,7 +3005,6 @@ impl Expander {
                 size: None,
                 little: false,
                 signed: false,
-                unit: 8,
             });
         }
         let p = self.pat(&v, cx, b)?;
@@ -3004,13 +3019,6 @@ fn mul_const(e: CE, k: i64) -> CE {
     match e {
         CE::Lit(Lit::Int(v)) => CE::int(v * k),
         e => CE::bif("tn_mul", vec![e, CE::int(k)]),
-    }
-}
-
-fn div_const(e: CE, k: i64) -> CE {
-    match e {
-        CE::Lit(Lit::Int(v)) => CE::int(v / k),
-        e => CE::bif("tn_div", vec![e, CE::int(k)]),
     }
 }
 
@@ -3705,5 +3713,20 @@ fn resolve_unquote_calls(e: &E) -> Option<E> {
         None
     } else {
         Some(out)
+    }
+}
+
+/// A binary-generator segment with its literal or pinned value replaced by
+/// `_`, keeping the type and size so it cuts the same number of bits.
+fn size_only(seg: &E) -> E {
+    let wild = |line| E::new(K::Var("_".into()), line);
+    let literal = |e: &E| matches!(&e.k, K::Int(_) | K::Float(_)) || matches!(&e.k, K::Un { op, .. } if op == "^" || op == "-");
+    match &seg.k {
+        K::Bin { op, l, r } if op == "::" && literal(l) => E::new(
+            K::Bin { op: "::".into(), l: Box::new(wild(l.line)), r: r.clone() },
+            seg.line,
+        ),
+        _ if literal(seg) => wild(seg.line),
+        _ => seg.clone(),
     }
 }

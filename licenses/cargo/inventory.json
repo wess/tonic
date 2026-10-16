@@ -1,5 +1,5 @@
 {
-  "cargolocksha256": "9302c607bff1a88f913d37d1610a47717a13cc5fd1a1894a001546d8081b4d89",
+  "cargolocksha256": "821607f9a79c5f8eec2e74bfccff14e38589d0d181bb096f3d1b83fdfe07f2bf",
   "packages": [
     {
       "name": "autocfg",
@@ -64,6 +64,23 @@
           "file": "licenses/cargo/blockbuffer/0.10.4/licensemit.txt",
           "sha256": "d5c22aa3118d240e877ad41c5d9fa232f9c77d757d4aac0c2f943afc0a95e0ef",
           "upstreamfile": "LICENSE-MIT"
+        }
+      ]
+    },
+    {
+      "name": "bytes",
+      "version": "1.12.1",
+      "license": "MIT",
+      "selected": "MIT",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04",
+      "origin": "https://crates.io/crates/bytes/1.12.1",
+      "repository": "https://github.com/tokio-rs/bytes",
+      "documents": [
+        {
+          "file": "licenses/cargo/bytes/1.12.1/license.txt",
+          "sha256": "45f522cacecb1023856e46df79ca625dfc550c94910078bd8aec6e02880b3d42",
+          "upstreamfile": "LICENSE"
         }
       ]
     },
@@ -345,6 +362,23 @@
           "file": "licenses/cargo/md5/0.10.6/licensemit.txt",
           "sha256": "b4eb00df6e2a4d22518fcaa6a2b4646f249b3a3c9814509b22bd2091f1392ff1",
           "upstreamfile": "LICENSE-MIT"
+        }
+      ]
+    },
+    {
+      "name": "mio",
+      "version": "1.2.3",
+      "license": "MIT",
+      "selected": "MIT",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "4b18443e9c262bfe8fa82f51666e2642c53393f7e5c27b3e1aeab922cff5b9d8",
+      "origin": "https://crates.io/crates/mio/1.2.3",
+      "repository": "https://github.com/tokio-rs/mio",
+      "documents": [
+        {
+          "file": "licenses/cargo/mio/1.2.3/license.txt",
+          "sha256": "07919255c7e04793d8ea760d6c2ce32d19f9ff02bdbdde3ce90b1e1880929a9b",
+          "upstreamfile": "LICENSE"
         }
       ]
     },
@@ -718,6 +752,28 @@
       ]
     },
     {
+      "name": "socket2",
+      "version": "0.6.5",
+      "license": "MIT OR Apache-2.0",
+      "selected": "Apache-2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4",
+      "origin": "https://crates.io/crates/socket2/0.6.5",
+      "repository": "https://github.com/rust-lang/socket2",
+      "documents": [
+        {
+          "file": "licenses/cargo/socket2/0.6.5/licenseapache.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "upstreamfile": "LICENSE-APACHE"
+        },
+        {
+          "file": "licenses/cargo/socket2/0.6.5/licensemit.txt",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "upstreamfile": "LICENSE-MIT"
+        }
+      ]
+    },
+    {
       "name": "syn",
       "version": "3.0.6",
       "license": "MIT OR Apache-2.0",
@@ -931,6 +987,33 @@
       ]
     },
     {
+      "name": "wasi",
+      "version": "0.11.1+wasi-snapshot-preview1",
+      "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "selected": "Apache-2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b",
+      "origin": "https://crates.io/crates/wasi/0.11.1+wasi-snapshot-preview1",
+      "repository": "https://github.com/bytecodealliance/wasi",
+      "documents": [
+        {
+          "file": "licenses/cargo/wasi/0.11.1+wasi-snapshot-preview1/licenseapache.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "upstreamfile": "LICENSE-APACHE"
+        },
+        {
+          "file": "licenses/cargo/wasi/0.11.1+wasi-snapshot-preview1/licenseapache2.0withllvmexception.txt",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+          "upstreamfile": "LICENSE-Apache-2.0_WITH_LLVM-exception"
+        },
+        {
+          "file": "licenses/cargo/wasi/0.11.1+wasi-snapshot-preview1/licensemit.txt",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "upstreamfile": "LICENSE-MIT"
+        }
+      ]
+    },
+    {
       "name": "windows-link",
       "version": "0.2.1",
       "license": "MIT OR Apache-2.0",
@@ -969,6 +1052,28 @@
         },
         {
           "file": "licenses/cargo/windowssys/0.59.0/licensemit.txt",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "upstreamfile": "license-mit"
+        }
+      ]
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.61.2",
+      "license": "MIT OR Apache-2.0",
+      "selected": "Apache-2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc",
+      "origin": "https://crates.io/crates/windows-sys/0.61.2",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "documents": [
+        {
+          "file": "licenses/cargo/windowssys/0.61.2/licenseapache2.0.txt",
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b",
+          "upstreamfile": "license-apache-2.0"
+        },
+        {
+          "file": "licenses/cargo/windowssys/0.61.2/licensemit.txt",
           "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
           "upstreamfile": "license-mit"
         }

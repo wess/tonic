@@ -1,6 +1,6 @@
 # Compatibility
 
-Tonic 0.0.1 compiles supported Elixir and Erlang source to LLVM and links a native runtime. `.exs` scripts use the same compiler. Native executables do not contain BEAM bytecode.
+Tonic 0.1.0-beta.1 compiles supported Elixir and Erlang source to LLVM and links a native runtime. `.exs` scripts use the same compiler. Native executables do not contain BEAM bytecode.
 
 ## Package coverage
 
@@ -58,3 +58,26 @@ Tonic implements a subset of the `erl_nif` API: terms, binaries, resources, envi
 `:gen_tcp` provides TCP listen, accept, connect, send, recv, close, shutdown and controlling process, in passive, `active: :once`, `active: true` and `active: N` modes. `:inet` covers `setopts`, `getopts`, `sockname`, `peername`, `getstat`, `port`, address parsing and formatting. Waiting socket operations run on the runtime's I/O driver and do not block scheduler threads. Only `:raw` packets are supported; `:erlang.decode_packet/3` handles raw, length-prefixed, line and HTTP packets. SSL, UDP and ports are not available.
 
 Distributed BEAM nodes, BEAM bytecode loading and full compatibility with undocumented OTP internals are outside this release's supported surface. Passing the source and runtime tests does not establish those capabilities.
+
+## Known differences
+
+These differ from Elixir 1.18 / OTP 27 in this release. Each is either intentional or tracked in TODO.md.
+
+- Redefining a module (a second `defmodule` with the same name) is a compile error; Elixir replaces the module at run time.
+- `:erlang.phash2/1,2` uses a different hash function. Values are stable within Tonic but differ from the BEAM, so do not persist or share them between the two.
+- `Macro.expand/2` and `Macro.expand_once/2` expand aliases and remote user macros (`M.macro(...)`), but not Kernel macros such as `if` and `|>`, imported macros called without their module, or `defguard` guards.
+- `URI.new/1` and `:uri_string.parse/1` accept some malformed URIs the BEAM rejects (for example a space in the host) and reject some it accepts.
+- `@moduledoc` and `@doc` read inside a function body return `nil`.
+- `:calendar.system_time_to_rfc3339/1,2` and `:calendar.rfc3339_to_system_time/1,2` are not implemented.
+- Compiler warnings for unused variables, ungrouped clauses and duplicate map keys are not emitted, and some invalid programs Elixir rejects (a macro called without `require`, `cond do end`) are accepted.
+- Runtime stack traces can omit or misreport line numbers inside functions.
+- A `quote` of a sigil omits the `delimiter:` metadata.
+- `:atomics` and `:counters` arrays are never freed.
+- `:zlib` is not available.
+- `:re` with `[:unicode]` but without `:ucp` matches `\w` and similar classes against ASCII only; use `~r/.../u` (which sets `:ucp`) for Unicode word characters.
+- Converting a very large integer to a float rounds correctly (IEEE 754); the BEAM can differ in the last digit.
+- `Code.string_to_quoted/1` error locations report line 0 without a column, and a compiled regex's `re_pattern` is not a real PCRE binary.
+- Small maps with atom keys print keys in source order rather than atom-table order.
+- Memory: a process holding a large amount of live data can peak at about four times that size while its heap grows, and each process starts at roughly 35 KB, compared to about 3 KB on the BEAM.
+- `mix test` with `compilers: [:tonic]` cannot start the application, since no BEAM files are produced; run tests with the default compilers.
+

@@ -64,6 +64,10 @@ defmodule Record do
     end)
     {:{}, [], [tag | entries]}
   end
+  # user(record): the record as a keyword list
+  def expand(tag, fields, [record], _context) do
+    {{:., [], [Record, :__keyword__]}, [], [tag, Keyword.keys(fields), record]}
+  end
   def expand(_tag, fields, [record, field], _context) when is_atom(field) do
     {{:., [], [:erlang, :element]}, [], [index(fields, field) + 1, record]}
   end
@@ -74,6 +78,21 @@ defmodule Record do
     end)
   end
   def expand(_tag, _fields, _args, _context), do: raise(ArgumentError, "invalid record arguments")
+
+  @doc false
+  def __keyword__(tag, names, record) do
+    if is_tuple(record) and tuple_size(record) == length(names) + 1 and elem(record, 0) == tag do
+      Enum.zip(names, tl(Tuple.to_list(record)))
+    else
+      raise ArgumentError,
+            "expected argument to be a literal atom, literal keyword or a #{inspect(tag)} record, got runtime: #{inspect(record)}"
+    end
+  end
+
+  defguard is_record(data) when is_tuple(data) and tuple_size(data) > 0 and is_atom(elem(data, 0))
+
+  defguard is_record(data, kind)
+           when is_atom(kind) and is_tuple(data) and tuple_size(data) > 0 and elem(data, 0) == kind
 
   defp index(fields, name) do
     case Enum.find_index(fields, fn {field, _} -> field == name end) do

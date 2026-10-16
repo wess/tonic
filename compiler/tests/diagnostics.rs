@@ -1,61 +1,23 @@
-use std::io::Read;
-use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
+#[path = "support/process.rs"]
+mod process;
 
-fn execute(mut command: Command) -> Output {
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command.spawn().unwrap();
-    let mut stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
-    let out = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stdout.read_to_end(&mut bytes).unwrap();
-        bytes
-    });
-    let err = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stderr.read_to_end(&mut bytes).unwrap();
-        bytes
-    });
-    let deadline = Instant::now() + Duration::from_secs(180);
-    let status = loop {
-        if let Some(status) = child.try_wait().unwrap() {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            #[cfg(unix)]
-            unsafe {
-                extern "C" {
-                    fn kill(pid: i32, signal: i32) -> i32;
-                }
-                kill(-(child.id() as i32), 9);
-            }
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("compiler regression timed out: {command:?}");
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    };
-    Output {
-        status,
-        stdout: out.join().unwrap(),
-        stderr: err.join().unwrap(),
-    }
+use std::process::{Command, Output};
+use std::time::Duration;
+
+fn execute(command: Command) -> Output {
+    process::execute(command, Duration::from_secs(180))
 }
 
 fn run_case(name: &str, source: &str) -> Output {
-    let dir = std::env::temp_dir().join(format!("tonicdiagnostics{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("tonicdiagnostics{}{name}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(format!("{name}.exs"));
     std::fs::write(&path, source).unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_tonic"));
     command.arg("run").arg(&path);
-    execute(command)
+    let output = execute(command);
+    let _ = std::fs::remove_dir_all(&dir);
+    output
 }
 
 #[test]

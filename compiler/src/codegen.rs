@@ -14,7 +14,7 @@
 
 use crate::bifs;
 use crate::core::*;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::rc::Rc;
 use tonic_shared::enc;
@@ -319,7 +319,7 @@ impl Gen {
         }
         for d in defs {
             let fi = self.frame_info(&d.key.module, &d.key.name, d.key.arity);
-            let mut f = FnGen::new(self, &d.key.symbol(), &d.key.module, &format!("{}/{}", d.key.name, d.key.arity));
+            let mut f = FnGen::new(self, &d.key.symbol());
             f.finfo = fi;
             f.gen_named(d);
             let text = f.finish();
@@ -346,7 +346,7 @@ impl Gen {
             }
             let sym = lambda_sym(&lam);
             let fi = self.frame_info(&lam.module, &format!("-{}-fun-0-", lam.parent), lam.arity);
-            let mut f = FnGen::new(self, &sym, &lam.module, &lam.parent);
+            let mut f = FnGen::new(self, &sym);
             f.finfo = fi;
             f.gen_lambda(&lam, &free);
             let text = f.finish();
@@ -727,8 +727,6 @@ fn lambda_free(l: &Lambda) -> Vec<VarId> {
 struct FnGen<'a> {
     g: &'a mut Gen,
     sym: String,
-    module: String,
-    parent: String,
     code: String,
     nslots: u32,
     tmp: u32,
@@ -755,12 +753,10 @@ enum Flow {
 }
 
 impl<'a> FnGen<'a> {
-    fn new(g: &'a mut Gen, sym: &str, module: &str, parent: &str) -> FnGen<'a> {
+    fn new(g: &'a mut Gen, sym: &str) -> FnGen<'a> {
         FnGen {
             g,
             sym: sym.to_string(),
-            module: module.to_string(),
-            parent: parent.to_string(),
             code: String::new(),
             nslots: 0,
             tmp: 0,
@@ -1006,10 +1002,6 @@ impl<'a> FnGen<'a> {
             let v = self.load(&op);
             self.ret(&v);
         }
-    }
-
-    fn parent_name(&self) -> String {
-        self.parent.split('/').next().unwrap_or("").to_string()
     }
 
     // ------------------------------------------------------------------
@@ -1565,9 +1557,11 @@ impl<'a> FnGen<'a> {
                         format!("i64 {}", fa),
                         format!("i64 {}", args.len()),
                     ];
+                    // reload: the BIF may have collected before failing, and
+                    // only the frame slots were updated
                     for i in 0..4 {
-                        fargs.push(match av.get(i + 1) {
-                            Some(a) => a.clone(),
+                        fargs.push(match ops.get(i) {
+                            Some(o) => format!("i64 {}", self.load(o)),
                             None => "i64 0".to_string(),
                         });
                     }
@@ -1844,57 +1838,40 @@ impl<'a> FnGen<'a> {
             self.block(&next);
         }
         // No clause matched.
+        let r = self.t();
         match fail {
-            Fail::Passthrough => {
-                let o = sops[0].clone();
-                if tail {
-                    let v = self.load(&o);
-                    self.ret(&v);
-                } else {
-                    self.put(rs.unwrap(), &o);
-                    self.br(&end);
-                    falls = true;
-                }
+            Fail::CaseClause | Fail::WithClause | Fail::TryClause => {
+                let f = match fail {
+                    Fail::CaseClause => "tn_raise_case_clause",
+                    Fail::WithClause => "tn_raise_with_clause",
+                    _ => "tn_raise_try_clause",
+                };
+                let v = self.load(&sops[0]);
+                self.emit(&format!("{} = call i64 @{}(ptr %ctx, i64 {})", r, f, v));
             }
-            _ => {
-                let r = self.t();
-                match fail {
-                    Fail::CaseClause | Fail::Match | Fail::WithClause | Fail::TryClause => {
-                        let f = match fail {
-                            Fail::CaseClause => "tn_raise_case_clause",
-                            Fail::Match => "tn_raise_match",
-                            Fail::WithClause => "tn_raise_with_clause",
-                            _ => "tn_raise_try_clause",
-                        };
-                        let v = self.load(&sops[0]);
-                        self.emit(&format!("{} = call i64 @{}(ptr %ctx, i64 {})", r, f, v));
-                    }
-                    Fail::FunctionClause { module, name, line } => {
-                        if *line > 0 {
-                            self.emit(&format!("store i64 {}, ptr %fr.l", line));
-                            self.stored_line = Some(*line);
-                        }
-                        let m = self.g.atom(module);
-                        let n = self.g.atom(name);
-                        let n_args = sops.len();
-                        // params are contiguous in slots [param_slots[0]..]
-                        let p = if n_args > 0 {
-                            let s0 = self.param_slots.first().copied().unwrap_or(0);
-                            self.slot_ptr(s0)
-                        } else {
-                            "null".to_string()
-                        };
-                        self.emit(&format!(
-                            "{} = call i64 @tn_raise_function_clause(ptr %ctx, i64 {}, i64 {}, ptr {}, i64 {})",
-                            r, m, n, p, n_args
-                        ));
-                    }
-                    Fail::Passthrough => unreachable!(),
+            Fail::FunctionClause { module, name, line } => {
+                if *line > 0 {
+                    self.emit(&format!("store i64 {}, ptr %fr.l", line));
+                    self.stored_line = Some(*line);
                 }
-                let target = self.exc.clone();
-                self.br(&target);
+                let m = self.g.atom(module);
+                let n = self.g.atom(name);
+                let n_args = sops.len();
+                // params are contiguous in slots [param_slots[0]..]
+                let p = if n_args > 0 {
+                    let s0 = self.param_slots.first().copied().unwrap_or(0);
+                    self.slot_ptr(s0)
+                } else {
+                    "null".to_string()
+                };
+                self.emit(&format!(
+                    "{} = call i64 @tn_raise_function_clause(ptr %ctx, i64 {}, i64 {}, ptr {}, i64 {})",
+                    r, m, n, p, n_args
+                ));
             }
         }
+        let target = self.exc.clone();
+        self.br(&target);
         if !falls {
             return Flow::Done;
         }
@@ -2247,10 +2224,6 @@ impl<'a> FnGen<'a> {
                     self.add_off(off, &Op::Ssa(l), 1);
                     self.pattern(&s.val, &Op::Slot(sl), fail);
                 }
-                _ => {
-                    self.br(fail);
-                    return;
-                }
             }
         }
         if !consumed_rest {
@@ -2370,7 +2343,7 @@ impl<'a> FnGen<'a> {
         if let Flow::Val(o) = body {
             if t.else_clauses.is_empty() {
                 self.put(rs, &o);
-                self.run_after(t, &outer, &end, rs, &mut falls);
+                self.run_after(t, &outer, &end, &mut falls);
             } else {
                 let o = self.to_slot(o);
                 let bs = self.new_slot();
@@ -2381,7 +2354,7 @@ impl<'a> FnGen<'a> {
                 let res = self.case(&[CE::Var(vid)], &t.else_clauses, &Fail::TryClause, false);
                 if let Flow::Val(ro) = res {
                     self.put(rs, &ro);
-                    self.run_after(t, &outer, &end, rs, &mut falls);
+                    self.run_after(t, &outer, &end, &mut falls);
                 }
             }
         }
@@ -2408,7 +2381,7 @@ impl<'a> FnGen<'a> {
             match self.expr(&c.body, false) {
                 Flow::Val(o) => {
                     self.put(rs, &o);
-                    self.run_after(t, &outer, &end, rs, &mut falls);
+                    self.run_after(t, &outer, &end, &mut falls);
                 }
                 Flow::Done => {}
             }
@@ -2448,7 +2421,7 @@ impl<'a> FnGen<'a> {
         self.finish_val(Op::Slot(rs), tail)
     }
 
-    fn run_after(&mut self, t: &TryE, outer: &str, end: &str, _rs: u32, falls: &mut bool) {
+    fn run_after(&mut self, t: &TryE, outer: &str, end: &str, falls: &mut bool) {
         let saved = self.exc.clone();
         self.exc = outer.to_string();
         if let Some(a) = &t.after {
@@ -3032,12 +3005,9 @@ define internal i64 @tn_utf8_len_i(i64 %cp) alwaysinline {
 
 "#;
 
-#[allow(dead_code)]
-fn _unused(_: BTreeSet<u8>) {}
-
-/// elixir_rewrite's inline table: (module, fun, arity) -> (erl module, fun).
 const EXT_FUN_MAX_ARITY: usize = 12;
 
+/// elixir_rewrite's inline table: (module, fun, arity) -> (erl module, fun).
 pub(crate) fn inline_target(module: &str, name: &str, arity: usize) -> Option<(&'static str, &'static str)> {
     static TABLE: &str = include_str!("../data/inline_funs.txt");
     let ar = arity.to_string();

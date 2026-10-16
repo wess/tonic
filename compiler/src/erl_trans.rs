@@ -16,7 +16,6 @@ pub struct Tr {
     file: String,
     records: HashMap<String, Vec<(String, Option<X>)>>,
     locals: HashSet<(String, usize)>,
-    no_auto: HashSet<(String, usize)>,
     imports: HashMap<(String, usize), String>,
     tmp: usize,
 }
@@ -47,41 +46,12 @@ fn block(mut es: Vec<E>, l: u32) -> E {
     }
 }
 
-/// Variables a pattern would bind (ignoring `_`).
-fn pat_vars(x: &X, out: &mut Bound) {
-    match &x.k {
-        XK::Var(v) if v != "_" => {
-            out.insert(v.clone());
-        }
-        XK::List(items, t) => {
-            items.iter().for_each(|i| pat_vars(i, out));
-            if let Some(t) = t {
-                pat_vars(t, out);
-            }
-        }
-        XK::Tuple(items) => items.iter().for_each(|i| pat_vars(i, out)),
-        XK::Bin(els) => els.iter().for_each(|e| pat_vars(&e.val, out)),
-        XK::Match(a, b) => {
-            pat_vars(a, out);
-            pat_vars(b, out);
-        }
-        XK::BinOp(op, a, b) if op == "++" => {
-            pat_vars(a, out);
-            pat_vars(b, out);
-        }
-        XK::Map(_, ps) => ps.iter().for_each(|(_, _, v)| pat_vars(v, out)),
-        XK::Rec(_, _, fs) => fs.iter().for_each(|(_, v)| pat_vars(v, out)),
-        _ => {}
-    }
-}
-
 pub fn translate(forms: Vec<Form>, file: &str) -> R<E> {
     let mut module = String::new();
     let mut exports: HashSet<(String, usize)> = HashSet::new();
     let mut export_all = false;
     let mut records = HashMap::new();
     let mut locals = HashSet::new();
-    let mut no_auto = HashSet::new();
     let mut imports = HashMap::new();
     let mut funs = Vec::new();
     for f in forms {
@@ -92,7 +62,6 @@ pub fn translate(forms: Vec<Form>, file: &str) -> R<E> {
             Form::Record(n, fs) => {
                 records.insert(n, fs);
             }
-            Form::NoAutoImport(fs) => no_auto.extend(fs),
             Form::Import(m, fs) => {
                 for fa in fs {
                     imports.insert(fa, m.clone());
@@ -108,7 +77,7 @@ pub fn translate(forms: Vec<Form>, file: &str) -> R<E> {
     if module.is_empty() {
         return Err(format!("{}: missing -module", file));
     }
-    let mut tr = Tr { module: module.clone(), file: file.to_string(), records, locals, no_auto, imports, tmp: 0 };
+    let mut tr = Tr { module: module.clone(), file: file.to_string(), records, locals, imports, tmp: 0 };
     let mut body = Vec::new();
     for (n, a, cls, _l) in funs {
         let public = export_all || exports.contains(&(n.clone(), a));

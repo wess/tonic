@@ -152,13 +152,6 @@ pub extern "C" fn tn_math_pi(c: *mut Ctx) -> Term {
     cx(c).float(std::f64::consts::PI)
 }
 
-/// Kernel.inspect helper for atoms used as module names etc.
-#[no_mangle]
-pub extern "C" fn tn_atom_length(c: *mut Ctx, a_: Term) -> Term {
-    let _ = c;
-    small(atoms::name(atom_idx(a_)).len() as i64)
-}
-
 /// String.to_atom for charlists/binaries
 #[no_mangle]
 pub extern "C" fn tn_to_atom(c: *mut Ctx, b: Term) -> Term {
@@ -176,18 +169,6 @@ pub extern "C" fn tn_monitor2(c: *mut Ctx, _ty: Term, p: Term) -> Term {
 pub extern "C" fn tn_unique_integer(c: *mut Ctx) -> Term {
     let _ = c;
     small(crate::sched::next_ref_id() as i64)
-}
-
-/// Pretty much :erlang.term_to_binary is not supported; identity marker.
-#[no_mangle]
-pub extern "C" fn tn_term_equal_hash(_c: *mut Ctx, t: Term) -> Term {
-    small((crate::cmp::hash(t) >> 2) as i64)
-}
-
-/// Sort a list with the runtime comparator in descending order.
-#[no_mangle]
-pub extern "C" fn tn_sort_desc_list(c: *mut Ctx, l: Term) -> Term {
-    tn_sort_desc(c, l)
 }
 
 /// :erlang.register(name, pid)

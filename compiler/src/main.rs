@@ -3,6 +3,8 @@
 mod ast;
 mod beam_atoms;
 mod bifs;
+mod cache;
+mod child;
 mod codegen;
 mod collect;
 mod core;
@@ -42,8 +44,21 @@ struct Opts {
     verbose: bool,
 }
 
+const COMMANDS: [&str; 4] = ["run", "build", "emit-llvm", "check"];
+
 fn usage() -> ! {
-    eprintln!(
+    eprintln!("{}", usage_text());
+    std::process::exit(2)
+}
+
+/// Prints usage for an argument error and exits.
+fn usage_error(msg: &str) -> ! {
+    eprintln!("tonic: {}\n", msg);
+    usage()
+}
+
+fn usage_text() -> String {
+    format!(
         "tonic {} — Elixir to native code via LLVM
 
 usage:
@@ -63,8 +78,7 @@ environment:
   TONIC_RUNTIME   path to libtonic_rt.a
   TONIC_MIX       Mix executable for project loading (default: mix)",
         env!("CARGO_PKG_VERSION")
-    );
-    std::process::exit(2)
+    )
 }
 
 fn parse_args() -> Opts {
@@ -74,11 +88,15 @@ fn parse_args() -> Opts {
     }
     let cmd = args.remove(0);
     if cmd == "-h" || cmd == "--help" || cmd == "help" {
-        usage();
+        println!("{}", usage_text());
+        std::process::exit(0);
     }
     if cmd == "--version" || cmd == "version" {
         println!("tonic {}", env!("CARGO_PKG_VERSION"));
         std::process::exit(0);
+    }
+    if !COMMANDS.contains(&cmd.as_str()) {
+        usage_error(&format!("unknown command {:?}", cmd));
     }
     let mut o = Opts {
         cmd,
@@ -98,7 +116,10 @@ fn parse_args() -> Opts {
         match a.as_str() {
             "-o" => {
                 i += 1;
-                o.output = args.get(i).cloned();
+                match args.get(i) {
+                    Some(out) if !out.starts_with('-') => o.output = Some(out.clone()),
+                    _ => usage_error("-o requires an output path"),
+                }
             }
             "-O0" | "-O1" | "-O2" | "-O3" => o.opt = a.clone(),
             "--keep" => o.keep = true,
@@ -106,6 +127,9 @@ fn parse_args() -> Opts {
             "--" => {
                 o.args = args[i + 1..].to_vec();
                 break;
+            }
+            _ if a.starts_with('-') && !(o.cmd == "run" && !o.inputs.is_empty()) => {
+                usage_error(&format!("unknown option {:?}", a))
             }
             _ => {
                 if o.cmd == "run" && !o.inputs.is_empty() && !(a.ends_with(".ex") || a.ends_with(".exs") || a.ends_with(".erl")) {
@@ -118,7 +142,17 @@ fn parse_args() -> Opts {
         i += 1;
     }
     if o.inputs.is_empty() {
-        usage();
+        usage_error("no input files");
+    }
+    if let Some(out) = &o.output {
+        let same = |i: &String| match (std::fs::canonicalize(i), std::fs::canonicalize(out)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        };
+        if o.inputs.iter().any(same) {
+            eprintln!("tonic: output {} would overwrite an input file", out);
+            std::process::exit(1);
+        }
     }
     // Mix projects: a directory with mix.exs (or the mix.exs file).
     let mut inputs = Vec::new();
@@ -139,6 +173,8 @@ fn parse_args() -> Opts {
             }
             Err(e) => {
                 eprintln!("** (Mix) {}", e);
+                // exit skips destructors; drop loaded projects so their scratch directories go
+                o.projects.clear();
                 std::process::exit(1);
             }
         }
@@ -220,8 +256,6 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
     if o.cmd == "check" {
         return Ok((String::new(), None));
     }
-    // Protocol implementation modules for user types are reachable via the
-    // dispatch functions; user modules are roots.
     if o.verbose {
         eprintln!("tonic:   expand {:?}", te.elapsed());
     }
@@ -407,16 +441,33 @@ fn find_runtime() -> Result<PathBuf, String> {
 
 fn link_flags() -> Vec<&'static str> {
     if cfg!(target_os = "macos") {
-        vec!["-lSystem", "-lc", "-lm", "-liconv", "-framework", "CoreFoundation"]
+        // clang links libSystem (libc, libm) itself; naming it again makes ld warn
+        vec!["-liconv", "-framework", "CoreFoundation"]
     } else {
         vec!["-lpthread", "-ldl", "-lm", "-lc", "-lgcc_s"]
     }
 }
 
 fn build(o: &Opts, ir: &str, prelude: Option<&Path>, out: &Path) -> Result<(), String> {
-    let cc = std::env::var("TONIC_CC").unwrap_or_else(|_| "clang".into());
+    if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty() && !d.is_dir()) {
+        return Err(format!("output directory {} does not exist", dir.display()));
+    }
     let tmp = std::env::temp_dir().join(format!("tonic-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    let r = build_in(o, ir, prelude, out, &tmp);
+    match &r {
+        // keep the IR of a failed LLVM compile for inspection
+        Err(e) if e.starts_with("LLVM compilation failed") => {}
+        _ if o.keep => eprintln!("tonic: intermediate files in {}", tmp.display()),
+        _ => {
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+    }
+    r
+}
+
+fn build_in(o: &Opts, ir: &str, prelude: Option<&Path>, out: &Path, tmp: &Path) -> Result<(), String> {
+    let cc = std::env::var("TONIC_CC").unwrap_or_else(|_| "clang".into());
     let ll = tmp.join("program.ll");
     let obj = tmp.join("program.o");
     std::fs::write(&ll, ir).map_err(|e| e.to_string())?;
@@ -438,7 +489,7 @@ fn build(o: &Opts, ir: &str, prelude: Option<&Path>, out: &Path) -> Result<(), S
     }
     let rt = find_runtime()?;
     let natives: Vec<String> = o.projects.iter().flat_map(|p| p.native_sources.iter().cloned()).collect();
-    let nif_objects = native::objects(&natives, &cc, &cache_dir())?;
+    let nif_objects = native::objects(&natives, &cc, &cache::dir())?;
     let mut cmd = Command::new(&cc);
     cmd.arg(&obj);
     cmd.args(&nif_objects);
@@ -458,15 +509,24 @@ fn build(o: &Opts, ir: &str, prelude: Option<&Path>, out: &Path) -> Result<(), S
     if !st.success() {
         return Err("linking failed".into());
     }
-    if !o.keep {
-        let _ = std::fs::remove_dir_all(&tmp);
-    } else {
-        eprintln!("tonic: intermediate files in {}", tmp.display());
-    }
     Ok(())
 }
 
+/// The parser, expander and code generator recurse over the syntax tree, so
+/// long operator chains and deeply nested literals need a deep stack.
+const COMPILER_STACK: usize = 1 << 30;
+
 fn main() -> ExitCode {
+    std::thread::Builder::new()
+        .name("tonic".into())
+        .stack_size(COMPILER_STACK)
+        .spawn(compile_main)
+        .expect("compiler thread")
+        .join()
+        .unwrap_or(ExitCode::from(101))
+}
+
+fn compile_main() -> ExitCode {
     let o = parse_args();
     let t0 = std::time::Instant::now();
     let compiled = compile_to_ir(&o);
@@ -514,7 +574,7 @@ fn main() -> ExitCode {
             if o.verbose {
                 eprintln!("tonic: total compile {:?}", t0.elapsed());
             }
-            let st = Command::new(&tmp).args(&o.args).status();
+            let st = child::run(&tmp, &o.args);
             let _ = std::fs::remove_file(&tmp);
             match st {
                 Ok(s) => match s.code() {
@@ -524,6 +584,10 @@ fn main() -> ExitCode {
                         {
                             use std::os::unix::process::ExitStatusExt;
                             let sig = s.signal().unwrap_or(0);
+                            // the program died of what it was sent, or of a closed pipe: not a crash
+                            if sig == child::forwarded() || sig == 13 {
+                                return ExitCode::from((128 + sig) as u8);
+                            }
                             let name = match sig {
                                 11 => "Segmentation fault",
                                 10 if cfg!(target_os = "macos") => "Bus error",
@@ -592,14 +656,6 @@ fn module_files(ex: &expand::Expander) -> std::collections::HashMap<String, Stri
         .collect()
 }
 
-fn cache_dir() -> PathBuf {
-    if let Ok(d) = std::env::var("TONIC_CACHE") {
-        return PathBuf::from(d);
-    }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".cache").join("tonic")
-}
-
 /// The prelude compiled once (at -O2) per tonic build and cached:
 /// returns the object path and the atom table order its code assumes.
 fn prelude_object(
@@ -608,16 +664,13 @@ fn prelude_object(
     defs: &[core::FunDef],
     per_program: &HashSet<String>,
 ) -> Result<(PathBuf, Vec<String>), String> {
-    use std::hash::{Hash, Hasher};
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let bytes = std::fs::read(&exe).map_err(|e| e.to_string())?;
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut h);
-    let key = format!("{:016x}", h.finish());
-    let dir = cache_dir();
+    let key = cache::compiler_key()?;
+    let dir = cache::dir();
     let obj = dir.join(format!("prelude-{}.o", key));
     let atoms_file = dir.join(format!("prelude-{}.atoms", key));
     if obj.exists() && atoms_file.exists() {
+        cache::touch(&obj);
+        cache::touch(&atoms_file);
         let text = std::fs::read_to_string(&atoms_file).map_err(|e| e.to_string())?;
         return Ok((obj, text.lines().map(|l| l.to_string()).collect()));
     }
@@ -654,6 +707,7 @@ fn prelude_object(
     std::fs::write(&tmp_atoms, atoms.join("\n")).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp_atoms, &atoms_file).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp_obj, &obj).map_err(|e| e.to_string())?;
+    cache::prune("prelude", &key);
     if o.verbose {
         eprintln!("tonic: prelude compiled in {:?}", t0.elapsed());
     }

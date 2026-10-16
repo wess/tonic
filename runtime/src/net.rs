@@ -51,6 +51,7 @@ struct Stream {
 
 struct Listener {
     io: TcpListener,
+    owner: parking_lot::Mutex<u64>,
     options: parking_lot::Mutex<Options>,
     closed: tokio::sync::Notify,
 }
@@ -251,6 +252,7 @@ pub extern "C" fn tn_tcp_listen(c: *mut Ctx, port: Term, opts: Term) -> Term {
         Ok(io) => {
             let id = register(Socket::Listener(Arc::new(Listener {
                 io,
+                owner: parking_lot::Mutex::new(ctx.pid()),
                 options: parking_lot::Mutex::new(options),
                 closed: tokio::sync::Notify::new(),
             })));
@@ -633,16 +635,39 @@ pub extern "C" fn tn_tcp_close(_c: *mut Ctx, socket: Term) -> Term {
         return atom(a::OK);
     }
     let removed = SOCKETS.lock().as_mut().and_then(|m| m.remove(&word(socket, 1)));
-    match removed {
-        Some(Socket::Stream(s)) => {
+    if let Some(s) = removed {
+        close(s);
+    }
+    atom(a::OK)
+}
+
+fn close(socket: Socket) {
+    match socket {
+        Socket::Stream(s) => {
             s.state.lock().closed = true;
             s.closed.notify_waiters();
             shutdown_fd(&s.io, 2);
         }
-        Some(Socket::Listener(l)) => l.closed.notify_waiters(),
-        None => {}
+        Socket::Listener(l) => l.closed.notify_waiters(),
     }
-    atom(a::OK)
+}
+
+fn owner_of(socket: &Socket) -> u64 {
+    match socket {
+        Socket::Stream(s) => s.state.lock().owner,
+        Socket::Listener(l) => *l.owner.lock(),
+    }
+}
+
+/// Sockets close with their controlling process, as ports do on the BEAM.
+pub fn owner_exited(pid: u64) {
+    let owned: Vec<Socket> = {
+        let mut sockets = SOCKETS.lock();
+        let Some(m) = sockets.as_mut() else { return };
+        let ids: Vec<u64> = m.iter().filter(|(_, s)| owner_of(s) == pid).map(|(id, _)| *id).collect();
+        ids.into_iter().filter_map(|id| m.remove(&id)).collect()
+    };
+    owned.into_iter().for_each(close);
 }
 
 fn shutdown_fd(io: &TcpStream, how: i32) -> bool {
@@ -685,7 +710,10 @@ pub extern "C" fn tn_tcp_controlling_process(c: *mut Ctx, socket: Term, owner: T
             s.state.lock().owner = pid_id(owner);
             atom(a::OK)
         }
-        Some(Socket::Listener(_)) => atom(a::OK),
+        Some(Socket::Listener(l)) => {
+            *l.owner.lock() = pid_id(owner);
+            atom(a::OK)
+        }
         None => ctx_result(ctx, None, Some("closed")),
     }
 }
@@ -826,7 +854,3 @@ pub extern "C" fn tn_inet_getstat(c: *mut Ctx, socket: Term) -> Term {
     ctx_result(ctx, Some(list), None)
 }
 
-#[no_mangle]
-pub extern "C" fn tn_inet_is_socket(_c: *mut Ctx, socket: Term) -> Term {
-    boolean(lookup(socket).is_some())
-}

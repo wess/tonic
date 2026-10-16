@@ -117,9 +117,10 @@ defmodule Tonic.ProjectBridge do
       end
 
     unless valid do
-      Mix.raise(
-        "Tonic dependency #{dep.app}: #{Mix.Dep.format_status(checked)}. Run mix deps.get in this project"
-      )
+      status = Mix.Dep.format_status(checked)
+      # some statuses already say to run mix deps.get
+      hint = if status =~ "deps.get", do: "", else: ". Run mix deps.get in this project"
+      Mix.raise("Tonic dependency #{dep.app}: #{status}#{hint}")
     end
   end
 

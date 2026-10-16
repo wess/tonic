@@ -55,8 +55,6 @@ pub struct BinSeg<T> {
     pub size: Option<CE>,
     pub little: bool,
     pub signed: bool,
-    /// size given in units? (`unit` multiplier applied already)
-    pub unit: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -87,12 +85,8 @@ pub struct Clause {
 pub enum Fail {
     CaseClause,
     FunctionClause { module: String, name: String, line: u32 },
-    /// Return the unmatched value (used by `with` without else).
-    Passthrough,
     WithClause,
     TryClause,
-    /// Raise via the given runtime error (for `=` matches).
-    Match,
 }
 
 #[derive(Clone, Debug)]
@@ -102,8 +96,6 @@ pub struct Lambda {
     pub clauses: Vec<Clause>,
     /// Parameter variables
     pub params: Vec<VarId>,
-    /// Filled by free variable analysis.
-    pub free: Vec<VarId>,
     pub module: String,
     pub parent: String,
     /// Source line of the `fn` (0 when unknown)

@@ -31,7 +31,6 @@ pub struct Cx {
     pub cap: Option<Vec<VarId>>,
     pub stacktrace: Option<VarId>,
     pub lambda_index: usize,
-    pub in_pattern_bound: Option<HashSet<String>>,
     pub macro_depth: usize,
     pub macro_context: Option<&'static str>,
     pub super_call: Option<(String, Vec<VarId>)>,
@@ -47,7 +46,6 @@ impl Cx {
             cap: None,
             stacktrace: None,
             lambda_index: 0,
-            in_pattern_bound: None,
             macro_depth: 0,
             macro_context: None,
             super_call: None,
@@ -117,6 +115,11 @@ impl Expander {
             }
             if !m.defs.iter().any(|d| d.name == "__info__" && d.arity == 1) {
                 funs.insert((m.name.clone(), "__info__".into(), 1), true);
+                funs.insert((m.name.clone(), "module_info".into(), 0), true);
+                funs.insert((m.name.clone(), "module_info".into(), 1), true);
+                if !m.callbacks.is_empty() {
+                    funs.insert((m.name.clone(), "behaviour_info".into(), 1), true);
+                }
             }
             if m.struct_fields.is_some() {
                 funs.insert((m.name.clone(), "__struct__".into(), 0), true);
@@ -419,7 +422,7 @@ impl Expander {
 
     /// `Mod.__info__/1`: module, functions, macros, struct, compile, attributes, md5.
     fn gen_info(&mut self, m: &Module, env: &ModEnv) -> R<()> {
-        let hidden = ["__info__", "__struct_fields__", "__inspect_derive__", "__derive_opts__"];
+        let hidden = ["__info__", "__struct_fields__", "__inspect_derive__", "__derive_opts__", "module_info", "behaviour_info"];
         let mut fs: Vec<(String, usize)> = self
             .funs
             .iter()
@@ -469,12 +472,30 @@ impl Expander {
         } else {
             "nil".to_string()
         };
-        let src = format!(
+        let mut src = format!(
             "def __info__(:module), do: __MODULE__\ndef __info__(:functions), do: {}\ndef __info__(:macros), do: {}\ndef __info__(:struct), do: {}\ndef __info__(:compile), do: [version: ~c\"8.6\", source: ~c\"\", options: []]\ndef __info__(:attributes), do: [vsn: [0]]\ndef __info__(:md5), do: <<0::128>>\ndef __info__(:exports_md5), do: <<0::128>>\ndef __info__(:deprecated), do: []\n",
             kw(&fs),
             kw(&ms),
             st
         );
+        // the Erlang view: exports include macros as MACRO-name/arity+1
+        let mut exports: Vec<(String, usize)> = vec![("__info__".into(), 1)];
+        exports.extend(fs.iter().cloned());
+        exports.extend(ms.iter().map(|(n, a)| (format!("MACRO-{}", n), a + 1)));
+        exports.push(("module_info".into(), 0));
+        exports.push(("module_info".into(), 1));
+        src.push_str(&format!(
+            "def module_info(), do: [module: __MODULE__, exports: module_info(:exports), attributes: [vsn: [0]], compile: [version: ~c\"8.6\", options: [], source: ~c\"\"], md5: <<0::128>>]\ndef module_info(:module), do: __MODULE__\ndef module_info(:exports), do: {ex}\ndef module_info(:functions), do: {ex}\ndef module_info(:attributes), do: [vsn: [0]]\ndef module_info(:compile), do: [version: ~c\"8.6\", options: [], source: ~c\"\"]\ndef module_info(:md5), do: <<0::128>>\ndef module_info(:nifs), do: []\n",
+            ex = kw(&exports)
+        ));
+        if !m.callbacks.is_empty() {
+            let mut cbs: Vec<(String, usize)> = m.callbacks.iter().cloned().collect();
+            cbs.sort_by_key(key);
+            src.push_str(&format!(
+                "def behaviour_info(:callbacks), do: {}\ndef behaviour_info(:optional_callbacks), do: []\n",
+                kw(&cbs)
+            ));
+        }
         self.gen_src_defs(m, env, &src, "__info__")
     }
 
@@ -731,6 +752,13 @@ impl Expander {
         for i in impls.iter().rev() {
             impl_list = CE::Cons(Box::new(CE::atom(i)), Box::new(impl_list));
         }
+        let mut funs = p.funs.clone();
+        funs.sort();
+        let mut functions = CE::Lit(Lit::Nil);
+        for (name, arity) in funs.iter().rev() {
+            let pair = CE::Tuple(vec![CE::atom(name), CE::Lit(Lit::Int(*arity as i64))]);
+            functions = CE::Cons(Box::new(pair), Box::new(functions));
+        }
         self.out.push(FunDef {
             key: FunKey::new(&p.name, "__protocol__", 1),
             params: vec![v2],
@@ -746,7 +774,21 @@ impl Expander {
                             CE::atom("not_consolidated")
                         },
                     },
-                    Clause { pats: vec![Pat::Wild], guard: None, body: CE::atom(&p.name) },
+                    Clause {
+                        pats: vec![Pat::Lit(Lit::Atom("functions".into()))],
+                        guard: None,
+                        body: functions,
+                    },
+                    Clause {
+                        pats: vec![Pat::Lit(Lit::Atom("consolidated?".into()))],
+                        guard: None,
+                        body: CE::atom(if self.consolidated { "true" } else { "false" }),
+                    },
+                    Clause {
+                        pats: vec![Pat::Lit(Lit::Atom("module".into()))],
+                        guard: None,
+                        body: CE::atom(&p.name),
+                    },
                 ],
                 Fail::CaseClause,
             ),

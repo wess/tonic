@@ -364,17 +364,19 @@ dependencies = [
 
 [[package]]
 name = "tonic"
-version = "0.0.1"
+version = "0.1.0-beta.1"
 dependencies = [
+ "libc",
  "num-bigint",
  "tonic-shared",
 ]
 
 [[package]]
 name = "tonic-rt"
-version = "0.0.1"
+version = "0.1.0-beta.1"
 dependencies = [
  "corosensei",
+ "libc",
  "md-5",
  "num-bigint",
  "num-integer",
@@ -392,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "tonic-shared"
-version = "0.0.1"
+version = "0.1.0-beta.1"
 
 [[package]]
 name = "typenum"

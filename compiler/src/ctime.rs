@@ -69,13 +69,6 @@ pub fn elements(e: &E) -> Option<Vec<E>> {
     }
 }
 
-fn kw_pair(k: &str, v: E, line: u32) -> E {
-    E::new(
-        K::Tuple(vec![E::new(K::Atom(k.to_string()), line), v]),
-        line,
-    )
-}
-
 fn apply_literal(
     function: &E,
     arguments: &[E],

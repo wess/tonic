@@ -5,6 +5,8 @@ use crate::atoms;
 use crate::bif_core::cx;
 use crate::cmp;
 use crate::heap::{Ctx, Fragment};
+use crate::num;
+use num_bigint::BigInt;
 use crate::term::*;
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -54,6 +56,14 @@ fn reg() -> &'static Mutex<Registry> {
 }
 
 const NO_TABLE: &str = "the table identifier does not refer to an existing ETS table";
+
+const NO_ACCESS: &str = "the table identifier refers to an ETS table with insufficient access rights";
+
+/// Whether `pid` may not read (or write) the table: only its owner may
+/// write a protected table, or use a private one at all.
+fn denied(t: &Table, pid: u64, write: bool) -> bool {
+    t.owner != pid && (t.protection == a("private") || (write && t.protection == a("protected")))
+}
 
 fn find(tab: Term) -> Option<Arc<Mutex<Table>>> {
     let r = reg().lock();
@@ -292,6 +302,7 @@ fn check_obj(t: &Table, obj: Term) -> bool {
 fn do_insert(c: *mut Ctx, tab: Term, objs: Term, only_new: bool) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), true) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let mut t = t.lock();
     let list: Vec<Term> = if is_tuple(objs) {
         vec![objs]
@@ -366,8 +377,8 @@ fn frags_to_list(ctx: &mut Ctx, frags: &[&Fragment]) -> Term {
 pub extern "C" fn tn_ets_lookup(c: *mut Ctx, tab: Term, key: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), false) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let t = t.lock();
-    // Copy the key out of the caller's heap first? Not needed: no GC before matching.
     let m = matching(&t, key);
     frags_to_list(ctx, &m)
 }
@@ -376,6 +387,7 @@ pub extern "C" fn tn_ets_lookup(c: *mut Ctx, tab: Term, key: Term) -> Term {
 pub extern "C" fn tn_ets_member(c: *mut Ctx, tab: Term, key: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), false) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let t = t.lock();
     boolean(lookup_count(&t, key) > 0)
 }
@@ -385,6 +397,7 @@ pub extern "C" fn tn_ets_member(c: *mut Ctx, tab: Term, key: Term) -> Term {
 pub extern "C" fn tn_ets_lookup_element(c: *mut Ctx, tab: Term, key: Term, pos: Term, default: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), false) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let t = t.lock();
     if !is_small(pos) || small_val(pos) < 1 {
         return ctx.badarg_args(&[(3, "not a valid position")]);
@@ -403,8 +416,6 @@ pub extern "C" fn tn_ets_lookup_element(c: *mut Ctx, tab: Term, key: Term, pos: 
     if t.kind == Kind::Bag || t.kind == Kind::DuplicateBag {
         let base = ctx.roots.len();
         for f in &m {
-            let el = Fragment { buf: Vec::new(), root: 0 };
-            let _ = el;
             let x = ctx.from_fragment(f);
             let e = tuple_get(x, p - 1);
             ctx.roots.push(e);
@@ -421,8 +432,10 @@ pub extern "C" fn tn_ets_lookup_element(c: *mut Ctx, tab: Term, key: Term, pos: 
 pub extern "C" fn tn_ets_delete_table(c: *mut Ctx, tab: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
-    let t = t.lock();
+    if denied(&t.lock(), ctx.pid(), true) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
+    // registry before table, matching owner_exited
     let mut r = reg().lock();
+    let t = t.lock();
     r.tables.remove(&t.id);
     if t.named {
         r.names.remove(&t.name);
@@ -468,6 +481,7 @@ fn remove_where(t: &mut Table, key: Term, pred: &dyn Fn(Term) -> bool) -> Vec<Fr
 pub extern "C" fn tn_ets_delete(c: *mut Ctx, tab: Term, key: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), true) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let mut t = t.lock();
     remove_where(&mut t, key, &|_| true);
     TRUE
@@ -477,6 +491,7 @@ pub extern "C" fn tn_ets_delete(c: *mut Ctx, tab: Term, key: Term) -> Term {
 pub extern "C" fn tn_ets_delete_object(c: *mut Ctx, tab: Term, obj: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), true) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let mut t = t.lock();
     if !check_obj(&t, obj) {
         return ctx.badarg_args(&[(2, "not a tuple")]);
@@ -490,6 +505,7 @@ pub extern "C" fn tn_ets_delete_object(c: *mut Ctx, tab: Term, obj: Term) -> Ter
 pub extern "C" fn tn_ets_take(c: *mut Ctx, tab: Term, key: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), true) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let mut t = t.lock();
     let removed = remove_where(&mut t, key, &|_| true);
     let refs: Vec<&Fragment> = removed.iter().collect();
@@ -500,6 +516,7 @@ pub extern "C" fn tn_ets_take(c: *mut Ctx, tab: Term, key: Term) -> Term {
 pub extern "C" fn tn_ets_delete_all_objects(c: *mut Ctx, tab: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), true) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let mut t = t.lock();
     t.buckets.clear();
     t.sorted.clear();
@@ -519,30 +536,10 @@ fn all_frags(t: &Table) -> Vec<&Fragment> {
 pub extern "C" fn tn_ets_tab2list(c: *mut Ctx, tab: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), false) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let t = t.lock();
     let all = all_frags(&t);
     frags_to_list(ctx, &all)
-}
-
-/// Keys in iteration order (for first/next/last/prev, implemented in Elixir).
-#[no_mangle]
-pub extern "C" fn tn_ets_keys(c: *mut Ctx, tab: Term) -> Term {
-    let ctx = cx(c);
-    let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
-    let t = t.lock();
-    let mut keys: Vec<Fragment> = Vec::new();
-    let mut seen: Vec<Term> = Vec::new();
-    for f in all_frags(&t) {
-        let k = frag_key(&t, f);
-        if !seen.iter().any(|&s| cmp::eq_exact(s, k)) {
-            seen.push(k);
-            keys.push(Fragment { buf: Vec::new(), root: 0 });
-            let n = keys.len() - 1;
-            keys[n] = copy_out(k);
-        }
-    }
-    let refs: Vec<&Fragment> = keys.iter().collect();
-    frags_to_list(ctx, &refs)
 }
 
 /// Copy a term that lives in a fragment into a new standalone fragment.
@@ -560,6 +557,7 @@ fn copy_out(t: Term) -> Fragment {
 pub extern "C" fn tn_ets_next(c: *mut Ctx, tab: Term, key: Term, dir: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), false) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let t = t.lock();
     let end = a("$end_of_table");
     let forward = dir == TRUE;
@@ -605,6 +603,7 @@ pub extern "C" fn tn_ets_next(c: *mut Ctx, tab: Term, key: Term, dir: Term) -> T
 pub extern "C" fn tn_ets_first(c: *mut Ctx, tab: Term, dir: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), false) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let t = t.lock();
     let all = all_frags(&t);
     let f = if dir == TRUE { all.first() } else { all.last() };
@@ -682,8 +681,9 @@ pub extern "C" fn tn_ets_all(c: *mut Ctx) -> Term {
 pub extern "C" fn tn_ets_rename(c: *mut Ctx, tab: Term, name: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
-    let mut t = t.lock();
+    if denied(&t.lock(), ctx.pid(), true) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let mut r = reg().lock();
+    let mut t = t.lock();
     if t.named {
         if r.names.contains_key(&atom_idx(name)) {
             return ctx.badarg_args(&[(2, "table name already exists")]);
@@ -701,6 +701,7 @@ pub extern "C" fn tn_ets_rename(c: *mut Ctx, tab: Term, name: Term) -> Term {
 pub extern "C" fn tn_ets_replace(c: *mut Ctx, tab: Term, obj: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), true) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let mut t = t.lock();
     let key = key_of(&t, obj);
     remove_where(&mut t, key, &|_| true);
@@ -716,67 +717,88 @@ pub extern "C" fn tn_ets_replace(c: *mut Ctx, tab: Term, obj: Term) -> Term {
 pub extern "C" fn tn_ets_update_counter(c: *mut Ctx, tab: Term, key: Term, ops: Term, default: Term) -> Term {
     let ctx = cx(c);
     let Some(t) = find(tab) else { return ctx.badarg_args(&[(1, NO_TABLE)]) };
+    if denied(&t.lock(), ctx.pid(), true) { return ctx.badarg_args(&[(1, NO_ACCESS)]) }
     let mut t = t.lock();
     if t.kind == Kind::Bag || t.kind == Kind::DuplicateBag {
         return ctx.badarg_args(&[(1, "the table type is not supported by this operation")]);
     }
+    // Everything the update reads lives in roots: reading the stored object
+    // allocates, and a collection would move unrooted arguments.
     let base = ctx.roots.len();
+    ctx.roots.extend_from_slice(&[key, ops, default]);
     let current = {
-        let m = matching(&t, key);
+        let m = matching(&t, ctx.roots[base]);
         match m.first() {
             Some(f) => ctx.from_fragment(f),
             None => {
-                if is_tuple(default) {
-                    default
+                if is_tuple(ctx.roots[base + 2]) {
+                    ctx.roots[base + 2]
                 } else {
+                    ctx.roots.truncate(base);
                     return ctx.badarg_args(&[(2, "not a key that exists in the table")]);
                 }
             }
         }
     };
     ctx.roots.push(current);
-    ctx.roots.push(ops);
-    // Work on a Vec copy of the tuple elements.
-    let n = tuple_size(ctx.roots[base]);
-    let mut elems: Vec<Term> = (0..n).map(|i| tuple_get(ctx.roots[base], i)).collect();
-    let mut results: Vec<i64> = Vec::new();
+    // Compute without allocating on the process heap.
+    let n = tuple_size(ctx.roots[base + 3]);
+    let mut values: Vec<(usize, BigInt)> = Vec::new();
+    let mut results: Vec<BigInt> = Vec::new();
     let mut l = ctx.roots[base + 1];
     while is_cons(l) {
         let op = head(l);
-        if !is_tuple(op) || !(tuple_size(op) == 2 || tuple_size(op) == 4) {
+        if !is_tuple(op) || !(tuple_size(op) == 2 || tuple_size(op) == 4) || !(1..tuple_size(op)).all(|i| is_integer(tuple_get(op, i))) {
             ctx.roots.truncate(base);
             return ctx.badarg_args(&[(3, "not a valid update operation")]);
         }
         let pos = tuple_get(op, 0);
-        let incr = tuple_get(op, 1);
-        if !is_small(pos) || !is_small(incr) || small_val(pos) < 1 || small_val(pos) as usize > n || small_val(pos) as usize == t.keypos {
+        if !is_small(pos) || small_val(pos) < 1 || small_val(pos) as usize > n || small_val(pos) as usize == t.keypos {
             ctx.roots.truncate(base);
             return ctx.badarg_args(&[(3, "the position is out of range or refers to the key")]);
         }
         let p = small_val(pos) as usize - 1;
-        let cur = elems[p];
-        if !is_small(cur) {
-            ctx.roots.truncate(base);
-            return ctx.badarg_args(&[(1, "the element to update is not an integer")]);
-        }
-        let mut v = small_val(cur) + small_val(incr);
+        let cur = match values.iter().rev().find(|(q, _)| *q == p) {
+            Some((_, v)) => v.clone(),
+            None => {
+                let c = tuple_get(ctx.roots[base + 3], p);
+                if !is_integer(c) {
+                    ctx.roots.truncate(base);
+                    return ctx.badarg_args(&[(3, "the value in the given position, in the object, is not an integer")]);
+                }
+                num::to_big(c)
+            }
+        };
+        let incr = num::to_big(tuple_get(op, 1));
+        let mut v = cur + &incr;
         if tuple_size(op) == 4 {
-            let th = small_val(tuple_get(op, 2));
-            let set = small_val(tuple_get(op, 3));
-            if (small_val(incr) >= 0 && v > th) || (small_val(incr) < 0 && v < th) {
-                v = set;
+            let threshold = num::to_big(tuple_get(op, 2));
+            if (incr.sign() != num_bigint::Sign::Minus && v > threshold) || (incr.sign() == num_bigint::Sign::Minus && v < threshold) {
+                v = num::to_big(tuple_get(op, 3));
             }
         }
-        elems[p] = small(v);
+        values.push((p, v.clone()));
         results.push(v);
         l = tail(l);
     }
+    // Results as terms, rooted (bignums allocate).
+    let rbase = ctx.roots.len();
+    for r in &results {
+        let t = num::from_big(ctx, r);
+        ctx.roots.push(t);
+    }
+    // ctx.tuple keeps its element terms current across a collection
+    let cur = ctx.roots[base + 3];
+    let mut elems: Vec<Term> = (0..n).map(|i| tuple_get(cur, i)).collect();
+    for (i, (p, _)) in values.iter().enumerate() {
+        elems[*p] = ctx.roots[rbase + i];
+    }
     let newobj = ctx.tuple(&elems);
-    ctx.roots.truncate(base);
     let k = key_of(&t, newobj);
     remove_where(&mut t, k, &|_| true);
     insert_one(ctx, &mut t, newobj, false);
-    let mut v: Vec<Term> = results.into_iter().map(small).collect();
+    let mut v: Vec<Term> = ctx.roots[rbase..].to_vec();
+    ctx.roots.truncate(base);
     ctx.list_from_vec(&mut v)
 }
 

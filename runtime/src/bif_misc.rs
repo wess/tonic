@@ -8,7 +8,6 @@ use crate::heap::Ctx;
 use crate::io;
 use crate::num;
 use crate::term::*;
-use parking_lot::Mutex;
 use std::sync::OnceLock;
 
 fn bytes_of(ctx: &mut Ctx, t: Term) -> Option<Vec<u8>> {
@@ -75,176 +74,12 @@ pub extern "C" fn tn_io_flush(_c: *mut Ctx) -> Term {
     atom(a::OK)
 }
 
-#[no_mangle]
-pub extern "C" fn tn_io_read_all(c: *mut Ctx) -> Term {
-    let ctx = cx(c);
-    io::stdout_flush();
-    let mut s = Vec::new();
-    use std::io::Read;
-    match std::io::stdin().read_to_end(&mut s) {
-        Ok(_) => {
-            if s.is_empty() {
-                atom(a::EOF)
-            } else {
-                ctx.binary(&s)
-            }
-        }
-        Err(_) => atom(a::EOF),
-    }
-}
-
 fn path_of(t: Term) -> Option<String> {
     let mut v = Vec::new();
     if flatten_io(t, &mut v, true) {
         Some(String::from_utf8_lossy(&v).into_owned())
     } else {
         None
-    }
-}
-
-fn errno_atom(e: &std::io::Error) -> Term {
-    use std::io::ErrorKind::*;
-    atom(match e.kind() {
-        NotFound => a::ENOENT,
-        PermissionDenied => a::EACCES,
-        AlreadyExists => a::EEXIST,
-        _ => {
-            if let Some(code) = e.raw_os_error() {
-                match code {
-                    21 => a::EISDIR,
-                    20 => a::ENOTDIR,
-                    _ => atoms::intern("eio"),
-                }
-            } else {
-                atoms::intern("eio")
-            }
-        }
-    })
-}
-
-fn err_tuple(ctx: &mut Ctx, e: &std::io::Error) -> Term {
-    let r = errno_atom(e);
-    ctx.tuple(&[atom(a::ERROR), r])
-}
-
-#[no_mangle]
-pub extern "C" fn tn_file_read(c: *mut Ctx, p: Term) -> Term {
-    let ctx = cx(c);
-    let path = match path_of(p) {
-        Some(p) => p,
-        None => return ctx.badarg("argument error"),
-    };
-    match std::fs::read(&path) {
-        Ok(b) => {
-            let bin = ctx.binary(&b);
-            let bi = ctx.push(bin);
-            let t = ctx.tuple(&[atom(a::OK), ctx.get(bi)]);
-            ctx.truncate(bi);
-            t
-        }
-        Err(e) => err_tuple(ctx, &e),
-    }
-}
-
-/// mode: 0 write, 1 append
-#[no_mangle]
-pub extern "C" fn tn_file_write(c: *mut Ctx, p: Term, data: Term, mode: Term) -> Term {
-    let ctx = cx(c);
-    let path = match path_of(p) {
-        Some(p) => p,
-        None => return ctx.badarg("argument error"),
-    };
-    let mut bytes = Vec::new();
-    if !flatten_io(data, &mut bytes, false) && !flatten_io(data, &mut bytes, true) {
-        return ctx.badarg("argument error");
-    }
-    let r = if small_val(mode) == 1 {
-        use std::io::Write;
-        std::fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&path)
-            .and_then(|mut f| f.write_all(&bytes))
-    } else {
-        std::fs::write(&path, &bytes)
-    };
-    match r {
-        Ok(_) => atom(a::OK),
-        Err(e) => err_tuple(ctx, &e),
-    }
-}
-
-/// op: 0 exists?, 1 dir?, 2 regular?
-#[no_mangle]
-pub extern "C" fn tn_file_test(c: *mut Ctx, p: Term, op: Term) -> Term {
-    let ctx = cx(c);
-    let path = match path_of(p) {
-        Some(p) => p,
-        None => return ctx.badarg("argument error"),
-    };
-    let md = std::fs::metadata(&path);
-    boolean(match small_val(op) {
-        0 => md.is_ok(),
-        1 => md.map(|m| m.is_dir()).unwrap_or(false),
-        _ => md.map(|m| m.is_file()).unwrap_or(false),
-    })
-}
-
-/// op: 0 rm, 1 mkdir, 2 mkdir_p, 3 rm_rf, 4 rmdir
-#[no_mangle]
-pub extern "C" fn tn_file_op(c: *mut Ctx, p: Term, op: Term) -> Term {
-    let ctx = cx(c);
-    let path = match path_of(p) {
-        Some(p) => p,
-        None => return ctx.badarg("argument error"),
-    };
-    let r = match small_val(op) {
-        0 => std::fs::remove_file(&path),
-        1 => std::fs::create_dir(&path),
-        2 => std::fs::create_dir_all(&path),
-        3 => {
-            let md = std::fs::symlink_metadata(&path);
-            match md {
-                Ok(m) if m.is_dir() => std::fs::remove_dir_all(&path),
-                Ok(_) => std::fs::remove_file(&path),
-                Err(_) => Ok(()),
-            }
-        }
-        _ => std::fs::remove_dir(&path),
-    };
-    match r {
-        Ok(_) => atom(a::OK),
-        Err(e) => err_tuple(ctx, &e),
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn tn_file_ls(c: *mut Ctx, p: Term) -> Term {
-    let ctx = cx(c);
-    let path = match path_of(p) {
-        Some(p) => p,
-        None => return ctx.badarg("argument error"),
-    };
-    match std::fs::read_dir(&path) {
-        Ok(rd) => {
-            let mut names: Vec<String> = rd
-                .filter_map(|e| e.ok())
-                .map(|e| e.file_name().to_string_lossy().into_owned())
-                .collect();
-            names.sort();
-            let base = ctx.roots.len();
-            for n in &names {
-                let b = ctx.str(n);
-                ctx.roots.push(b);
-            }
-            let l = ctx.list_from_roots(base, names.len(), NIL_LIST);
-            ctx.roots.truncate(base);
-            let li = ctx.push(l);
-            let t = ctx.tuple(&[atom(a::OK), ctx.get(li)]);
-            ctx.truncate(li);
-            t
-        }
-        Err(e) => err_tuple(ctx, &e),
     }
 }
 
@@ -255,19 +90,6 @@ pub extern "C" fn tn_file_cwd(c: *mut Ctx) -> Term {
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
     ctx.str(&d)
-}
-
-#[no_mangle]
-pub extern "C" fn tn_file_stat_size(c: *mut Ctx, p: Term) -> Term {
-    let ctx = cx(c);
-    let path = match path_of(p) {
-        Some(p) => p,
-        None => return ctx.badarg("argument error"),
-    };
-    match std::fs::metadata(&path) {
-        Ok(m) => small(m.len() as i64),
-        Err(_) => NIL,
-    }
 }
 
 // ---------------- system ----------------
@@ -438,51 +260,6 @@ pub extern "C" fn tn_math2(c: *mut Ctx, op: Term, x: Term, y: Term) -> Term {
 
 // ---------------- random ----------------
 
-fn rng() -> &'static Mutex<u64> {
-    static R: OnceLock<Mutex<u64>> = OnceLock::new();
-    R.get_or_init(|| {
-        let seed = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(42);
-        Mutex::new(seed | 1)
-    })
-}
-
-fn next_u64() -> u64 {
-    let mut s = rng().lock();
-    // xorshift64*
-    let mut x = *s;
-    x ^= x >> 12;
-    x ^= x << 25;
-    x ^= x >> 27;
-    *s = x;
-    x.wrapping_mul(0x2545F4914F6CDD1D)
-}
-
-#[no_mangle]
-pub extern "C" fn tn_rand_uniform(c: *mut Ctx, n: Term) -> Term {
-    let ctx = cx(c);
-    if !is_small(n) || small_val(n) < 1 {
-        return ctx.badarg("argument error");
-    }
-    small((next_u64() % small_val(n) as u64) as i64 + 1)
-}
-
-#[no_mangle]
-pub extern "C" fn tn_rand_float(c: *mut Ctx) -> Term {
-    let ctx = cx(c);
-    let f = (next_u64() >> 11) as f64 / (1u64 << 53) as f64;
-    ctx.float(f)
-}
-
-#[no_mangle]
-pub extern "C" fn tn_rand_seed(_c: *mut Ctx, s: Term) -> Term {
-    let v = if is_small(s) { small_val(s) as u64 } else { crate::cmp::hash(s) };
-    *rng().lock() = tonic_shared::mix64(v) | 1;
-    atom(a::OK)
-}
-
 // ---------------- error formatting ----------------
 
 /// Format an uncaught exception as Elixir prints it; uses the prelude's
@@ -578,13 +355,6 @@ pub fn debug_term(t: Term) -> String {
         T_REF => "#Reference<>".into(),
         _ => "<?>".into(),
     }
-}
-
-#[no_mangle]
-pub extern "C" fn tn_debug_print(c: *mut Ctx, t: Term) -> Term {
-    let _ = c;
-    eprintln!("{}", debug_term(t));
-    t
 }
 
 /// Identifier class of a codepoint for String.Tokenizer:

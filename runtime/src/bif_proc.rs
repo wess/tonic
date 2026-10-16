@@ -163,6 +163,9 @@ fn monitor_impl(ctx: &mut Ctx, target: Term, tag: Option<crate::heap::Fragment>)
         Some(p) => sched::monitor(me, p, refid),
         None => false,
     };
+    if ok && is_atom(target) {
+        sched::monitor_name_set(refid, atom_idx(target));
+    }
     let r = sched::mk_ref_term(ctx, refid);
     if !ok {
         let ri = ctx.push(r);
@@ -175,11 +178,17 @@ fn monitor_impl(ctx: &mut Ctx, target: Term, tag: Option<crate::heap::Fragment>)
             atom(a::DOWN)
         };
         let hi = ctx.push(head);
+        let object = if is_atom(target) {
+            ctx.tuple(&[target, atom(atoms::intern("nonode@nohost"))])
+        } else {
+            target
+        };
+        let oi = ctx.push(object);
         let t = ctx.tuple(&[
             ctx.get(hi),
             ctx.get(ri),
             atom(a::PROCESS),
-            target,
+            ctx.get(oi),
             atom(a::NOPROC),
         ]);
         let f = ctx.to_fragment(t);
@@ -221,17 +230,6 @@ pub extern "C" fn tn_wait_message(c: *mut Ctx) -> Term {
         return NONE;
     }
     TRUE
-}
-
-#[no_mangle]
-pub extern "C" fn tn_priority_of(_c: *mut Ctx, p: Term) -> Term {
-    if !is_pid(p) {
-        return NIL;
-    }
-    match sched::priority_of(pid_id(p)) {
-        Some(v) => atom(v),
-        None => NIL,
-    }
 }
 
 /// erlang:start_timer(ms, dest, msg): sends {:timeout, tref, msg}.
@@ -286,6 +284,9 @@ pub extern "C" fn tn_exit2(c: *mut Ctx, p: Term, reason: Term) -> Term {
         Err(e) => return e,
     };
     let me = ctx.pid();
+    if target != me {
+        sched::doom(target, reason == atom(a::KILL), reason == atom(a::NORMAL));
+    }
     let f = ctx.to_fragment(reason);
     sched::send_signal(
         target,
@@ -352,6 +353,14 @@ pub extern "C" fn tn_unregister(c: *mut Ctx, name: Term) -> Term {
     }
 }
 
+/// `:erlang.processes/0`
+#[no_mangle]
+pub extern "C" fn tn_processes(c: *mut Ctx) -> Term {
+    let ctx = cx(c);
+    let mut v: Vec<Term> = sched::live_pids().into_iter().map(pid).collect();
+    ctx.list_from_vec(&mut v)
+}
+
 #[no_mangle]
 pub extern "C" fn tn_whereis(_c: *mut Ctx, name: Term) -> Term {
     if !is_atom(name) {
@@ -371,44 +380,12 @@ pub extern "C" fn tn_registered(c: *mut Ctx) -> Term {
 }
 
 #[no_mangle]
-pub extern "C" fn tn_process_list(c: *mut Ctx) -> Term {
-    let ctx = cx(c);
-    let mut v: Vec<Term> = sched::all_pids().into_iter().map(pid).collect();
-    ctx.list_from_vec(&mut v)
-}
-
-#[no_mangle]
-pub extern "C" fn tn_process_links(c: *mut Ctx, p: Term) -> Term {
-    let ctx = cx(c);
-    let mut v: Vec<Term> = sched::links_of(pid_id(p)).into_iter().map(pid).collect();
-    ctx.list_from_vec(&mut v)
-}
-
-#[no_mangle]
 pub extern "C" fn tn_message_queue_len(c: *mut Ctx) -> Term {
     let ctx = cx(c);
     if !ctx.drain() {
         return NONE;
     }
     small(ctx.saveq.len() as i64)
-}
-
-/// The calling process' mailbox, oldest first.
-#[no_mangle]
-pub extern "C" fn tn_message_queue(c: *mut Ctx) -> Term {
-    let ctx = cx(c);
-    if !ctx.drain() {
-        return NONE;
-    }
-    let base = ctx.roots.len();
-    let n = ctx.saveq.len();
-    for i in 0..n {
-        let m = ctx.saveq[i];
-        ctx.roots.push(m);
-    }
-    let l = ctx.list_from_roots(base, n, NIL_LIST);
-    ctx.roots.truncate(base);
-    l
 }
 
 // ---------------- receive ----------------
@@ -536,7 +513,8 @@ pub extern "C" fn tn_set_group_leader(_c: *mut Ctx, p: Term, gl: Term) -> Term {
         return atom(a::ERROR);
     }
     let mut m = sched::group_leaders().lock();
-    if is_pid(gl) {
+    // a dead process never reaches process_exit again to clear its entry
+    if is_pid(gl) && sched::is_alive(pid_id(p)) {
         m.insert(pid_id(p), pid_id(gl));
     } else {
         m.remove(&pid_id(p));
@@ -736,15 +714,6 @@ pub extern "C" fn tn_info_request(c: *mut Ctx, p: Term, items: Term) -> Term {
     let f = ctx.to_fragment(items);
     sched::send_signal(target, Signal::Info { from: ctx.pid(), refid, items: f });
     sched::mk_ref_term(ctx, refid)
-}
-
-#[no_mangle]
-pub extern "C" fn tn_set_initial_call(c: *mut Ctx, m: Term, f: Term, a: Term) -> Term {
-    let ctx = cx(c);
-    if is_atom(m) && is_atom(f) && is_small(a) {
-        sched::set_initial_call(ctx.pid(), atom_idx(m), atom_idx(f), small_val(a) as u64);
-    }
-    TRUE
 }
 
 #[no_mangle]

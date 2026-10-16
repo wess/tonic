@@ -1,6 +1,6 @@
 # tonic
 
-**0.0.1 · experimental.** Start with scripts and small native applications.
+**0.1.0-beta.1 · beta.** Start with scripts and small native applications.
 Visit the [Tonic website](https://wess.io/tonic/).
 See the [release guide](docs/release.md) for installation and the
 [compatibility report](docs/compatibility.md) for tested packages and limitations.
@@ -229,6 +229,27 @@ in parallel across cores with preemptive-feeling fairness, and `GenServer`,
 `spawn`/`send`/`receive`/links/monitors) get all of that for free.
 `TONIC_SCHEDULERS` sets the number of worker threads.
 
+### Runtime settings
+
+Native programs read these environment variables at startup:
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `TONIC_SCHEDULERS` | CPU count | Scheduler threads running processes |
+| `TONIC_PROC_STACK_MB` | 256 | Stack reserved for each spawned process |
+| `TONIC_MAIN_STACK_MB` | 1024 | Stack reserved for the main process |
+| `TONIC_MIN_HEAP` | 2048 | Initial heap of each process, in words |
+| `TONIC_GC_STRESS` | off | Collect on every allocation (testing only) |
+
+Process stacks are reserved address space; memory is only committed as a
+process uses it. Unlike the BEAM, a process stack does not grow without
+bound: very deep non-tail recursion (a few hundred thousand frames in a spawned
+process at `-O0`) ends the program with a message naming these settings.
+Output to a pipe or file is batched and flushed within a few milliseconds, and
+`SIGTERM`, `SIGINT` and `SIGHUP` flush pending output before the program exits.
+`tonic run` passes termination signals on to the program it runs (and, on
+Linux, takes the program down with it even if tonic itself is killed).
+
 ### Calls, tail calls and exceptions
 
 Functions use LLVM's `tailcc` convention and every call in tail position is a
@@ -326,7 +347,7 @@ The CI workflow builds and checks the workspace on Linux and macOS, runs both
 fixture and live-reference comparisons, and exercises the moving collector.
 
 The release workflow requires those checks, verifies installed bundles with a
-fresh cache, and publishes an experimental GitHub prerelease for a matching
+fresh cache, and publishes a GitHub prerelease for a matching
 version tag. Manual release workflow runs produce artifacts without publishing.
 
 ## Website

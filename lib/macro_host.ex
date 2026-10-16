@@ -30,6 +30,8 @@ defmodule Tonic.MacroHost do
             {cmd, payload} = read_frame(header)
             {:ok, dispatch(cmd, payload)}
           rescue
+            # compile errors the host raises are already written for the user
+            e in CompileError -> {:error, Exception.message(e)}
             e -> {:error, Exception.format(:error, e, __STACKTRACE__)}
           catch
             kind, reason -> {:error, Exception.format(kind, reason, __STACKTRACE__)}
@@ -253,8 +255,15 @@ defmodule Tonic.MacroHost do
     if is_atom(target), do: Module.concat(protocol, target)
   end
 
+  # The user's view of a failure while loading their module: the exception and
+  # where it was raised, without the evaluator's own frames.
   defp format_error(kind, reason, stacktrace) do
-    Exception.format(kind, reason, stacktrace)
+    banner = Exception.format_banner(kind, reason, stacktrace)
+
+    case Process.delete(:tonic_eval_raised_at) do
+      {file, line} -> banner <> "\n    #{Path.relative_to_cwd(file)}:#{line}: (module)"
+      nil -> banner
+    end
   rescue
     _ -> Exception.format_banner(kind, reason, [])
   end
@@ -262,7 +271,7 @@ defmodule Tonic.MacroHost do
   defp store_load_error(nil, path, error), do: raise(CompileError, file: path, description: error)
   defp store_load_error(mod, path, error) do
     errors = Process.get(:tonic_macro_load_errors)
-    Process.put(:tonic_macro_load_errors, Map.put(errors, mod, "could not load #{inspect(mod)} from #{path}:\n#{error}"))
+    Process.put(:tonic_macro_load_errors, Map.put(errors, mod, error))
   end
 
   defp check_loaded!(mod) do
@@ -368,6 +377,10 @@ defmodule Tonic.MacroHost do
       _ -> a
     end
   end
+
+  # var!(x) is the caller's x: a plain variable, never renamed
+  defp rename({:var!, _, [{name, meta, ctx}]}, _bound, _id) when is_atom(name) and is_atom(ctx), do: {name, meta, nil}
+  defp rename({:var!, _, [{name, meta, ctx}, nil]}, _bound, _id) when is_atom(name) and is_atom(ctx), do: {name, meta, nil}
 
   defp rename({:@, meta, [{name, name_meta, ctx}]}, _bound, _id) when is_atom(name) and is_atom(ctx),
     do: {:@, meta, [{name, name_meta, ctx}]}

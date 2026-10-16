@@ -16,7 +16,7 @@ pub enum T {
     Str(Vec<Part>),
     Charlist(Vec<Part>),
     Sigil {
-        ch: char,
+        name: String,
         parts: Vec<Part>,
         mods: String,
     },
@@ -84,6 +84,14 @@ impl<'a> Lexer<'a> {
 
     fn err<T>(&self, msg: &str) -> LexResult<T> {
         Err(format!("{}:{}: syntax error: {}", self.file, self.line, msg))
+    }
+
+    /// An unclosed token, reported where it opens rather than at end of file.
+    fn missing<T>(&self, start: u32, terminator: &str, what: &str) -> LexResult<T> {
+        Err(format!(
+            "{}:{}: syntax error: missing terminator: {} (for {} starting at line {})",
+            self.file, start, terminator, what, start
+        ))
     }
 
     fn peek(&self) -> u8 {
@@ -507,7 +515,10 @@ impl<'a> Lexer<'a> {
             .filter(|c| *c != '_')
             .collect();
         if is_float {
-            Ok(T::Float(text.parse().map_err(|_| "bad float")?))
+            match text.parse::<f64>() {
+                Ok(f) if f.is_finite() => Ok(T::Float(f)),
+                _ => Err(format!("invalid float number {}", text)),
+            }
         } else {
             Ok(T::Int(text.trim_start_matches('0').to_string()).normalize_int())
         }
@@ -624,7 +635,7 @@ impl<'a> Lexer<'a> {
             }
             self.pos += 1;
         }
-        self.err("unterminated interpolation")
+        self.missing(line, "}", "interpolation")
     }
 
     /// Body of a quoted string after the opening delimiter.
@@ -637,12 +648,13 @@ impl<'a> Lexer<'a> {
         let mut parts = Vec::new();
         let mut cur: Vec<u8> = Vec::new();
         let mut depth = 0;
+        let start = self.line;
         loop {
             if self.pos >= self.src.len() {
                 if close == 0xff {
                     break;
                 }
-                return self.err("unterminated string");
+                return self.missing(start, &(close as char).to_string(), "string");
             }
             let c = self.peek();
             if c == close && depth == 0 {
@@ -712,11 +724,13 @@ impl<'a> Lexer<'a> {
     }
 
     fn heredoc_x(&mut self, q: u8, interp: bool, raw: bool, keep_escapes: bool) -> LexResult<Vec<Part>> {
+        let start = self.line;
+        let terminator = String::from_utf8(vec![q; 3]).unwrap();
         self.pos += 3;
         // skip to end of line
         while self.peek() != b'\n' {
             if self.pos >= self.src.len() {
-                return self.err("unterminated heredoc");
+                return self.missing(start, &terminator, "heredoc");
             }
             self.pos += 1;
         }
@@ -728,7 +742,7 @@ impl<'a> Lexer<'a> {
         let indent;
         loop {
             if self.pos >= self.src.len() {
-                return self.err("unterminated heredoc");
+                return self.missing(start, &terminator, "heredoc");
             }
             let ls = self.pos;
             while self.pos < self.src.len() && self.peek() != b'\n' {
@@ -770,7 +784,14 @@ impl<'a> Lexer<'a> {
         self.pos += 1;
         let ch = self.peek() as char;
         self.pos += 1;
-        // Multi-letter uppercase sigils (~HTML) - consume trailing uppercase letters
+        let mut name = ch.to_string();
+        // multi-letter sigils (~HTML) are uppercase letters and digits
+        if ch.is_ascii_uppercase() {
+            while self.peek().is_ascii_uppercase() || self.peek().is_ascii_digit() {
+                name.push(self.peek() as char);
+                self.pos += 1;
+            }
+        }
         let d = self.peek();
         let lower = ch.is_ascii_lowercase();
         let parts = if (d == b'"' || d == b'\'') && self.peek_at(1) == d && self.peek_at(2) == d {
@@ -796,7 +817,7 @@ impl<'a> Lexer<'a> {
             self.pos += 1;
         }
         let mods = String::from_utf8_lossy(&self.src[ms..self.pos]).into_owned();
-        self.push(T::Sigil { ch, parts, mods }, line, sp);
+        self.push(T::Sigil { name, parts, mods }, line, sp);
         Ok(())
     }
 }

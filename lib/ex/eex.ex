@@ -1,4 +1,5 @@
 defmodule EEx.SyntaxError do
+# Modified for Tonic; Elixir 1.18.3 source/port. Apache-2.0; see licenses/sources.json and notice.
   defexception [:file, :line, :column, :snippet, message: "syntax error"]
 
 

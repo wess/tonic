@@ -1,8 +1,11 @@
+#[path = "support/process.rs"]
+mod process;
+
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 fn scratch(name: &str) -> PathBuf {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -22,53 +25,6 @@ fn write(root: &Path, name: &str, source: &str) {
     fs::write(path, source).unwrap();
 }
 
-fn execute(mut command: Command, timeout: Duration) -> Output {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .unwrap_or_else(|error| panic!("cannot run {command:?}: {error}"));
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
-    let read = |mut stream: Box<dyn std::io::Read + Send>| {
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            stream.read_to_end(&mut bytes).unwrap();
-            bytes
-        })
-    };
-    let out = read(Box::new(stdout));
-    let err = read(Box::new(stderr));
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child.try_wait().unwrap() {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            #[cfg(unix)]
-            unsafe {
-                extern "C" {
-                    fn kill(pid: i32, signal: i32) -> i32;
-                }
-                kill(-(child.id() as i32), 9);
-            }
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("command timed out: {command:?}");
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    };
-    Output {
-        status,
-        stdout: out.join().unwrap(),
-        stderr: err.join().unwrap(),
-    }
-}
-
 fn tonic(root: &Path, env: &str, target: &str, args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tonic"));
     command
@@ -77,7 +33,7 @@ fn tonic(root: &Path, env: &str, target: &str, args: &[&str]) -> Output {
         .env("MIX_TARGET", target)
         .env("TONIC_PACKAGE_RUNTIME", "duringrun")
         .args(args);
-    execute(command, Duration::from_secs(180))
+    process::execute(command, Duration::from_secs(180))
 }
 
 fn success(result: &Output) {
@@ -242,7 +198,7 @@ end
         .current_dir(&root)
         .env("TONIC_PACKAGE_RUNTIME", "standalone")
         .arg("standalone");
-    let result = execute(command, Duration::from_secs(60));
+    let result = process::execute(command, Duration::from_secs(60));
     success(&result);
     assert_eq!(
         result.stdout,
@@ -377,7 +333,7 @@ end
             .env("MIX_ENV", "dev")
             .env("MIX_TARGET", "host")
             .args(args);
-        execute(command, Duration::from_secs(180))
+        process::execute(command, Duration::from_secs(180))
     };
     success(&mix(&["local.hex", "--force"]));
     success(&mix(&["deps.get"]));
@@ -394,7 +350,7 @@ end
         .env("MIX_ENV", "dev")
         .env("MIX_TARGET", "host")
         .args(["run", "."]);
-    let result = execute(command, Duration::from_secs(180));
+    let result = process::execute(command, Duration::from_secs(180));
     success(&result);
     assert_eq!(result.stdout, b"3.75\n");
     let lock_path = project.join("mix.lock");
@@ -422,7 +378,7 @@ end
         .env("MIX_ENV", "dev")
         .env("MIX_TARGET", "host")
         .args(["check", "."]);
-    let stale = execute(command, Duration::from_secs(180));
+    let stale = process::execute(command, Duration::from_secs(180));
     fs::write(&lock_path, &original_lock).unwrap();
     assert!(!stale.status.success());
     let error = String::from_utf8_lossy(&stale.stderr);

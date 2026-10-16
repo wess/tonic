@@ -291,6 +291,9 @@ pub mod enc {
     /// Map HAMT node: [hdr, bitmap (small int), child...]; a child is a
     /// HAMT node or a T_MAPNODE leaf.
     pub const T_HAMT: u64 = 13;
+    /// Growable byte buffer behind appended binaries: [hdr, used bytes, data...].
+    /// Never a term itself; only sub-binaries over it reach programs.
+    pub const T_WBUF: u64 = 14;
 
     #[inline(always)]
     pub const fn header(tag: u64, payload_words: u64) -> u64 {

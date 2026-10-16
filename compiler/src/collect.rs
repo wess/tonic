@@ -445,8 +445,16 @@ impl Collector {
         }
     }
 
-    fn new_module(&mut self, name: &str, file: &str, line: u32) {
+    fn new_module(&mut self, name: &str, file: &str, line: u32) -> R<()> {
         let prelude = self.prelude;
+        // Elixir replaces a redefined module, which only works when modules
+        // load at run time; refuse instead of silently keeping one of them.
+        if let Some(m) = self.mods.get(name).filter(|m| !prelude && !m.is_prelude) {
+            return Err(format!(
+                "{}:{}: module {} is already defined at {}:{}; tonic cannot redefine modules",
+                file, line, name.strip_prefix("Elixir.").unwrap_or(name), m.file, m.line
+            ));
+        }
         // A program redefining a standard library module replaces it.
         if !prelude && self.mods.get(name).map(|m| m.is_prelude).unwrap_or(false) {
             self.mods.remove(name);
@@ -472,6 +480,7 @@ impl Collector {
             after_compile: false,
             callbacks: HashSet::new(),
         });
+        Ok(())
     }
 
     /// defmodule / defprotocol / defimpl at top level or nested.
@@ -505,7 +514,7 @@ impl Collector {
                         outer.aliases.insert(first, full);
                     }
                 }
-                self.new_module(&name, &file, e.line);
+                self.new_module(&name, &file, e.line)?;
                 let mut env = ModEnv {
                     module: name.clone(),
                     aliases: outer.aliases.clone(),
@@ -526,7 +535,7 @@ impl Collector {
                         outer.aliases.insert(first, full);
                     }
                 }
-                self.new_module(&name, &file, e.line);
+                self.new_module(&name, &file, e.line)?;
                 let mut p = self.protocols.remove(&name).unwrap_or_default();
                 p.name = name.clone();
                 let stmts = block_stmts(&body);
@@ -604,7 +613,7 @@ impl Collector {
                 for f in fors {
                     let short = f.strip_prefix("Elixir.").unwrap_or(&f).to_string();
                     let name = format!("{}.{}", proto, short);
-                    self.new_module(&name, &file, e.line);
+                    self.new_module(&name, &file, e.line)?;
                     let mut env = ModEnv {
                         module: name.clone(),
                         aliases: outer.aliases.clone(),
@@ -1587,8 +1596,16 @@ impl Collector {
                                     K::Var(name) => vars.get(name).cloned(),
                                     _ => None,
                                 });
+                                let accumulated = attrs.contains_key(&format!("\u{0}acc:{}", name));
                                 let v =
                                     match self.constant_attribute(&expression, env, &vars, attrs) {
+                                        Some(value) if accumulated => {
+                                            let mut items = vec![value];
+                                            if let Some(E { k: K::List(previous, None), .. }) = attrs.get(name) {
+                                                items.extend(previous.iter().cloned());
+                                            }
+                                            E::list(items, line)
+                                        }
                                         Some(value) => value,
                                         None if !self.prelude => crate::macrohost::attribute_value(
                                             module, name, &env.file, line, occurrence,
@@ -1637,12 +1654,29 @@ impl Collector {
                         "register_attribute" | "put_attribute" | "delete_attribute" | "add_doc"
                     )
                 {
+                    // accumulated attributes read in function bodies need the whole list
+                    if name == "register_attribute" && args.len() == 3 {
+                        let accumulate = matches!(args[2].kw_get("accumulate"), Some(E { k: K::Atom(t), .. }) if t == "true");
+                        if let (true, K::Atom(attr)) = (accumulate, &args[1].k) {
+                            attrs.insert(format!("\u{0}acc:{}", attr), E::atom("true", line));
+                            attrs.entry(attr.clone()).or_insert_with(|| E::list(vec![], line));
+                        }
+                    }
                     return Ok(());
                 }
                 if target == "Elixir.Enum" && matches!(name.as_str(), "each" | "map") && args.len() == 2 {
                     let mut last = line;
                     map_expr(&s, &mut |node| { last = last.max(node.line); None });
                     let definitions = crate::macrohost::generated_definitions(module, &env.file, line, last)?;
+                    return self.module_stmt_inner(module, definitions, env, attrs);
+                }
+                // any other call that defines functions as it runs, such as
+                // `Enum.reduce(0..9, 1, fn i, acc -> def f(unquote(i)) ... end)`:
+                // take the definitions the host recorded while running it
+                if !self.defines_macro(&target, name, args.len()) && defines_functions(args) {
+                    let mut last = line;
+                    map_expr(&s, &mut |node| { last = last.max(node.line); None });
+                    let definitions = crate::macrohost::comprehension_definitions(module, &env.file, line, last)?;
                     return self.module_stmt_inner(module, definitions, env, attrs);
                 }
                 if self.defines_macro(&target, name, args.len()) {
@@ -1955,45 +1989,6 @@ impl Collector {
     }
 }
 
-const GENSERVER_USING: &str = r#"
-def child_spec(init_arg) do
-  %{id: __MODULE__, start: {__MODULE__, :start_link, [init_arg]}}
-end
-def handle_call(msg, _from, _state) do
-  raise "attempted to call GenServer #{inspect(self())} but no handle_call/3 clause was provided (got: #{inspect(msg)})"
-end
-def handle_cast(msg, _state) do
-  raise "attempted to cast GenServer #{inspect(self())} but no handle_cast/2 clause was provided (got: #{inspect(msg)})"
-end
-def handle_info(_msg, state) do
-  {:noreply, state}
-end
-def terminate(_reason, _state) do
-  :ok
-end
-def code_change(_old, state, _extra) do
-  {:ok, state}
-end
-"#;
-
-const AGENT_USING: &str = r#"
-def child_spec(arg) do
-  %{id: __MODULE__, start: {__MODULE__, :start_link, [arg]}}
-end
-"#;
-
-const TASK_USING: &str = r#"
-def child_spec(arg) do
-  %{id: __MODULE__, start: {__MODULE__, :start_link, [arg]}, restart: :temporary}
-end
-"#;
-
-const SUPERVISOR_USING: &str = r#"
-def child_spec(arg) do
-  %{id: __MODULE__, start: {__MODULE__, :start_link, [arg]}, type: :supervisor}
-end
-"#;
-
 fn defines_modules(e: &E) -> bool {
     let mut found = false;
     map_expr(e, &mut |node| {
@@ -2164,6 +2159,20 @@ fn struct_fields(e: &E, attrs: &HashMap<String, E>, file: &str) -> R<Vec<(String
 }
 
 /// Generic expression rewriter: `f` returns Some(replacement) to replace a node.
+/// Whether running `args` defines functions: they contain a `def`-family call.
+fn defines_functions(args: &[E]) -> bool {
+    let mut found = false;
+    for a in args {
+        map_expr(a, &mut |node| {
+            if let K::Call { name, .. } = &node.k {
+                found |= matches!(name.as_str(), "def" | "defp" | "defmacro" | "defmacrop");
+            }
+            None
+        });
+    }
+    found
+}
+
 pub fn map_expr(e: &E, f: &mut dyn FnMut(&E) -> Option<E>) -> E {
     if let Some(r) = f(e) {
         return r;

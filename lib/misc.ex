@@ -17,7 +17,7 @@ defmodule System do
 
   def fetch_env!(name) do
     case :tonic.system_get_env(name) do
-      nil -> raise ArgumentError, "could not fetch environment variable #{inspect(name)} because it is not set"
+      nil -> raise System.EnvError, env: name
       v -> v
     end
   end
@@ -1887,4 +1887,13 @@ defmodule Node do
   def self, do: :nonode@nohost
   def alive?, do: false
   def list, do: []
+end
+
+defmodule System.EnvError do
+  defexception [:env]
+
+  @impl true
+  def message(%{env: env}) do
+    "could not fetch environment variable #{inspect(env)} because it is not set"
+  end
 end

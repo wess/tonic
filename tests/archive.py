@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the installed Mix archive with the native compiler."""
 import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -37,6 +38,7 @@ def main():
 end
 ''')
         (project / "lib/main.ex").write_text('''defmodule NativeArchive do
+  def main(["stdin"]), do: IO.inspect({:stdin, IO.gets("")})
   def main(args), do: IO.inspect({:native, args})
 end
 ''')
@@ -46,6 +48,10 @@ end
         run(["mix", "archive.install", str(archive), "--force"], project)
         run(["mix", "tonic.check"], project)
         assert run(["mix", "tonic.run", "--", "with spaces", "$(literal)", "--deps-get"], project) == b'{:native, ["with spaces", "$(literal)", "--deps-get"]}\n'
+        # the program shares the caller's stdin rather than waiting on a pipe Mix never feeds
+        piped = subprocess.run(["mix", "tonic.run", "--", "stdin"], cwd=project, input=b"alice\n",
+                               capture_output=True, timeout=180)
+        assert piped.returncode == 0 and piped.stdout == b'{:stdin, "alice\\n"}\n', piped
         run(["mix", "tonic.build"], project)
         binary = project / "_build/dev/tonic/nativearchive"
         assert run([str(binary), "standalone"], root) == b'{:native, ["standalone"]}\n'

@@ -1,4 +1,5 @@
 defmodule EEx.Compiler do
+# Modified for Tonic; Elixir 1.18.3 source/port. Apache-2.0; see licenses/sources.json and notice.
 
 
   # When changing this setting, don't forget to update the docs for EEx

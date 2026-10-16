@@ -41,6 +41,9 @@ pub struct ProcState {
     pub monitored_by: Vec<(u64, u64)>,
     pub trap_exit: bool,
     pub alive: bool,
+    /// Sent an exit signal that will kill it: from the sender's view it is
+    /// already dead, as signal ordering guarantees on the BEAM.
+    pub doomed: bool,
     pub name: Option<u64>,
     /// process_flag(:priority) value (atom index).
     pub priority: u64,
@@ -64,9 +67,6 @@ pub enum YieldReason {
 
 type Co = Coroutine<(), YieldReason, (), DefaultStack>;
 struct SendCo(Co);
-
-struct SendStack(DefaultStack);
-unsafe impl Send for SendStack {}
 
 struct StackPool(Vec<DefaultStack>);
 unsafe impl Send for StackPool {}
@@ -104,6 +104,8 @@ struct Globals {
     rt: OnceLock<tokio::runtime::Handle>,
     timers: Mutex<HashMap<u64, (tokio::task::JoinHandle<()>, Instant)>>,
     proc_stack: usize,
+    main_stack: usize,
+    min_heap: Option<usize>,
     pub argv: Mutex<Vec<String>>,
 }
 
@@ -121,9 +123,16 @@ fn g() -> &'static Globals {
         proc_stack: std::env::var("TONIC_PROC_STACK_MB")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(64)
+            .unwrap_or(256)
             * 1024
             * 1024,
+        main_stack: std::env::var("TONIC_MAIN_STACK_MB")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(1024)
+            * 1024
+            * 1024,
+        min_heap: std::env::var("TONIC_MIN_HEAP").ok().and_then(|s| s.parse::<usize>().ok()),
         argv: Mutex::new(Vec::new()),
     })
 }
@@ -350,6 +359,7 @@ fn new_shared(pid: u64) -> Arc<ProcShared> {
             monitored_by: Vec::new(),
             trap_exit: false,
             alive: true,
+            doomed: false,
             name: None,
             priority: crate::atoms::intern("normal"),
             initial_call: (crate::atoms::intern("erlang"), crate::atoms::intern("apply"), 2),
@@ -401,16 +411,7 @@ pub fn spawn(entry: Entry, opts: SpawnOpts) -> u64 {
     g().procs.write().insert(pid, shared.clone());
     g().alive.fetch_add(1, Ordering::Relaxed);
     let is_main = matches!(entry, Entry::Main(_));
-    let stack_size = if is_main {
-        std::env::var("TONIC_MAIN_STACK_MB")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(1024)
-            * 1024
-            * 1024
-    } else {
-        g().proc_stack
-    };
+    let stack_size = if is_main { g().main_stack } else { g().proc_stack };
     let sh2 = shared.clone();
     let stack = if is_main { None } else { stack_pool().lock().pop() };
     let stack = match stack {
@@ -426,7 +427,7 @@ pub fn spawn(entry: Entry, opts: SpawnOpts) -> u64 {
     let co: Co = Coroutine::with_stack(
         stack,
         move |yielder: &Yielder<(), YieldReason>, ()| {
-            let mut ctx = Ctx::new(match std::env::var("TONIC_MIN_HEAP").ok().and_then(|s| s.parse::<usize>().ok()) {
+            let mut ctx = Ctx::new(match g().min_heap {
                 Some(n) => n.max(64),
                 None => if is_main { 1 << 16 } else { MIN_HEAP_WORDS },
             });
@@ -473,7 +474,7 @@ pub fn spawn(entry: Entry, opts: SpawnOpts) -> u64 {
             let stack = co.0.into_stack();
             let mut pool = stack_pool().lock();
             if pool.len() < 256 {
-                pool.push(SendStack(stack).0);
+                pool.push(stack);
             }
         }
     };
@@ -535,6 +536,12 @@ fn finish_process(ctx: &mut Ctx, r: Term, is_main: bool) {
         if r == NONE {
             let kind = ctx.exc_kind;
             let rs = ctx.exc_reason;
+            if kind == atom(a::EXIT_KIND) {
+                if let Some(code) = shutdown_status(rs) {
+                    crate::io::stdout_flush();
+                    std::process::exit(code);
+                }
+            }
             if ctx.kill_reason == 0 {
                 let msg = crate::bif_misc::format_exit_message_x(ctx, kind, rs, true);
                 crate::io::stdout_flush();
@@ -548,6 +555,27 @@ fn finish_process(ctx: &mut Ctx, r: Term, is_main: bool) {
     }
     ctx.exit_reason = reason;
     process_exit(ctx);
+}
+
+/// Pids of live processes, oldest first.
+pub fn live_pids() -> Vec<u64> {
+    let mut v: Vec<u64> = g().procs.read().iter().filter(|(_, p)| p.st.lock().alive).map(|(id, _)| *id).collect();
+    v.sort_unstable();
+    v
+}
+
+/// Exit status for a script whose main process exits with an orderly
+/// shutdown reason, as `elixir` does: :normal, :shutdown and
+/// {:shutdown, _} stop quietly; {:shutdown, n} uses n as the status.
+fn shutdown_status(reason: Term) -> Option<i32> {
+    if reason == atom(a::NORMAL) || reason == atom(a::SHUTDOWN) {
+        return Some(0);
+    }
+    if is_tuple(reason) && tuple_size(reason) == 2 && tuple_get(reason, 0) == atom(a::SHUTDOWN) {
+        let code = tuple_get(reason, 1);
+        return Some(if is_small(code) { (small_val(code) & 255) as i32 } else { 0 });
+    }
+    None
 }
 
 fn process_exit(ctx: &mut Ctx) {
@@ -564,7 +592,11 @@ fn process_exit(ctx: &mut Ctx) {
     };
     g().procs.write().remove(&me);
     crate::ets::owner_exited(me);
+    crate::net::owner_exited(me);
+    crate::bif_file::owner_exited(me);
     group_leaders().lock().remove(&me);
+    watcher_exited(me);
+    aliases_exited(me);
     if let Some(n) = name {
         g().names.write().remove(&n);
     }
@@ -601,11 +633,17 @@ fn process_exit(ctx: &mut Ctx) {
             None => atom(a::DOWN),
         };
         ctx.roots.push(head);
+        // a monitor taken by name reports {name, node}
+        let object = match monitor_name_take(refid) {
+            Some(name) => ctx.tuple(&[atom(name), atom(crate::atoms::intern("nonode@nohost"))]),
+            None => pid(me),
+        };
+        ctx.roots.push(object);
         let t = ctx.tuple(&[
             ctx.roots[base + 1],
             ctx.roots[base],
             atom(a::PROCESS),
-            pid(me),
+            ctx.roots[base + 2],
             ctx.exit_reason,
         ]);
         ctx.roots.truncate(base);
@@ -688,6 +726,7 @@ pub fn alias_remove(refid: u64, owner: u64) -> bool {
     match a.get(&refid) {
         Some((o, _)) if *o == owner => {
             a.remove(&refid);
+            reply_aliases().lock().remove(&refid);
             true
         }
         _ => false,
@@ -737,7 +776,7 @@ pub fn monitor(watcher: u64, target: u64, refid: u64) -> bool {
     match lookup_proc(target) {
         Some(p) => {
             let mut st = p.st.lock();
-            if !st.alive {
+            if !st.alive || st.doomed {
                 return false;
             }
             st.monitored_by.push((refid, watcher));
@@ -752,13 +791,50 @@ fn monitor_gone(refid: u64) {
     let mut a = aliases().lock();
     if let Some((_, true)) = a.get(&refid) {
         a.remove(&refid);
+        reply_aliases().lock().remove(&refid);
     }
+}
+
+/// Drop monitors a dead process held on others; the targets would otherwise
+/// keep them until they exit themselves.
+fn watcher_exited(me: u64) {
+    let held: Vec<(u64, u64)> = {
+        let mut idx = monitor_index().lock();
+        let held: Vec<(u64, u64)> = idx
+            .iter()
+            .filter(|(_, (_, w))| *w == me)
+            .map(|(r, (t, _))| (*r, *t))
+            .collect();
+        for (r, _) in &held {
+            idx.remove(r);
+        }
+        held
+    };
+    for (refid, target) in held {
+        let _ = monitor_tag_take(refid);
+        if let Some(p) = lookup_proc(target) {
+            p.st.lock().monitored_by.retain(|(r, _)| *r != refid);
+        }
+    }
+}
+
+fn aliases_exited(me: u64) {
+    let mut a = aliases().lock();
+    let mut reply = reply_aliases().lock();
+    a.retain(|r, (o, _)| {
+        let keep = *o != me;
+        if !keep {
+            reply.remove(r);
+        }
+        keep
+    });
 }
 
 /// Remove a monitor; true if it was still active.
 pub fn demonitor(refid: u64) -> bool {
     let target = monitor_index().lock().remove(&refid);
     let _ = monitor_tag_take(refid);
+    let _ = monitor_name_take(refid);
     let found = target.is_some();
     if let Some((t, _)) = target {
         if let Some(p) = lookup_proc(t) {
@@ -770,7 +846,32 @@ pub fn demonitor(refid: u64) -> bool {
 }
 
 pub fn is_alive(pid: u64) -> bool {
-    lookup_proc(pid).map(|p| p.st.lock().alive).unwrap_or(false)
+    lookup_proc(pid).map(|p| { let st = p.st.lock(); st.alive && !st.doomed }).unwrap_or(false)
+}
+
+/// Marks `pid` dead to other processes once an exit signal that kills it
+/// has been sent: `:kill`, or any abnormal reason when it does not trap exits.
+pub fn doom(pid: u64, kill: bool, normal: bool) {
+    if let Some(p) = lookup_proc(pid) {
+        let mut st = p.st.lock();
+        if kill || (!normal && !st.trap_exit) {
+            st.doomed = true;
+        }
+    }
+}
+
+/// Registered names of monitors taken by name, for their DOWN messages.
+fn monitor_names() -> &'static parking_lot::Mutex<HashMap<u64, u64>> {
+    static M: std::sync::OnceLock<parking_lot::Mutex<HashMap<u64, u64>>> = std::sync::OnceLock::new();
+    M.get_or_init(|| parking_lot::Mutex::new(HashMap::new()))
+}
+
+pub fn monitor_name_set(refid: u64, name: u64) {
+    monitor_names().lock().insert(refid, name);
+}
+
+fn monitor_name_take(refid: u64) -> Option<u64> {
+    monitor_names().lock().remove(&refid)
 }
 
 pub fn set_trap_exit(pid: u64, v: bool) -> bool {
@@ -806,12 +907,19 @@ pub fn send_after(to: u64, f: Fragment, ms: u64) -> u64 {
 
 pub fn send_after_id(to: u64, f: Fragment, ms: u64, id: u64) -> u64 {
     let deadline = Instant::now() + Duration::from_millis(ms);
+    // hold the lock across spawn so a zero-delay timer cannot remove its
+    // entry before it is inserted
+    let mut timers = g().timers.lock();
     let h = g().rt.get().unwrap().spawn(async move {
         tokio::time::sleep(Duration::from_millis(ms)).await;
-        g().timers.lock().remove(&id);
-        send_fragment(to, f);
+        // a timer that cancel_timer removed first must not deliver, even if
+        // this task was already past its sleep when abort() ran
+        let active = g().timers.lock().remove(&id).is_some();
+        if active {
+            send_fragment(to, f);
+        }
     });
-    g().timers.lock().insert(id, (h, deadline));
+    timers.insert(id, (h, deadline));
     id
 }
 
@@ -894,6 +1002,7 @@ pub unsafe extern "C" fn tonic_start(
         .enable_time()
         .enable_io()
         .thread_stack_size(8 * 1024 * 1024)
+        .on_thread_start(crate::io::alt_stack)
         .build()
         .expect("tokio runtime");
     let _ = g().rt.set(rt.handle().clone());

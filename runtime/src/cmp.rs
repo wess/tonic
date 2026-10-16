@@ -39,7 +39,14 @@ fn cmp_numbers(a: Term, b: Term, exact: bool) -> Ordering {
     let bf = is_float(b);
     match (af, bf) {
         (false, false) => cmp_int(a, b),
-        (true, true) => float_val(a).partial_cmp(&float_val(b)).unwrap_or(Equal),
+        (true, true) => {
+            let (x, y) = (float_val(a), float_val(b));
+            match x.partial_cmp(&y).unwrap_or(Equal) {
+                // OTP 27: -0.0 and 0.0 are equal numbers but different terms
+                Equal if exact => x.is_sign_positive().cmp(&y.is_sign_positive()),
+                o => o,
+            }
+        }
         (false, true) => {
             let o = cmp_int_float(a, float_val(b));
             if o == Equal && exact {
@@ -92,6 +99,12 @@ pub fn map_key_cmp(a: Term, b: Term) -> Ordering {
         return atoms::beam_index(atom_idx(a))
             .cmp(&atoms::beam_index(atom_idx(b)))
             .then(atom_idx(a).cmp(&atom_idx(b)));
+    }
+    // in map key order every integer precedes every float
+    match (is_integer(a) && is_float(b), is_float(a) && is_integer(b)) {
+        (true, _) => return Less,
+        (_, true) => return Greater,
+        _ => {}
     }
     compare_x(a, b, true, false)
 }

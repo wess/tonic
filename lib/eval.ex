@@ -1153,13 +1153,16 @@ defmodule Tonic.Eval do
     end
   end
 
+  # where compile-time code raised, for the error the macro host reports
+  defp raised_at(meta, st), do: Process.put(:tonic_eval_raised_at, {st.file, Keyword.get(meta, :line, st.line)})
+
   defp kernel_macro(name, arity) do
     {name, arity} in [{:if, 2}, {:unless, 2}, {:to_string, 1}, {:is_nil, 1}, {:then, 2}, {:tap, 2}, {:raise, 1}, {:raise, 2}]
   end
 
-  defp special_or_local(:raise, _meta, [msg], st) do
+  defp special_or_local(:raise, meta, [msg], st) do
     {v, st} = expr(msg, st)
-    _ = st
+    raised_at(meta, st)
 
     exception =
       cond do
@@ -1172,9 +1175,10 @@ defmodule Tonic.Eval do
     :erlang.error(exception)
   end
 
-  defp special_or_local(:raise, _meta, [mod, attrs], st) do
+  defp special_or_local(:raise, meta, [mod, attrs], st) do
     {m, st} = expr(mod, st)
-    {a, _st} = expr(attrs, st)
+    {a, st} = expr(attrs, st)
+    raised_at(meta, st)
     :erlang.error(Tonic.Eval.Modules.apply(m, :exception, [a]))
   end
 

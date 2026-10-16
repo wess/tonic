@@ -414,7 +414,7 @@ pub unsafe extern "C" fn enif_make_atom(_e: *mut Env, name: *const c_char) -> Te
 
 #[no_mangle]
 pub unsafe extern "C" fn enif_make_atom_len(_e: *mut Env, name: *const c_char, len: usize) -> Term {
-    let bytes = std::slice::from_raw_parts(name as *const u8, len);
+    let bytes = raw_slice(name as *const u8, len);
     atom(crate::atoms::intern(&String::from_utf8_lossy(bytes)))
 }
 
@@ -474,7 +474,7 @@ pub unsafe extern "C" fn enif_make_string(e: *mut Env, s: *const c_char, _enc: c
 
 #[no_mangle]
 pub unsafe extern "C" fn enif_make_string_len(e: *mut Env, s: *const c_char, len: usize, _enc: c_int) -> Term {
-    env(e).charlist(std::slice::from_raw_parts(s as *const u8, len))
+    env(e).charlist(raw_slice(s as *const u8, len))
 }
 
 /// Marks binaries allocated by enif_alloc_binary (their memory is ours).
@@ -532,7 +532,7 @@ pub unsafe extern "C" fn enif_release_binary(bin: *mut NifBinary) {
 
 #[no_mangle]
 pub unsafe extern "C" fn enif_make_binary(e: *mut Env, bin: *mut NifBinary) -> Term {
-    let bytes = std::slice::from_raw_parts((*bin).data, (*bin).size);
+    let bytes = raw_slice((*bin).data, (*bin).size);
     let t = env(e).bytes(bytes);
     enif_release_binary(bin);
     t
@@ -543,6 +543,16 @@ pub unsafe extern "C" fn enif_make_new_binary(e: *mut Env, size: usize, termp: *
     let (t, data) = env(e).binary(size);
     *termp = t;
     data
+}
+
+/// A slice from C: NIFs pass NULL with a zero count, which
+/// `slice::from_raw_parts` does not allow.
+unsafe fn raw_slice<'a, T>(p: *const T, n: usize) -> &'a [T] {
+    if n == 0 || p.is_null() {
+        &[]
+    } else {
+        std::slice::from_raw_parts(p, n)
+    }
 }
 
 #[no_mangle]
@@ -556,13 +566,13 @@ pub unsafe extern "C" fn enif_make_sub_binary(e: *mut Env, bin: Term, pos: usize
 
 #[no_mangle]
 pub unsafe extern "C" fn enif_make_tuple_from_array(e: *mut Env, arr: *const Term, cnt: c_uint) -> Term {
-    let items = std::slice::from_raw_parts(arr, cnt as usize);
+    let items = raw_slice(arr, cnt as usize);
     env(e).tuple(items)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn enif_make_list_from_array(e: *mut Env, arr: *const Term, cnt: c_uint) -> Term {
-    let items = std::slice::from_raw_parts(arr, cnt as usize);
+    let items = raw_slice(arr, cnt as usize);
     let mut list = NIL_LIST;
     for item in items.iter().rev() {
         list = env(e).cons(*item, list);

@@ -7,6 +7,9 @@ on:
   workflow_call:
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 jobs:
   test:
     strategy:
@@ -14,7 +17,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-14]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       TONIC_TEST_TIMEOUT: 120
     steps:
@@ -59,6 +62,10 @@ jobs:
         env:
           TONIC_TEST_HEX: '1'
         run: cargo test -p tonic --test packagesextra -- --ignored
+      - name: Native web example (Plug, Bandit, Ecto, SQLite NIF)
+        env:
+          TONIC_TEST_HEX: '1'
+        run: cargo test -p tonic --test helloweb -- --ignored
       - name: Release build
         run: cargo build --release --workspace --locked
       - name: Mix archive native integration
@@ -70,7 +77,7 @@ jobs:
       - name: Garbage collector stress
         env:
           TONIC_GC_STRESS: '1'
-        run: bash tests/run.sh tests/cases/basics.exs tests/cases/binaries.exs tests/cases/enums.exs tests/cases/structs.exs
+        run: bash tests/run.sh tests/cases/basics.exs tests/cases/binaries.exs tests/cases/enums.exs tests/cases/structs.exs tests/cases/regressions.exs
       - name: Package and verify clean installation
         run: |
           python3 tools/release.py

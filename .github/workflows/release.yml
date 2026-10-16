@@ -76,7 +76,7 @@ jobs:
         working-directory: dist
         run: |
           for checksum in *.sha256; do sha256sum --check "$checksum"; done
-      - name: Publish experimental release
+      - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}

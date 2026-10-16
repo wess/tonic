@@ -1,24 +1,39 @@
 # Tonic TODO
 
-Tonic 0.0.1 is experimental. The next priority is broader Elixir source and
-runtime compatibility, backed by comparisons against Elixir/OTP. Supporting
-`.ex` and `.exs` files does not establish full BEAM compatibility.
+Tonic 0.1.0-beta.1 is the first public release: a beta for scripts and small
+applications. The next priority is broader Elixir source and runtime
+compatibility, backed by comparisons against Elixir/OTP. Supporting `.ex` and
+`.exs` files does not establish full BEAM compatibility.
 
-## Publish 0.0.1
+## Publish 0.1.0-beta.1
 
-- [x] Set the compiler, runtime, shared crate, and Mix archive to 0.0.1.
-- [x] Package the compiler, static runtime, Mix archive, installer, checksums,
-  license, and third-party notices.
-- [x] Pass actual Linux and macOS CI, including package downloads, clean
-  installation, native execution, and sustained supervision under GC stress.
-- [ ] Push the prepared website and Pages workflow to `main`; verify deployment
-  at https://wess.io/tonic/ on desktop and mobile.
-- [ ] Create and push `v0.0.1`; verify that the release workflow publishes the
-  experimental prerelease and both platform bundles.
-- [ ] Update the website download button to the published release instead of
-  temporary CI artifacts.
+- [x] Set the compiler, runtime, shared crate, and Mix archive to 0.1.0-beta.1.
+- [x] Record provenance for the imported EEx, `base64` and `array` sources and
+  regenerate notices (also covers the crates tokio's `net` feature added).
+- [x] Package and verify a clean macOS installation locally
+  (`tools/release.py`, `tests/release.py`).
+- [ ] Commit and push to `main`; confirm Linux and macOS CI pass.
+- [ ] Verify the website deployment at https://wess.io/tonic/ on desktop and
+  mobile; its download button points at the `v0.1.0-beta.1` release.
+- [ ] Create and push `v0.1.0-beta.1`; verify that the release workflow
+  publishes the prerelease and both platform bundles.
 
 Git commits, pushes, and tags remain user-owned under the shared project guidance.
+
+## Beta follow-ups
+
+Known differences are listed in docs/compatibility.md. In priority order:
+
+- [ ] Grow process stacks on demand (or catch overflow per process) instead of
+  ending the program; the BEAM handles ten million frames.
+- [ ] Reduce heap growth peaks (copying into three times live data while the old
+  space is still mapped) and the per-process baseline.
+- [ ] Match OTP's `:erlang.phash2/1,2`.
+- [ ] Expand Kernel macros in `Macro.expand/2`; read `@moduledoc`/`@doc` in
+  function bodies; port `:calendar` RFC 3339 functions.
+- [ ] Match `URI.new/1` / `:uri_string.parse/1` validation.
+- [ ] Emit Elixir's compile warnings (unused variables, ungrouped clauses) and
+  reject the invalid programs still accepted; fix runtime stack trace lines.
 
 ## Source compatibility
 
@@ -30,8 +45,8 @@ Git commits, pushes, and tags remain user-owned under the shared project guidanc
   Verify that compile-time effects run exactly once.
 - [ ] Complete and test `Record` support: evaluated field defaults,
   `Record.is_record`, and record extraction from Erlang headers.
-- [ ] Audit the remaining `:array` operations, including map/fold and sparse
-  variants, against OTP. Preserve persistence and exact error behavior.
+- [x] Audit the remaining `:array` operations: the bundled module is now OTP
+  27.3's own `array.erl`.
 - [ ] Audit Erlang preprocessing conditions. Unsupported expressions must
   produce diagnostics rather than silently evaluate to false.
 - [ ] Continue adding file-and-line diagnostics for unsupported constructs;
@@ -62,9 +77,9 @@ Git commits, pushes, and tags remain user-owned under the shared project guidanc
 - [ ] Strengthen environment/target, optional dependency, protocol, and stale
   cache coverage across project and dependency sources.
 - [ ] Decide and document support for umbrella roots and custom compilers.
-- [ ] Turn `examples/helloweb` into an automated test: build it, exercise the
-  HTTP endpoints, and compare with the BEAM.
-- [ ] Refresh `licenses/cargo` for the crates tokio's `net` feature added
+- [x] Turn `examples/helloweb` into an automated test (`compiler/tests/helloweb.rs`,
+  run in CI): build it natively and exercise its HTTP endpoints.
+- [x] Refresh `licenses/cargo` for the crates tokio's `net` feature added
   (mio, socket2, ...).
 
 ## Larger runtime decisions
@@ -95,7 +110,6 @@ dedicated interoperability tests before any compatibility claims.
 - [Compatibility report](docs/compatibility.md)
 - [Installation and release guide](docs/release.md)
 - [Linux/macOS CI](https://github.com/wess/tonic/actions/runs/37013537408)
-- [Verified 0.0.1 bundles](https://github.com/wess/tonic/actions/runs/37469587923)
 
 Existing tests live in `compiler/tests/`, `tests/cases/`, `tests/fixtures/`, and
 `mix/tests/`. Every compatibility fix should include a focused regression and,

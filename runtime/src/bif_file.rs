@@ -1057,6 +1057,7 @@ pub extern "C" fn tn_fio_write_file(c: *mut Ctx, p: Term, data: Term, flags: Ter
 
 struct Handle {
     f: std::fs::File,
+    owner: u64,
     buf: Vec<u8>,
     pos: usize,
 }
@@ -1126,12 +1127,22 @@ pub extern "C" fn tn_fio_open(c: *mut Ctx, p: Term, flags: Term) -> Term {
             let mut fs = files().lock();
             let id = fs.next;
             fs.next += 1;
-            fs.map.insert(id, Handle { f, buf: Vec::new(), pos: 0 });
+            fs.map.insert(id, Handle { f, owner: ctx.pid(), buf: Vec::new(), pos: 0 });
             drop(fs);
             ok_tuple(ctx, small(id as i64))
         }
         Err(e) => err(ctx, &e),
     }
+}
+
+/// Files close with the process that opened them, as on the BEAM.
+pub fn owner_exited(pid: u64) {
+    let owned: Vec<Handle> = {
+        let mut fs = files().lock();
+        let ids: Vec<u64> = fs.map.iter().filter(|(_, h)| h.owner == pid).map(|(id, _)| *id).collect();
+        ids.into_iter().filter_map(|id| fs.map.remove(&id)).collect()
+    };
+    drop(owned);
 }
 
 macro_rules! with_handle {
@@ -1444,25 +1455,6 @@ pub extern "C" fn tn_fio_recode(c: *mut Ctx, b: Term, to_utf8: Term) -> Term {
             out.push(ch as u32 as u8);
         }
         ctx.binary(&out)
-    }
-}
-
-/// Local datetime → universal datetime and back (for :file time options).
-#[no_mangle]
-pub extern "C" fn tn_fio_posix_to_datetime(c: *mut Ctx, secs: Term, local: Term) -> Term {
-    let ctx = cx(c);
-    if !is_small(secs) {
-        return ctx.badarg("argument error");
-    }
-    datetime(ctx, small_val(secs), local == TRUE)
-}
-
-#[no_mangle]
-pub extern "C" fn tn_fio_datetime_to_posix(c: *mut Ctx, dt: Term, local: Term) -> Term {
-    let ctx = cx(c);
-    match to_posix(dt, local == TRUE) {
-        Some(s) => small(s),
-        None => ctx.badarg("argument error"),
     }
 }
 

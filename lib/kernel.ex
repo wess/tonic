@@ -316,6 +316,24 @@ defmodule Tonic.Internal do
 
   def bin_chunks(bin, splitter), do: bin_chunks(bin, splitter, [])
 
+  # `for <<x <- bin>>`: whole bytes only, trailing bits are left over
+  def gen_bytes(bin) when is_binary(bin), do: :erlang.binary_to_list(bin)
+
+  def gen_bytes(bin) when is_bitstring(bin) do
+    n = div(bit_size(bin), 8)
+    <<bytes::binary-size(n), _::bitstring>> = bin
+    :erlang.binary_to_list(bytes)
+  end
+
+  def gen_bytes(other), do: :erlang.binary_to_list(other)
+
+  # `for <<c::utf8 <- bin>>`: stops at the first invalid sequence
+  def gen_utf8(bin) when is_bitstring(bin), do: gen_utf8(bin, [])
+  def gen_utf8(other), do: :erlang.binary_to_list(other)
+
+  defp gen_utf8(<<c::utf8, rest::bitstring>>, acc), do: gen_utf8(rest, [c | acc])
+  defp gen_utf8(_, acc), do: :lists.reverse(acc)
+
   defp bin_chunks(bin, splitter, acc) do
     case splitter.(bin) do
       nil ->
