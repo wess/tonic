@@ -14,6 +14,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("string.ex", include_str!("../../lib/string.ex")),
     ("io.ex", include_str!("../../lib/io.ex")),
     ("ex/process.ex", include_str!("../../lib/ex/process.ex")),
+    ("ex/port.ex", include_str!("../../lib/ex/port.ex")),
     ("ex/gen_server.ex", include_str!("../../lib/ex/gen_server.ex")),
     ("ex/agent.ex", include_str!("../../lib/ex/agent.ex")),
     ("ex/agent_server.ex", include_str!("../../lib/ex/agent_server.ex")),

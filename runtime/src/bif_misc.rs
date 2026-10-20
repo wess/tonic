@@ -353,6 +353,7 @@ pub fn debug_term(t: Term) -> String {
         }
         T_CLOSURE => "#Function<>".into(),
         T_REF => "#Reference<>".into(),
+        T_PORT => format!("#Port<0.{}>", word(t, 1)),
         _ => "<?>".into(),
     }
 }

@@ -26,6 +26,7 @@ pub fn type_rank(t: Term) -> u8 {
         T_FLOAT | T_BIGINT => 0,
         T_REF => 2,
         T_CLOSURE => 3,
+        T_PORT => 4,
         T_TUPLE => 6,
         T_MAP => 7,
         T_CONS => 8,
@@ -147,6 +148,7 @@ fn compare_x(mut a: Term, mut b: Term, exact: bool, atom_idx_order: bool) -> Ord
                 }
                 return Equal;
             }
+            4 => return word(a, 1).cmp(&word(b, 1)),
             5 => return pid_id(a).cmp(&pid_id(b)),
             6 => {
                 let na = tuple_size(a);
@@ -278,6 +280,7 @@ fn hash_x(mut t: Term, mut h: u64) -> u64 {
                 return acc;
             }
             T_REF => return mix(h, word(t, 1) ^ 0x4ef),
+            T_PORT => return mix(h, word(t, 1) ^ 0x9f7),
             T_CLOSURE => {
                 h = mix(h, word(t, 1));
                 let n = size_of_hdr(hdr(t)) as usize;

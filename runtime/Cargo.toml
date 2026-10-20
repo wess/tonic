@@ -11,7 +11,7 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 tonic-shared = { path = "../shared" }
-tokio = { version = "1", features = ["rt-multi-thread", "rt", "time", "sync", "macros", "net", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "rt", "time", "sync", "macros", "net", "io-util", "process"] }
 corosensei = "0.3"
 num-bigint = "0.4"
 num-traits = "0.2"

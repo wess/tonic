@@ -31,6 +31,9 @@ fn resolve_dest(ctx: &mut Ctx, dest: Term) -> Result<Option<u64>, Term> {
 #[no_mangle]
 pub extern "C" fn tn_send(c: *mut Ctx, dest: Term, msg: Term) -> Term {
     let ctx = cx(c);
+    if is_port(dest) {
+        return crate::port::message(dest, msg);
+    }
     match resolve_dest(ctx, dest) {
         Ok(Some(p)) => {
             let f = ctx.to_fragment(msg);
@@ -99,6 +102,10 @@ pub extern "C" fn tn_spawn_monitor(c: *mut Ctx, f: Term) -> Term {
 #[no_mangle]
 pub extern "C" fn tn_link(c: *mut Ctx, p: Term) -> Term {
     let ctx = cx(c);
+    if is_port(p) {
+        crate::port::link(ctx, p);
+        return TRUE;
+    }
     if !is_pid(p) {
         return ctx.badarg("argument error");
     }
@@ -127,6 +134,8 @@ pub extern "C" fn tn_unlink(c: *mut Ctx, p: Term) -> Term {
     let ctx = cx(c);
     if is_pid(p) {
         sched::unlink(ctx.pid(), pid_id(p));
+    } else if is_port(p) {
+        crate::port::unlink(ctx.pid(), p);
     }
     TRUE
 }
@@ -146,6 +155,9 @@ pub extern "C" fn tn_monitor_tag(c: *mut Ctx, target: Term, tag: Term) -> Term {
 }
 
 fn monitor_impl(ctx: &mut Ctx, target: Term, tag: Option<crate::heap::Fragment>) -> Term {
+    if is_port(target) {
+        return crate::port::monitor(ctx, target);
+    }
     let tpid = if is_pid(target) {
         Some(pid_id(target))
     } else if is_atom(target) {
@@ -278,6 +290,10 @@ pub extern "C" fn tn_read_timer(_c: *mut Ctx, r: Term) -> Term {
 #[no_mangle]
 pub extern "C" fn tn_exit2(c: *mut Ctx, p: Term, reason: Term) -> Term {
     let ctx = cx(c);
+    if is_port(p) {
+        crate::port::exit_signal(ctx, p, reason);
+        return TRUE;
+    }
     let target = match resolve_dest(ctx, p) {
         Ok(Some(t)) => t,
         Ok(None) => return TRUE,
@@ -613,14 +629,22 @@ pub fn info_items(ctx: &mut Ctx, items: Term, running: bool) -> Term {
             "message_queue_len" => small((ctx.saveq.len() + sched::queue_len(me)) as i64),
             "links" => {
                 let ls = sched::links_of(me);
-                let mut v: Vec<Term> = ls.iter().map(|p| pid(*p)).collect();
-                ctx.list_from_vec(&mut v)
+                let b2 = ctx.roots.len();
+                for l in &ls {
+                    let t = crate::port::source_term(ctx, *l);
+                    ctx.roots.push(t);
+                }
+                let r = ctx.list_from_roots(b2, ls.len(), NIL_LIST);
+                ctx.roots.truncate(b2);
+                r
             }
             "monitors" => {
                 let ms = sched::monitors_of(me);
                 let b2 = ctx.roots.len();
                 for p in &ms {
-                    let t = ctx.tuple(&[atom(a::PROCESS), pid(*p)]);
+                    let kind = if crate::port::linked_port(*p).is_some() { atom(atoms::intern("port")) } else { atom(a::PROCESS) };
+                    let object = crate::port::source_term(ctx, *p);
+                    let t = ctx.tuple(&[kind, object]);
                     ctx.roots.push(t);
                 }
                 let r = ctx.list_from_roots(b2, ms.len(), NIL_LIST);

@@ -475,6 +475,13 @@ fn etf_encode(t: Term, out: &mut Vec<u8>) -> Result<(), ()> {
             out.extend_from_slice(&((id >> 32) as u32).to_be_bytes());
             out.extend_from_slice(&0u32.to_be_bytes());
         }
+        T_PORT => {
+            // V4_PORT_EXT, as OTP 26+ writes it
+            out.push(120);
+            etf_encode(atom(atoms::intern("nonode@nohost")), out)?;
+            out.extend_from_slice(&word(t, 1).to_be_bytes());
+            out.extend_from_slice(&0u32.to_be_bytes());
+        }
         _ => return Err(()),
     }
     Ok(())
@@ -504,6 +511,7 @@ enum D {
     Map(Vec<(D, D)>),
     Pid(u64),
     Ref(u64),
+    Port(u64),
 }
 
 struct Rd<'a> {
@@ -630,6 +638,16 @@ impl<'a> Rd<'a> {
                 let id = ids.first().copied().unwrap_or(0) | (ids.get(1).copied().unwrap_or(0) << 32);
                 D::Ref(id)
             }
+            120 | 89 | 102 => {
+                self.atom_name()?;
+                let id = if tag == 120 { (self.u32()? as u64) << 32 | self.u32()? as u64 } else { self.u32()? as u64 };
+                if tag == 102 {
+                    self.u8()?;
+                } else {
+                    self.u32()?;
+                }
+                D::Port(id)
+            }
             _ => return None,
         })
     }
@@ -653,6 +671,7 @@ fn build(ctx: &mut Ctx, d: &D) -> Term {
             }
             p as Term
         }
+        D::Port(id) => crate::port::term(ctx, *id),
         D::Tuple(v) => {
             let base = ctx.roots.len();
             for e in v {
@@ -895,6 +914,7 @@ pub fn erl_write(t: Term, pretty: bool, out: &mut String) {
             out.push('}');
         }
         T_REF => out.push_str(&format!("#Ref<0.0.0.{}>", word(t, 1))),
+        T_PORT => out.push_str(&format!("#Port<0.{}>", word(t, 1))),
         T_CLOSURE => out.push_str("#Fun<erl_eval.0.0>"),
         _ => out.push('?'),
     }
@@ -1187,85 +1207,6 @@ pub extern "C" fn tn_system_find_executable(c: *mut Ctx, name: Term) -> Term {
         }
     }
     NIL
-}
-
-/// Run a program: (cmd, [args], cd | nil, [{k, v | nil}], stderr_to_stdout)
-/// -> {output_binary, exit_status} or {:error, reason}.
-#[no_mangle]
-pub extern "C" fn tn_system_cmd(c: *mut Ctx, cmd: Term, args: Term, cd: Term, env: Term, merge: Term) -> Term {
-    let ctx = cx(c);
-    let Some(program) = term_string(cmd) else { return ctx.badarg("argument error") };
-    let mut argv = Vec::new();
-    let mut l = args;
-    while is_cons(l) {
-        match term_string(head(l)) {
-            Some(s) => argv.push(s),
-            None => return ctx.badarg("argument error"),
-        }
-        l = tail(l);
-    }
-    let mut command = std::process::Command::new(&program);
-    command.args(&argv);
-    if let Some(d) = term_string(cd) {
-        command.current_dir(d);
-    }
-    let mut l = env;
-    while is_cons(l) {
-        let kv = head(l);
-        if is_tuple(kv) && tuple_size(kv) == 2 {
-            if let Some(k) = term_string(tuple_get(kv, 0)) {
-                match term_string(tuple_get(kv, 1)) {
-                    Some(v) => {
-                        command.env(k, v);
-                    }
-                    None => {
-                        command.env_remove(k);
-                    }
-                }
-            }
-        }
-        l = tail(l);
-    }
-    crate::io::stdout_flush();
-    let merge = merge == TRUE;
-    let result = if merge {
-        // Merge stderr into stdout through a shell-independent pipe pair.
-        command.stdin(std::process::Stdio::null());
-        command.stdout(std::process::Stdio::piped());
-        command.stderr(std::process::Stdio::piped());
-        command.output().map(|o| {
-            let mut v = o.stdout;
-            v.extend(o.stderr);
-            (v, o.status)
-        })
-    } else {
-        command.stdin(std::process::Stdio::null());
-        command.stderr(std::process::Stdio::inherit());
-        command.output().map(|o| (o.stdout, o.status))
-    };
-    match result {
-        Ok((out, status)) => {
-            let code = status.code().unwrap_or_else(|| {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::process::ExitStatusExt;
-                    128 + status.signal().unwrap_or(0)
-                }
-                #[cfg(not(unix))]
-                1
-            });
-            let b = ctx.binary(&out);
-            ctx.tuple(&[b, small(code as i64)])
-        }
-        Err(e) => {
-            let reason = match e.kind() {
-                std::io::ErrorKind::NotFound => "enoent",
-                std::io::ErrorKind::PermissionDenied => "eacces",
-                _ => "eio",
-            };
-            ctx.tuple(&[a("error"), a(reason)])
-        }
-    }
 }
 
 #[no_mangle]
