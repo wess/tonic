@@ -26,8 +26,8 @@ Known differences are listed in docs/compatibility.md. In priority order:
 - [ ] Executable size: PCRE2 and the inspect/exception machinery are always
   linked (hello world is ~4.5 MB); make regex and exception formatting
   reachable only when used.
-- [ ] Port `:calendar` RFC 3339 functions.
-- [ ] Match `URI.new/1` / `:uri_string.parse/1` validation.
+- [ ] Make `:calendar.local_time_to_universal_time/1` use the offset in effect
+  at that local time, as the BEAM does.
 - [ ] Emit the remaining compile warnings (ungrouped clauses, duplicate map
   keys, unused variables in dependency macro output) and reject the invalid
   programs still accepted.

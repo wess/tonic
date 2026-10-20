@@ -68,8 +68,7 @@ These differ from Elixir 1.18 / OTP 27 in this release. Each is either intention
 - Redefining a module (a second `defmodule` with the same name) is a compile error; Elixir replaces the module at run time.
 - `:erlang.phash/2` and `:erlang.phash2/1,2` match OTP 27 for every term except pids, references and anonymous or local funs. Pids and references hash their printed numbers, which differ from the BEAM's; anonymous funs cannot reproduce OTP's per-module code checksum. External funs (`&Mod.fun/arity`) match.
 - `Macro.expand/2` and `Macro.expand_once/2` expand aliases, user macros (remote, and imported ones when given `__ENV__`) and the Kernel macros `if`, `unless`, `&&`, `||`, `!`, `|>`, `is_nil`, `then`, `tap`, `to_string`, `to_charlist` and `match?`. Other Kernel macros and `defguard` guards are returned unexpanded.
-- `URI.new/1` and `:uri_string.parse/1` accept some malformed URIs the BEAM rejects (for example a space in the host) and reject some it accepts.
-- `:calendar.system_time_to_rfc3339/1,2` and `:calendar.rfc3339_to_system_time/1,2` are not implemented.
+- `:calendar.local_time_to_universal_time/1` applies the current UTC offset rather than the offset in effect at the given local time, so results differ across a daylight saving change.
 - Unused variable warnings are emitted for code you write, but not for variables inside code a dependency's macro generates (for example the body of a `Plug.Router` route). Warnings for ungrouped clauses and duplicate map keys are not emitted, and some invalid programs Elixir rejects are still accepted.
 - Stack trace frames for anonymous functions inside `with ... else` and other inlined code are named after the enclosing function, where the BEAM names a generated function such as `-w/1-fun-0-`.
 - A `quote` of a sigil omits the `delimiter:` metadata.

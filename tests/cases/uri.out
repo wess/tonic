@@ -1,0 +1,483 @@
+{"http://example.com",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "example.com",
+    port: 80,
+    path: nil,
+    query: nil,
+    fragment: nil
+  }}, "http://example.com", [host: "example.com", path: "", scheme: "http"],
+ "http://example.com/", "http://example.com", "http://example.com"}
+{"https://u:p@example.com:8080/p/a?q=1&b=2#frag",
+ {:ok,
+  %URI{
+    scheme: "https",
+    userinfo: "u:p",
+    host: "example.com",
+    port: 8080,
+    path: "/p/a",
+    query: "q=1&b=2",
+    fragment: "frag"
+  }}, "https://u:p@example.com:8080/p/a?q=1&b=2#frag",
+ [
+   fragment: "frag",
+   host: "example.com",
+   path: "/p/a",
+   port: 8080,
+   query: "q=1&b=2",
+   scheme: "https",
+   userinfo: "u:p"
+ ], "https://u:p@example.com:8080/p/a?q=1&b=2#frag",
+ "https://u:p@example.com:8080/p/a?q=1&b=2#frag",
+ "https://u:p@example.com:8080/p/a?q=1&b=2#frag"}
+{"http://bad host", {:error, ":"}, "http://bad host",
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"}}
+{"http://h:port", {:error, ":"}, "http://h", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"http://ü.com", {:error, ":"}, "http://ü.com", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"http://h/%zz",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "h",
+    port: 80,
+    path: "/%zz",
+    query: nil,
+    fragment: nil
+  }}, "http://h/%zz", [host: "h", path: "/%zz", scheme: "http"],
+ {:error, :invalid_percent_encoding, "%zz"}, "http://h/%zz", "http://h/%zz"}
+{"http://h/%2",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "h",
+    port: 80,
+    path: "/%2",
+    query: nil,
+    fragment: nil
+  }}, "http://h/%2", [host: "h", path: "/%2", scheme: "http"], "http://h/%2",
+ "http://h/%2", "http://h/%2"}
+{"http://[::1]:80/",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "::1",
+    port: 80,
+    path: "/",
+    query: nil,
+    fragment: nil
+  }}, "http://[::1]/", [host: "::1", path: "/", port: 80, scheme: "http"],
+ "http://[::1]/", "http://[::1]:80/", "http://[::1]:80/"}
+{"http://[::1/", {:error, ":"}, "http:///", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"http://[fe80::1%25en0]/", {:error, ":"}, "http://fe80/",
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"}}
+{"http://[v1.fe]/", {:error, ":"}, "http://v1.fe/",
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"}}
+{"http://[::ffff:1.2.3.4]/",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "::ffff:1.2.3.4",
+    port: 80,
+    path: "/",
+    query: nil,
+    fragment: nil
+  }}, "http://[::ffff:1.2.3.4]/",
+ [host: "::ffff:1.2.3.4", path: "/", scheme: "http"],
+ "http://[::ffff:1.2.3.4]/", "http://[::ffff:1.2.3.4]/",
+ "http://[::ffff:1.2.3.4]/"}
+{"http://[]/", {:error, ":"}, "http:///", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"http://::1/", {:error, ":"}, "http://::1/", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"http://1.2.3.4:65536/",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "1.2.3.4",
+    port: 65536,
+    path: "/",
+    query: nil,
+    fragment: nil
+  }}, "http://1.2.3.4:65536/",
+ [host: "1.2.3.4", path: "/", port: 65536, scheme: "http"],
+ "http://1.2.3.4:65536/", "http://1.2.3.4:65536/", "http://1.2.3.4:65536/"}
+{"http://h:/",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "h",
+    port: 80,
+    path: "/",
+    query: nil,
+    fragment: nil
+  }}, "http://h/", [host: "h", path: "/", port: :undefined, scheme: "http"],
+ "http://h/", "http://h:/", "http://h:/"}
+{"http://h:00080",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "h",
+    port: 80,
+    path: nil,
+    query: nil,
+    fragment: nil
+  }}, "http://h", [host: "h", path: "", port: 80, scheme: "http"], "http://h/",
+ "http://h:80", "http://h:80"}
+{"http://h:1x/", {:error, ":"}, "http://h:1/", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"http://a%20b.com/",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "a%20b.com",
+    port: 80,
+    path: "/",
+    query: nil,
+    fragment: nil
+  }}, "http://a%20b.com/", [host: "a%20b.com", path: "/", scheme: "http"],
+ "http://a%20b.com/", "http://a%20b.com/", "http://a%20b.com/"}
+{"foo:bar",
+ {:ok,
+  %URI{
+    scheme: "foo",
+    userinfo: nil,
+    host: nil,
+    port: nil,
+    path: "bar",
+    query: nil,
+    fragment: nil
+  }}, "foo:bar", [path: "bar", scheme: "foo"], "foo:bar", "foo:bar", "foo:bar"}
+{"mailto:a@b.c",
+ {:ok,
+  %URI{
+    scheme: "mailto",
+    userinfo: nil,
+    host: nil,
+    port: nil,
+    path: "a@b.c",
+    query: nil,
+    fragment: nil
+  }}, "mailto:a@b.c", [path: "a@b.c", scheme: "mailto"], "mailto:a@b.c",
+ "mailto:a@b.c", "mailto:a@b.c"}
+{"file:///etc/hosts",
+ {:ok,
+  %URI{
+    scheme: "file",
+    userinfo: nil,
+    host: "",
+    port: nil,
+    path: "/etc/hosts",
+    query: nil,
+    fragment: nil
+  }}, "file:///etc/hosts", [host: "", path: "/etc/hosts", scheme: "file"],
+ "file:///etc/hosts", "file:///etc/hosts", "file:///etc/hosts"}
+{"//host/path",
+ {:ok,
+  %URI{
+    scheme: nil,
+    userinfo: nil,
+    host: "host",
+    port: nil,
+    path: "/path",
+    query: nil,
+    fragment: nil
+  }}, "//host/path", [host: "host", path: "/path"], "//host/path",
+ "//host/path", "http://host/path"}
+{"rel/path",
+ {:ok,
+  %URI{
+    scheme: nil,
+    userinfo: nil,
+    host: nil,
+    port: nil,
+    path: "rel/path",
+    query: nil,
+    fragment: nil
+  }}, "rel/path", [path: "rel/path"], "rel/path", "rel/path",
+ "http://a/b/c/rel/path"}
+{"a:b:c",
+ {:ok,
+  %URI{
+    scheme: "a",
+    userinfo: nil,
+    host: nil,
+    port: nil,
+    path: "b:c",
+    query: nil,
+    fragment: nil
+  }}, "a:b:c", [path: "b:c", scheme: "a"], "a:b:c", "a:b:c", "a:b:c"}
+{"./a:b",
+ {:ok,
+  %URI{
+    scheme: nil,
+    userinfo: nil,
+    host: nil,
+    port: nil,
+    path: "./a:b",
+    query: nil,
+    fragment: nil
+  }}, "./a:b", [path: "./a:b"], "a:b", "./a:b", "http://a/b/c/a:b"}
+{"1http://x", {:error, ":"}, "1http://x", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"x_y://h", {:error, ":"}, "x_y://h", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"HTTP://EXAMPLE.COM/%7Efoo/../bar/./baz",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "EXAMPLE.COM",
+    port: 80,
+    path: "/%7Efoo/../bar/./baz",
+    query: nil,
+    fragment: nil
+  }}, "http://EXAMPLE.COM/%7Efoo/../bar/./baz",
+ [host: "EXAMPLE.COM", path: "/%7Efoo/../bar/./baz", scheme: "HTTP"],
+ "http://example.com/bar/baz", "HTTP://EXAMPLE.COM/%7Efoo/../bar/./baz",
+ "HTTP://EXAMPLE.COM/bar/baz"}
+{"http://a/b/c/./../../g",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "a",
+    port: 80,
+    path: "/b/c/./../../g",
+    query: nil,
+    fragment: nil
+  }}, "http://a/b/c/./../../g",
+ [host: "a", path: "/b/c/./../../g", scheme: "http"], "http://a/g",
+ "http://a/b/c/./../../g", "http://a/g"}
+{"http://x/?q=a b", {:error, ":"}, "http://x/?q=a b",
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"}}
+{"http://x/#a#b", {:error, ":"}, "http://x/#a#b", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"http://ü/ä?ö#ß", {:error, ":"}, "http://ü/ä?ö#ß",
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"}}
+{"http://x/<>", {:error, ":"}, "http://x/<>", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"http://x/\\", {:error, ":"}, "http://x/\\", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"http://@host",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: "",
+    host: "host",
+    port: 80,
+    path: nil,
+    query: nil,
+    fragment: nil
+  }}, "http://host", [host: "host", path: "", scheme: "http", userinfo: ""],
+ "http://@host/", "http://@host", "http://@host"}
+{"http://a@b@c/", {:error, ":"}, "http://a@b@c/", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"http://u:p:q@h/",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: "u:p:q",
+    host: "h",
+    port: 80,
+    path: "/",
+    query: nil,
+    fragment: nil
+  }}, "http://u:p:q@h/",
+ [host: "h", path: "/", scheme: "http", userinfo: "u:p:q"], "http://u:p:q@h/",
+ "http://u:p:q@h/", "http://u:p:q@h/"}
+{"http://h:80:80/", {:error, ":"}, "http://h/", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"?q",
+ {:ok,
+  %URI{
+    scheme: nil,
+    userinfo: nil,
+    host: nil,
+    port: nil,
+    path: nil,
+    query: "q",
+    fragment: nil
+  }}, "?q", [path: "", query: "q"], "?q", "?q", "http://a/b/c/d;p?q"}
+{"#f",
+ {:ok,
+  %URI{
+    scheme: nil,
+    userinfo: nil,
+    host: nil,
+    port: nil,
+    path: nil,
+    query: nil,
+    fragment: "f"
+  }}, "#f", [fragment: "f", path: ""], "#f", "#f", "http://a/b/c/d;p?q#f"}
+{"//",
+ {:ok,
+  %URI{
+    scheme: nil,
+    userinfo: nil,
+    host: "",
+    port: nil,
+    path: nil,
+    query: nil,
+    fragment: nil
+  }}, "//", [host: "", path: ""], "//", "//", "http://"}
+{"///",
+ {:ok,
+  %URI{
+    scheme: nil,
+    userinfo: nil,
+    host: "",
+    port: nil,
+    path: "/",
+    query: nil,
+    fragment: nil
+  }}, "///", [host: "", path: "/"], "///", "///", "http:///"}
+{"http:",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: nil,
+    port: 80,
+    path: nil,
+    query: nil,
+    fragment: nil
+  }}, "http:", [path: "", scheme: "http"], "http:/", "http:", "http:"}
+{"http://",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "",
+    port: 80,
+    path: nil,
+    query: nil,
+    fragment: nil
+  }}, "http://", [host: "", path: "", scheme: "http"], "http:///", "http://",
+ "http://"}
+{" http://h", {:error, " "}, " http://h", {:error, :invalid_uri, ~c" "},
+ {:error, :invalid_uri, ~c" "}, {:error, :invalid_uri, ~c" "},
+ {:error, :invalid_uri, ~c" "}}
+{"http://h/\n", {:error, ":"}, "http://h/\n", {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}}
+{"HTTP://H.COM:80/",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "H.COM",
+    port: 80,
+    path: "/",
+    query: nil,
+    fragment: nil
+  }}, "http://H.COM/", [host: "H.COM", path: "/", port: 80, scheme: "HTTP"],
+ "http://h.com/", "HTTP://H.COM:80/", "HTTP://H.COM:80/"}
+{"http://h.com:443/",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "h.com",
+    port: 443,
+    path: "/",
+    query: nil,
+    fragment: nil
+  }}, "http://h.com:443/",
+ [host: "h.com", path: "/", port: 443, scheme: "http"], "http://h.com:443/",
+ "http://h.com:443/", "http://h.com:443/"}
+{"http://h/%2e%2e/x",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "h",
+    port: 80,
+    path: "/%2e%2e/x",
+    query: nil,
+    fragment: nil
+  }}, "http://h/%2e%2e/x", [host: "h", path: "/%2e%2e/x", scheme: "http"],
+ "http://h/x", "http://h/%2e%2e/x", "http://h/%2e%2e/x"}
+{"http://h/é%C3%A9", {:error, ":"}, "http://h/é%C3%A9",
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"},
+ {:error, :invalid_uri, ~c":"}, {:error, :invalid_uri, ~c":"}}
+{"http://h:99999999999999999999",
+ {:ok,
+  %URI{
+    scheme: "http",
+    userinfo: nil,
+    host: "h",
+    port: 99999999999999999999,
+    path: nil,
+    query: nil,
+    fragment: nil
+  }}, "http://h:99999999999999999999",
+ [host: "h", path: "", port: 99999999999999999999, scheme: "http"],
+ "http://h:99999999999999999999/", "http://h:99999999999999999999",
+ "http://h:99999999999999999999"}
+{"",
+ {:ok,
+  %URI{
+    scheme: nil,
+    userinfo: nil,
+    host: nil,
+    port: nil,
+    path: nil,
+    query: nil,
+    fragment: nil
+  }}, "", [path: ""], "", "", "http://a/b/c/d;p?q"}
+{"http://%C3%BC.com", "http%3A%2F%2F%C3%BC.com", "http://ü.com",
+ "http://ü.com", "http%3A%2F%2F%C3%BC.com", "http://ü.com", "http://ü.com"}
+{"a:b/c?d", "a%3Ab%2Fc%3Fd", "a:b/c?d", "a:b/c?d", "a%3Ab%2Fc%3Fd", "a:b/c?d",
+ "a:b/c?d"}
+{"a%20b+c%2520%25zz", "a+b%2Bc%2520%25zz", "a b+c %zz", "a b c %zz",
+ "a%20b%2Bc%2520%25zz", {:thrown, {:error, :invalid_percent_encoding, "%zz"}},
+ {:thrown, {:error, :invalid_percent_encoding, "%zz"}}}
+[
+  fragment: ~c"f",
+  host: ~c"h",
+  path: ~c"/p",
+  port: 8080,
+  query: ~c"q",
+  scheme: ~c"http"
+]
+"a=b+c&d&%C3%A4=%E2%82%AC"
+{:error, :invalid_encoding, :rfc1738}
+{:error, :invalid_percent_encoding, ~c"%zz"}
+"http://u@[::1]:8080/x"
+"http://h/b"
+{:error, :invalid_uri, ~c":"}
+"http://h/%C3%A4"
+%{"a" => "b c", "d" => "%zz", "e" => ""}
+{:raised, URI.Error}
+{{:ok, {65152, 0, 0, 0, 0, 0, 0, 1}}, {:error, :einval}, ~c"::ffff:1.2.3.4"}

@@ -48,98 +48,16 @@ defmodule :inet do
 
   def close(socket), do: :gen_tcp.close(socket)
 
-  def ntoa({a, b, c, d}) when a in 0..255 and b in 0..255 and c in 0..255 and d in 0..255,
-    do: ~c"#{a}.#{b}.#{c}.#{d}"
-
-  def ntoa({0, 0, 0, 0, 0, 65535, ab, cd}), do: ~c"::ffff:" ++ ntoa({div(ab, 256), rem(ab, 256), div(cd, 256), rem(cd, 256)})
-
-  def ntoa({_, _, _, _, _, _, _, _} = address) do
-    groups = address |> Tuple.to_list() |> Enum.map(&String.downcase(Integer.to_string(&1, 16)))
-    ipv6_compress(groups) |> String.to_charlist()
-  end
-
-  def ntoa(_), do: {:error, :einval}
-
-  defp ipv6_compress(groups) do
-    runs =
-      groups
-      |> Enum.with_index()
-      |> Enum.chunk_by(fn {g, _} -> g == "0" end)
-      |> Enum.filter(fn [{g, _} | _] = run -> g == "0" and length(run) > 1 end)
-
-    case Enum.max_by(runs, &length/1, fn -> nil end) do
-      nil ->
-        Enum.join(groups, ":")
-
-      [{_, first} | _] = run ->
-        {left, rest} = Enum.split(groups, first)
-        right = Enum.drop(rest, length(run))
-        Enum.join(left, ":") <> "::" <> Enum.join(right, ":")
-    end
-  end
-
-  def parse_address(address) when is_list(address) do
-    case parse_ipv4_address(address) do
-      {:ok, ip} -> {:ok, ip}
-      _ -> parse_ipv6_address(address)
-    end
-  end
-
-  def parse_strict_address(address), do: parse_address(address)
-
-  def parse_ipv4strict_address(address), do: parse_ipv4_address(address)
-
-  def parse_ipv4_address(address) when is_list(address) do
-    parts = address |> List.to_string() |> String.split(".")
-
-    with 4 <- length(parts),
-         octets when is_list(octets) <- Enum.map(parts, &octet/1),
-         false <- Enum.member?(octets, :error) do
-      {:ok, List.to_tuple(octets)}
-    else
-      _ -> {:error, :einval}
-    end
-  end
-
-  def parse_ipv6_address(address) when is_list(address) do
-    string = List.to_string(address)
-
-    {head, tail} =
-      case String.split(string, "::") do
-        [all] -> {all, nil}
-        [head, tail] -> {head, tail}
-        _ -> {nil, nil}
-      end
-
-    groups = fn
-      "" -> []
-      part -> String.split(part, ":")
-    end
-
-    with true <- head != nil,
-         left <- groups.(head),
-         right <- if(tail, do: groups.(tail), else: []),
-         missing <- 8 - length(left) - length(right),
-         true <- (tail == nil and missing == 0) or (tail != nil and missing >= 1),
-         values <- Enum.map(left ++ List.duplicate("0", if(tail, do: missing, else: 0)) ++ right, &hex_group/1),
-         false <- Enum.member?(values, :error) do
-      {:ok, List.to_tuple(values)}
-    else
-      _ -> {:error, :einval}
-    end
-  end
-
-  defp octet(part) do
-    case Integer.parse(part) do
-      {n, ""} when n in 0..255 -> n
-      _ -> :error
-    end
-  end
-
-  defp hex_group(part) do
-    case Integer.parse(part, 16) do
-      {n, ""} when n in 0..65535 and byte_size(part) <= 4 -> n
-      _ -> :error
-    end
-  end
+  # Same delegations as OTP's inet.erl; the parsers are the bundled inet_parse.
+  def ntoa(address), do: :inet_parse.ntoa(address)
+  def parse_address(address), do: :inet_parse.address(address)
+  def parse_address(address, :inet), do: :inet_parse.ipv4_address(address)
+  def parse_address(address, :inet6), do: :inet_parse.ipv6_address(address)
+  def parse_strict_address(address), do: :inet_parse.strict_address(address)
+  def parse_strict_address(address, :inet), do: :inet_parse.ipv4strict_address(address)
+  def parse_strict_address(address, :inet6), do: :inet_parse.ipv6strict_address(address)
+  def parse_ipv4_address(address), do: :inet_parse.ipv4_address(address)
+  def parse_ipv6_address(address), do: :inet_parse.ipv6_address(address)
+  def parse_ipv4strict_address(address), do: :inet_parse.ipv4strict_address(address)
+  def parse_ipv6strict_address(address), do: :inet_parse.ipv6strict_address(address)
 end

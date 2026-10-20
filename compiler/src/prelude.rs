@@ -44,6 +44,8 @@ pub const FILES: &[(&str, &str)] = &[
     ("erl/erl_scan.erl", include_str!("../../lib/erl/erl_scan.erl")),
     ("erl/erl_anno.erl", include_str!("../../lib/erl/erl_anno.erl")),
     ("erl/array.erl", include_str!("../../lib/erl/array.erl")),
+    ("erl/uristring.erl", include_str!("../../lib/erl/uristring.erl")),
+    ("erl/inetparse.erl", include_str!("../../lib/erl/inetparse.erl")),
     ("record.ex", include_str!("../../lib/record.ex")),
     ("eval.ex", include_str!("../../lib/eval.ex")),
     ("config.ex", include_str!("../../lib/config.ex")),

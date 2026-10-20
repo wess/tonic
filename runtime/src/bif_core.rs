@@ -1407,6 +1407,18 @@ pub extern "C" fn tn_raise3(c: *mut Ctx, kind: Term, reason: Term, stack: Term) 
     NONE
 }
 
+/// badarg carrying per-argument messages (`%{position => message}`), for
+/// Erlang BIFs written in Elixir whose BEAM errors come from erl_erts_errors.
+#[no_mangle]
+pub extern "C" fn tn_badarg_args(c: *mut Ctx, errs: Term) -> Term {
+    let ctx = cx(c);
+    let ei = ctx.push(errs);
+    ctx.raise_error(atom(a::BADARG));
+    ctx.pending_args = ctx.get(ei);
+    ctx.truncate(ei);
+    NONE
+}
+
 #[no_mangle]
 pub extern "C" fn tn_raise_case_clause(c: *mut Ctx, v: Term) -> Term {
     cx(c).case_clause(v)
