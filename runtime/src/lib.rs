@@ -24,6 +24,7 @@ pub mod num;
 pub mod phash;
 pub mod re;
 pub mod ustr;
+pub mod zlib;
 pub mod sched;
 pub mod term;
 pub mod udp;

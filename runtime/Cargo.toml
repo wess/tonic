@@ -26,3 +26,4 @@ pcre2-sys = "0.2"
 unicode-segmentation = "1"
 unicode-normalization = "0.1"
 unicode-ident = "1"
+libz-sys = { version = "1.1", features = ["static"] }

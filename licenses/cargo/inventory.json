@@ -1,5 +1,5 @@
 {
-  "cargolocksha256": "65043aa2ecc16e2dae96fc3e1fb810220c4232d7ba6ca4c2255c9e813148c916",
+  "cargolocksha256": "e5162c61af71987c8a1177bcd1b29747aa33fef58c13b164c038d123a7a4d652",
   "packages": [
     {
       "name": "autocfg",
@@ -317,6 +317,28 @@
         {
           "file": "licenses/cargo/libc/0.2.189/licensemit.txt",
           "sha256": "123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e",
+          "upstreamfile": "LICENSE-MIT"
+        }
+      ]
+    },
+    {
+      "name": "libz-sys",
+      "version": "1.1.30",
+      "license": "MIT OR Apache-2.0",
+      "selected": "Apache-2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "f710a23e6dbf193214fd46ca56a9d6864e550abe86202184532ae7275e46de19",
+      "origin": "https://crates.io/crates/libz-sys/1.1.30",
+      "repository": "https://github.com/rust-lang/libz-sys",
+      "documents": [
+        {
+          "file": "licenses/cargo/libzsys/1.1.30/licenseapache.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "upstreamfile": "LICENSE-APACHE"
+        },
+        {
+          "file": "licenses/cargo/libzsys/1.1.30/licensemit.txt",
+          "sha256": "34c467b6945a22696d060b8fdd2379d464acb3408d4c599d3dc5fe4fa1b4c84f",
           "upstreamfile": "LICENSE-MIT"
         }
       ]
@@ -965,6 +987,28 @@
       ]
     },
     {
+      "name": "vcpkg",
+      "version": "0.2.15",
+      "license": "MIT/Apache-2.0",
+      "selected": "Apache-2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426",
+      "origin": "https://crates.io/crates/vcpkg/0.2.15",
+      "repository": "https://github.com/mcgoo/vcpkg-rs",
+      "documents": [
+        {
+          "file": "licenses/cargo/vcpkg/0.2.15/licenseapache.txt",
+          "sha256": "60c93a31f490375aadf64098b75f10715010379541021e00261045d7800611d3",
+          "upstreamfile": "LICENSE-APACHE"
+        },
+        {
+          "file": "licenses/cargo/vcpkg/0.2.15/licensemit.txt",
+          "sha256": "016d20f335060a70e79d9fcf8dfaa6201114d65d592211f4bdfb8ae9ca2bc1dc",
+          "upstreamfile": "LICENSE-MIT"
+        }
+      ]
+    },
+    {
       "name": "version_check",
       "version": "0.9.5",
       "license": "MIT/Apache-2.0",
@@ -1281,11 +1325,13 @@
   "native": {
     "pcre2": "10.46",
     "sljit": "0.95",
-    "license": "BSD-3-Clause WITH PCRE2-exception; SLJIT BSD-2-Clause",
+    "zlib": "1.3.2",
+    "license": "BSD-3-Clause WITH PCRE2-exception; SLJIT BSD-2-Clause; zlib Zlib",
     "documents": [
       "licenses/pcre2/license.md",
       "licenses/pcre2/sourcecopyrights.txt",
-      "licenses/unicode/license.txt"
+      "licenses/unicode/license.txt",
+      "licenses/zlib/license.txt"
     ]
   }
 }

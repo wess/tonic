@@ -381,6 +381,19 @@
       "sha256": "7983249e1530e8814d4358c08481cd35439580f172c2c9f308af9006e9ea20fc"
     },
     {
+      "file": "lib/erl/zlib.erl",
+      "version": "27.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/erts/preloaded/src/zlib.erl"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Provenance header added; NIF loading removed and NIF stubs forward to the Tonic runtime.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/erts/preloaded/src/zlib.erl": "8ec3a69b212f1ce6aeced46fb24cd6fb0d646bebb08413f53ae87e7ec378bafd"
+      },
+      "sha256": "b3de5193b73ea6ed0f5e2791f67bd2ff972a34d60e6ab48c96845bcd35fdf802"
+    },
+    {
       "file": "lib/erlang.ex",
       "version": "27.3",
       "upstream": [

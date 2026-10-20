@@ -1,0 +1,55 @@
+<<120, 156, 203, 72, 205, 201, 201, 87, 200, 64, 144, 0, 58, 46, 6, 125>>
+<<203, 72, 205, 201, 201, 7, 0>>
+<<31, 139, 8, 0, 0, 0, 0, 0, 0>>
+<<203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0>>
+{<<120, 156, 3, 0, 0, 0, 0, 1>>, <<3, 0>>}
+{"abcde", "hi", "yo"}
+{true, true, true}
+{true, true, true}
+[[<<120, 156>>], [<<74, 76, 74, 78, 73, 77, 3, 0, 0, 0, 255, 255>>]]
+true
+true
+<<120, 218, 75, 76, 79, 204, 204, 3, 0, 5, 233, 2, 1>>
+1646266547
+<<120, 187, 98, 32, 8, 179, 203, 64, 18, 133, 176, 17, 114, 0, 155, 113, 10,
+  231>>
+{:need_dictionary, 1646266547, []}
+["hello world hello dictionary"]
+"hello world dictionary"
+{:raised, {:need_dictionary, 1646266547}}
+["hello world hello dictionary"]
+true
+"onetwo"
+["x"]
+[]
+["x"]
+{:raised, :data_error}
+{:raised, :data_error}
+{:raised, :data_error}
+{:raised, :data_error}
+{:raised, "argument error"}
+{:raised, :data_error}
+{:raised, :data_error}
+{:raised,
+ "errors were found at the given arguments:\n\n  * 1st argument: not an iodata term\n"}
+{:raised, :data_error}
+{:raised, :data_error}
+{:raised, :not_initialized}
+{:raised, :not_initialized}
+{:raised, :bad_compression_level}
+{:raised, :bad_windowbits}
+{:raised, :stream_error}
+{:raised, :bad_compression_method}
+{:raised, :bad_memlevel}
+{:raised, :bad_compression_strategy}
+{:raised, :bad_eos_behavior}
+{:raised, :already_initialized}
+{:raised, :bad_flush_mode}
+{:raised, :data_error}
+{:raised, :not_initialized}
+:ok
+{:raised, "argument error"}
+true
+{:raised, :not_on_controlling_process}
+{:other, :ok}
+{:raised, :not_on_controlling_process}

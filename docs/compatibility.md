@@ -74,7 +74,7 @@ These differ from Elixir 1.18 / OTP 27 in this release. Each is either intention
 - Stack trace frames for anonymous functions inside `with ... else` and other inlined code are named after the enclosing function, where the BEAM names a generated function such as `-w/1-fun-0-`.
 - A `quote` of a sigil omits the `delimiter:` metadata.
 - `:atomics` and `:counters` arrays are never freed.
-- `:zlib` is not available.
+- `:zlib` streams that are never closed are not freed, and closing a stream twice raises `:badarg` rather than `:not_initialized`. Compressed bytes come from stock zlib 1.3.2 and match an OTP built against stock zlib; an OTP linked to a different zlib (such as zlib-ng) can produce different bytes, though each decompresses the other's output.
 - Sockets are references rather than ports, so they print as `#Reference<...>` and `is_port/1` is false for them.
 - `:gen_udp.connect/2,3`, multicast group membership (`:add_membership`) and ancillary data (`:recvtos`, `:recvttl`) are not implemented; `:multicast_ttl`, `:multicast_loop`, `:recvtos` and similar options are accepted and ignored. A receive error in UDP active mode delivers `{:udp_error, socket, reason}` and stops delivery until `:inet.setopts/2` re-enables it.
 - `:re` with `[:unicode]` but without `:ucp` matches `\w` and similar classes against ASCII only; use `~r/.../u` (which sets `:ucp`) for Unicode word characters.
