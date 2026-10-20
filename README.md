@@ -99,7 +99,9 @@ with a startup module and no escript entry keeps running.
 
 ### Mix tasks
 
-Build and install the archive from this checkout:
+Every command works through Mix as well as directly. The release bundle's
+`install.sh` installs the Mix archive when Mix is present. From a checkout,
+build and install it yourself:
 
 ```sh
 cd mix
@@ -111,13 +113,15 @@ With `tonic` on `PATH`, use these in your application directory:
 
 ```sh
 mix deps.get
-mix tonic.check
-mix tonic.build
-mix tonic.run -- one two
-mix tonic.build --deps-get -o ./program
+mix tonic check
+mix tonic build
+mix tonic run -- one two
+mix tonic build --deps-get -o ./program
+mix tonic            # list the commands
 ```
 
-`mix tonic.build` defaults to `_build/<env>/tonic/<app>`. Set `TONIC` to the native
+`mix tonic.build`, `mix tonic.run` and `mix tonic.check` are the same commands.
+`mix tonic build` defaults to `_build/<env>/tonic/<app>`. Set `TONIC` to the native
 compiler executable or configure `tonic: [executable: "/path/to/tonic"]` in
 `project/0`. Ordinary Mix dependency, Hex publishing, and package-management
 tasks continue to use Mix.
@@ -141,16 +145,16 @@ Set `consolidate_protocols: false` to disable Mix’s separate BEAM protocol
 consolidation. The Tonic compiler rebuilds on each invocation so evaluated
 configuration and toolchain changes cannot leave a stale native artifact.
 It produces a native artifact; it does not produce application
-BEAM files for `mix run` or `mix release`. Use `mix tonic.run` to run it.
+BEAM files for `mix run` or `mix release`. Use `mix tonic run` to run it.
 
 The locked example in `examples/packages/` uses Decimal from Hex:
 
 ```sh
 cd examples/packages
 mix deps.get
-mix tonic.run -- 1.25 2.50
+mix tonic run -- 1.25 2.50
 # 3.75
-mix tonic.build
+mix tonic build
 ./_build/dev/tonic/packages 10.5 2.25
 # 12.75
 ```

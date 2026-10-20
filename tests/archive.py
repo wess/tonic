@@ -52,6 +52,13 @@ end
         piped = subprocess.run(["mix", "tonic.run", "--", "stdin"], cwd=project, input=b"alice\n",
                                capture_output=True, timeout=180)
         assert piped.returncode == 0 and piped.stdout == b'{:stdin, "alice\\n"}\n', piped
+        # the same commands through the dispatcher
+        assert run(["mix", "tonic", "run", "--", "dispatched"], project) == b'{:native, ["dispatched"]}\n'
+        run(["mix", "tonic", "check"], project)
+        assert b"mix tonic build" in run(["mix", "tonic"], project)
+        unknown = subprocess.run(["mix", "tonic", "bogus"], cwd=project, capture_output=True, timeout=180)
+        assert unknown.returncode != 0 and b"unknown tonic command" in unknown.stderr + unknown.stdout, unknown
+        run(["mix", "tonic", "build"], project)
         run(["mix", "tonic.build"], project)
         binary = project / "_build/dev/tonic/nativearchive"
         assert run([str(binary), "standalone"], root) == b'{:native, ["standalone"]}\n'

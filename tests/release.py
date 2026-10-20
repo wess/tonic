@@ -37,7 +37,10 @@ def verify(artifact):
         for name, expected in manifest["files"].items():
             assert hashlib.sha256((bundle / name).read_bytes()).hexdigest() == expected, name
         prefix = root / "installation with spaces"
+        # the installer adds the Mix tasks; keep them out of the real Mix home
+        os.environ["MIX_ARCHIVES"] = str(root / "archives")
         run(["bash", bundle / "install.sh", prefix], root)
+        assert list((root / "archives").glob("tonic*")), "install.sh did not install the Mix archive"
         source = root / "hello.exs"
         source.write_text((bundle / "hello.exs").read_text())
         # Remove the extracted compiler to verify the installed runtime search path.
@@ -75,7 +78,6 @@ IO.inspect({NativeMain.answer(), Regex.match?(~r/^native$/, "native")})
             assert run([root / "macro"], root) == b"{42, true}\n"
         finally:
             os.environ["PATH"] = previous_path
-        run(["mix", "archive.install", prefix / "share/tonic/tonic.ez", "--force"], root)
         project = root / "project"
         (project / "lib").mkdir(parents=True)
         (project / "mix.exs").write_text('''defmodule Release.MixProject do
@@ -88,6 +90,8 @@ end
 end
 ''')
         assert run(["mix", "tonic.run", "--", "installed"], project) == b'["installed"]\n'
+        assert run(["mix", "tonic", "run", "--", "dispatched"], project) == b'["dispatched"]\n'
+        assert b"build" in run(["mix", "tonic"], project)
         print("Release checksums, clean installation, native macros, standalone executable, and Mix archive passed")
 
 

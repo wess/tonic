@@ -1,6 +1,6 @@
 const examples = {
   script: 'tonic run hello.exs\ntonic build hello.exs -o hello\n./hello',
-  mix: 'mix deps.get\nmix tonic.check\nmix tonic.build\nmix tonic.run'
+  mix: 'mix deps.get\nmix tonic check\nmix tonic build\nmix tonic run'
 };
 let selected = 'script';
 const tabs = [...document.querySelectorAll('[data-example]')];

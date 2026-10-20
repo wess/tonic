@@ -19,4 +19,14 @@ cp "$bundle/license" "$bundle/notice" "$bundle/manifest.json" "$prefix/share/ton
 cp -R "$bundle/licenses" "$bundle/docs" "$prefix/share/tonic/"
 "$prefix/bin/tonic" --version
 printf 'Installed in %s\nAdd %s/bin to PATH.\n' "$prefix" "$prefix"
-printf 'For Mix tasks: mix archive.install "%s/share/tonic/tonic.ez" --force\n' "$prefix"
+# `mix tonic build|run|check` works right away when Mix is installed;
+# TONIC_NO_MIX=1 skips this
+if [ -z "${TONIC_NO_MIX:-}" ] && command -v mix > /dev/null 2>&1; then
+  if mix archive.install "$prefix/share/tonic/tonic.ez" --force > /dev/null; then
+    echo 'Installed the Mix tasks: mix tonic build | run | check'
+  else
+    printf 'Could not install the Mix tasks; run: mix archive.install "%s/share/tonic/tonic.ez" --force\n' "$prefix" >&2
+  fi
+else
+  printf 'For Mix tasks: mix archive.install "%s/share/tonic/tonic.ez" --force\n' "$prefix"
+fi

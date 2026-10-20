@@ -2,8 +2,8 @@
 
 Beta Elixir-to-native compiler with LLVM code generation, a moving
 garbage collector, and a concurrent process runtime. Supports `.ex` modules,
-`.exs` scripts, fetched Mix/Hex dependency sources, and `mix tonic.build`,
-`mix tonic.run`, and `mix tonic.check`.
+`.exs` scripts, fetched Mix/Hex dependency sources, and the Mix tasks
+`mix tonic build`, `mix tonic run`, and `mix tonic check`.
 
 This release is intended for scripts and small applications. Compatibility is
 limited to the language and runtime APIs Tonic implements. See
@@ -79,15 +79,17 @@ cd tonic0.1.0-beta.2
 bash install.sh "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 tonic run hello.exs
-mix archive.install "$HOME/.local/share/tonic/tonic.ez" --force
 ```
 
 Use the Linux filename on Linux. Install clang 18 with your distribution's
 package manager, or LLVM 18 on macOS. Set `TONIC_CC` to its clang executable if
-the default `clang` is older. The archive install is optional for standalone
-scripts. A user-specified prefix also works; keep `bin/` and `lib/` together.
-Install subsequent versions into the same prefix to upgrade both the compiler
-and its runtime, then reinstall the Mix archive.
+the default `clang` is older. When Mix is installed, `install.sh` also installs
+the Mix archive, so `mix tonic build|run|check` work right away; set
+`TONIC_NO_MIX=1` to skip it, or install it later with
+`mix archive.install "$HOME/.local/share/tonic/tonic.ez" --force`. A
+user-specified prefix also works; keep `bin/` and `lib/` together. Install
+subsequent versions into the same prefix to upgrade the compiler, its runtime
+and the Mix tasks together.
 
 ## Build a release from source
 
