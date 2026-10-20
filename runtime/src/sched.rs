@@ -593,6 +593,7 @@ fn process_exit(ctx: &mut Ctx) {
     g().procs.write().remove(&me);
     crate::ets::owner_exited(me);
     crate::net::owner_exited(me);
+    crate::udp::owner_exited(me);
     crate::bif_file::owner_exited(me);
     group_leaders().lock().remove(&me);
     watcher_exited(me);

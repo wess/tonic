@@ -25,3 +25,4 @@ pub mod re;
 pub mod ustr;
 pub mod sched;
 pub mod term;
+pub mod udp;

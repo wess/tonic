@@ -90,7 +90,7 @@ dedicated interoperability tests before any compatibility claims.
 - [ ] Define a ports and external-process interface.
 - [ ] Extend the `erl_nif` subset (maps, monitors, select, dirty schedulers) and
   release resources when no term references them.
-- [ ] SSL and UDP sockets.
+- [ ] SSL sockets, `:gen_udp.connect` and UDP multicast.
 - [ ] Define the scope of distributed-node support and BEAM interoperability.
 - [ ] Decide how dynamic module loading and hot code replacement would work
   with native compilation.
