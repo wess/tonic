@@ -26,7 +26,7 @@ TONIC_TEST_HEX=1 cargo test -p tonic --test packagesextra -- --ignored
 
 ## Macros and compilation callbacks
 
-User macros can execute compile-time code through the macro host. Coverage includes caller environments, computed expansions, default macro arguments, map splicing, generated definitions, `use`, and chained overridable functions and macros.
+User macros can execute compile-time code through the macro host. Coverage includes caller environments, computed expansions, default macro arguments, map splicing, generated definitions, `use`, and chained overridable functions and macros. In a Mix project, compile-time code can call `Mix.Project.config/0` (the `:app` and `:version` of the project the code belongs to) and the functions of each project's own `mix.exs` module.
 
 `@on_definition` callbacks receive definition metadata and can update attributes seen by subsequent definitions. `@before_compile` callbacks can inject definitions and attributes. Native `@after_compile` callbacks run after LLVM generation; their second argument is the emitted LLVM IR binary. It is not a BEAM module binary. Interpreted `Code.eval_*` modules receive an empty binary because they do not emit a compiled artifact.
 

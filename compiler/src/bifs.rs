@@ -66,6 +66,7 @@ const TABLE: &[(&str, &str, usize, &str, &str)] = &[
     ("erlang", "element", 2, "tn_element", "G"),
     ("erlang", "setelement", 3, "tn_setelement", ""),
     ("erlang", "tuple_size", 1, "tn_tuple_size", "G"),
+    ("erlang", "size", 1, "tn_size", "G"),
     ("erlang", "map_size", 1, "tn_map_size", "G"),
     ("erlang", "byte_size", 1, "tn_byte_size", "G"),
     ("erlang", "bit_size", 1, "tn_bit_size", "G"),

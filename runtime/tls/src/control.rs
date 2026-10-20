@@ -232,6 +232,7 @@ pub extern "C" fn tn_ssl_getopts(c: *mut Ctx, socket: Term, names: Term) -> Term
                     "packet" => packet::term(packet),
                     "nodelay" | "keepalive" | "reuseaddr" => FALSE,
                     "header" | "packet_size" => small(0),
+                    "sndbuf" | "recbuf" | "buffer" => small(65536),
                     _ => return None,
                 };
                 Some(value).map(|v| (name, v))

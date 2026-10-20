@@ -399,6 +399,20 @@ pub fn eval(e: &E, vars: &Vars, attrs: &HashMap<String, E>) -> Option<E> {
                         line,
                     ))
                 }
+                ("Bitwise", "band", 2) => Some(big(as_big(&ev[0])? & as_big(&ev[1])?, line)),
+                ("Bitwise", "bor", 2) => Some(big(as_big(&ev[0])? | as_big(&ev[1])?, line)),
+                ("Bitwise", "bxor", 2) => Some(big(as_big(&ev[0])? ^ as_big(&ev[1])?, line)),
+                ("Bitwise", "bnot", 1) => Some(big(!as_big(&ev[0])?, line)),
+                ("Bitwise", "bsl", 2) | ("Bitwise", "bsr", 2) => {
+                    let shift = as_int(&ev[1])?;
+                    let magnitude = usize::try_from(shift.checked_abs()?).ok()?;
+                    if magnitude > 1_000_000 {
+                        return None;
+                    }
+                    let left = (name == "bsl") == (shift >= 0);
+                    let value = as_big(&ev[0])?;
+                    Some(big(if left { value << magnitude } else { value >> magnitude }, line))
+                }
                 ("Enum", "to_list", 1) => Some(E::new(K::List(elements(&ev[0])?, None), line)),
                 ("Enum", "reverse", 1) => {
                     let mut v = elements(&ev[0])?;
@@ -609,7 +623,8 @@ pub fn subst_unquote(e: &E, vars: &Vars, attrs: &HashMap<String, E>) -> E {
         }
         K::Call { name, args, parens } if name == "__unquote_remote__" && args.len() >= 2 => {
             let recv = subst_unquote(&args[0], vars, attrs);
-            let head = subst_unquote(&args[1], vars, attrs);
+            // the parser keeps the expression inside `Mod.unquote(expr)(...)` bare
+            let head = eval(&args[1], vars, attrs).unwrap_or_else(|| subst_unquote(&args[1], vars, attrs));
             let rest = splice(&args[2..]);
             match head.k {
                 K::Atom(a) => K::Remote {

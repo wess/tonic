@@ -94,6 +94,26 @@ fn scan(
         _ => {}
     }
     crate::collect::map_expr(e, &mut |node| {
+        // attribute values and struct defaults run at compile time (Req's
+        // `@req Req.Request.new()`, `defstruct headers: Req.Fields.new([])`)
+        let compile_time = match &node.k {
+            K::Un { op, e: attribute } if op == "@" => match &attribute.k {
+                K::Call { args, .. } if args.len() == 1 => Some(&args[0]),
+                _ => None,
+            },
+            K::Call { name, args, .. } if name == "defstruct" && args.len() == 1 => Some(&args[0]),
+            _ => None,
+        };
+        if let Some(value) = compile_time {
+            crate::collect::map_expr(value, &mut |inner| {
+                if let K::Remote { recv, .. } = &inner.k {
+                    if let K::Alias(name) = &recv.k {
+                        references.insert(resolve(name, aliases));
+                    }
+                }
+                None
+            });
+        }
         if let K::Struct { name, .. } = &node.k {
             if let K::Alias(name) = &name.k {
                 references.insert(resolve(name, aliases));

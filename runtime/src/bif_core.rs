@@ -253,6 +253,18 @@ pub extern "C" fn tn_tuple_size(c: *mut Ctx, t: Term) -> Term {
     }
 }
 
+/// :erlang.size/1: a tuple's arity or a binary's byte size.
+#[no_mangle]
+pub extern "C" fn tn_size(c: *mut Ctx, t: Term) -> Term {
+    if is_tuple(t) {
+        small(tuple_size(t) as i64)
+    } else if is_bitstring(t) {
+        small(((bit_len(t) + 7) / 8) as i64)
+    } else {
+        cx(c).badarg_args(&[(1, "not tuple or binary")])
+    }
+}
+
 /// Kernel.elem/2 (0-based)
 #[no_mangle]
 pub extern "C" fn tn_elem(c: *mut Ctx, t: Term, i: Term) -> Term {

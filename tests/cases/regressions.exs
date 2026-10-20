@@ -257,6 +257,46 @@ defmodule Regressions.Frames do
   end
 end
 
+# compile-time code Mint and Req use: attributes in a private macro's quotes
+# and unquotes, Bitwise in unquote, `Mod.unquote(name)()` patterns, and the
+# evaluator's apply/3, struct!/2 and update_in/2 on modules it interprets
+defmodule Regressions.Words do
+  @word 7
+  @ones Enum.reduce(1..@word, 0, fn _, acc -> Bitwise.bor(Bitwise.bsl(acc, 8), 0x01) end)
+  @highs @ones * 0x80
+
+  defmacrop has_byte(word), do: quote(do: Bitwise.band(unquote(word) - @ones, @highs))
+  defmacrop scaled(n), do: quote(do: unquote(@ones * 2) * unquote(n))
+
+  def run(x), do: {has_byte(x), scaled(1), lowest(0x8000), :erlang.size({1, 2}), :erlang.size("abc")}
+
+  for k <- 0..(@word - 1) do
+    defp lowest(mask) when Bitwise.band(mask, unquote(Bitwise.bsl(0x80, 8 * k))) != 0, do: unquote(k)
+  end
+end
+
+defmodule Regressions.Dispatch do
+  require Regressions.Frames
+  alias Regressions.Frames
+
+  for name <- [:data, :ping] do
+    defp kind(Frames.unquote(name)() = frame), do: {unquote(name), elem(frame, 1)}
+  end
+
+  def run, do: {kind(Frames.data(stream_id: 1)), kind(Frames.ping(stream_id: 2))}
+end
+
+defmodule Regressions.HostStruct do
+  defstruct a: 1, b: [], set: MapSet.new()
+  def new(options), do: struct!(__MODULE__, options)
+  def grow(s), do: update_in(s.b, &[0 | &1])
+end
+
+defmodule Regressions.HostUse do
+  @made apply(Regressions.HostStruct, :new, [[b: [2]]]) |> Regressions.HostStruct.grow()
+  def run, do: {@made.a, @made.b}
+end
+
 defmodule Regressions.Third do
   import Regressions.Expand
   def expansions do
@@ -279,3 +319,4 @@ IO.inspect(trace.(fn -> Regressions.Third.unrequired() end))
 IO.inspect(trace.(fn -> Regressions.Third.line({1, 2, 3}) end))
 IO.inspect(trace.(fn -> abs(:a) end))
 IO.inspect(Regressions.Frames.run())
+IO.inspect({Regressions.Words.run(0x4242424242), Regressions.Dispatch.run(), Regressions.HostUse.run()})

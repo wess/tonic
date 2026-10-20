@@ -208,6 +208,54 @@ end
 }
 
 #[test]
+fn compile_time_code_sees_its_own_mix_project() {
+    let root = scratch("mixproject");
+    let project = root.join("project");
+    write(
+        &root.join("dependency"),
+        "mix.exs",
+        r#"defmodule PackageMix.MixProject do
+  use Mix.Project
+  def project, do: [app: :packagemix, version: "1.2.3"]
+  def flag, do: :from_mix
+end
+"#,
+    );
+    write(
+        &root.join("dependency"),
+        "lib/library.ex",
+        r#"defmodule PackageMix do
+  @agent "packagemix/" <> Mix.Project.config()[:version]
+  @flag PackageMix.MixProject.flag()
+  def info, do: {@agent, @flag}
+end
+"#,
+    );
+    write(
+        &project,
+        "mix.exs",
+        r#"defmodule MixConsumer.MixProject do
+  use Mix.Project
+  def project, do: [app: :mixconsumer, version: "0.1.0", deps: [{:packagemix, path: "../dependency"}], escript: [main_module: MixConsumer]]
+end
+"#,
+    );
+    write(
+        &project,
+        "lib/main.ex",
+        r#"defmodule MixConsumer do
+  @own Mix.Project.config()[:app]
+  def main(_), do: IO.inspect({PackageMix.info(), @own})
+end
+"#,
+    );
+    let result = tonic(&project, "dev", "host", &["run", "."]);
+    success(&result);
+    assert_eq!(result.stdout, b"{{\"packagemix/1.2.3\", :from_mix}, :mixconsumer}\n");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn missing_fetched_packages_report_the_dependency_and_fetch_command() {
     let root = scratch("missing");
     write(
