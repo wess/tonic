@@ -324,6 +324,15 @@ impl Collector {
                         let full = resolve_alias(env, a);
                         let as_name = match opts.and_then(|o| o.kw_get("as")) {
                             Some(E { k: K::Alias(n), .. }) => n.clone(),
+                            Some(E { k: K::Var(v), .. }) => {
+                                return Err(format!("{}:{}: undefined variable \"{}\"", env.file, line, v))
+                            }
+                            Some(E { k: K::Atom(v), .. }) => {
+                                return Err(format!(
+                                    "{}:{}: invalid value for option :as, expected an alias, got: :{}",
+                                    env.file, line, v
+                                ))
+                            }
                             _ => full.rsplit('.').next().unwrap().to_string(),
                         };
                         env.aliases.insert(as_name, full);
@@ -852,6 +861,30 @@ impl Collector {
             m.super_targets.insert(key.clone(), hidden);
         }
         let super_target = m.super_targets.get(&key).cloned();
+        if !m.is_prelude {
+            let kind_of = |public: bool, is_macro: bool| match (is_macro, public) {
+                (true, true) => "defmacro",
+                (true, false) => "defmacrop",
+                (false, true) => "def",
+                (false, false) => "defp",
+            };
+            let defaults = |args: &[E]| args.iter().any(|a| matches!(&a.k, K::Bin { op, .. } if op == "\\\\"));
+            if let Some(old) = m.defs.iter().find(|o| o.name == fname && o.arity == fargs.len()) {
+                let old_kind = kind_of(old.public, old.is_macro);
+                if old_kind != kind {
+                    return Err(format!(
+                        "{}:{}: {} {}/{} already defined as {} in {}:{}",
+                        env.file, line, kind, fname, fargs.len(), old_kind, env.file, old.line
+                    ));
+                }
+                if defaults(&fargs) && m.defs.iter().any(|o| o.name == fname && o.arity == fargs.len() && defaults(&o.args)) {
+                    return Err(format!(
+                        "{}:{}: {} {}/{} defines defaults multiple times. Elixir allows defaults to be declared once per definition",
+                        env.file, line, kind, fname, fargs.len()
+                    ));
+                }
+            }
+        }
         let d = DefC {
             name: fname,
             arity: fargs.len(),

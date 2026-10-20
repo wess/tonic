@@ -111,6 +111,11 @@ fn invalid_control_flow_is_rejected() {
         ("cond", "cond do end\n", "expected -> clauses for :do in \"cond\""),
         ("case", "case 1 do end\n", "expected -> clauses for :do in \"case\""),
         ("ifkeys", "if true, do: 1, foo: 2\n", "invalid or duplicate keys for if"),
+        ("trybare", "try do\n  1\nend\n", "missing :catch/:rescue/:after option in \"try\""),
+        ("kinds", "defmodule A do\n  def f(x), do: x\n  defp f(y), do: y\nend\n", "defp f/1 already defined as def in"),
+        ("macrokind", "defmodule A do\n  defmacro m(x), do: x\n  def m(x), do: x\nend\n", "def m/1 already defined as defmacro in"),
+        ("defaults", "defmodule A do\n  def f(x \\\\ 1), do: x\n  def f(x \\\\ 2), do: x\nend\n", "def f/1 defines defaults multiple times"),
+        ("aliasas", "defmodule A do\n  alias Foo.Bar, as: :baz\nend\n", "invalid value for option :as, expected an alias, got: :baz"),
     ] {
         let output = run_case(name, source);
         assert!(!output.status.success(), "{name} succeeded");

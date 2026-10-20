@@ -2296,6 +2296,9 @@ impl Expander {
 
     fn try_expr(&mut self, args: &[E], line: u32, cx: &mut Cx) -> R<CE> {
         let kw = &args[0];
+        if !["rescue", "catch", "after"].iter().any(|k| kw.kw_get(k).is_some()) {
+            return err(cx, line, "missing :catch/:rescue/:after option in \"try\"");
+        }
         let body_e = kw.kw_get("do").cloned().unwrap_or(E::nil(line));
         let body = self.body(&body_e, cx)?;
         let mut catches = Vec::new();
