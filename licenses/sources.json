@@ -406,7 +406,7 @@
         "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/rand.erl": "7f956b3658f5b2054fe5809b7db1221e76109339a27ca728184d5a90fc679b0d",
         "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/calendar.erl": "ced1faf7e4d87181f2f78dbc9820539c6873b623d7e91fde831a9dcd0b3f9e85"
       },
-      "sha256": "dec8a1697d7091bb01edabc905721741f1e793b11d12908a200cd016e0fe3c2a"
+      "sha256": "9d195296b72c9463c862f065073e46c25c10eef7c12b008667eefc20f41b2d12"
     },
     {
       "file": "lib/erlang_ds.ex",
@@ -1380,6 +1380,19 @@
         "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/uri_string.erl": "00c5766fc2a1b77301470dc8c31302d7f85105ade5ab021a7f1a743d113e949e"
       },
       "sha256": "d63e6147b206da1bf511a1cd0d81ff3cde01ce916100688a8edd13fbcf3f50d5"
+    },
+    {
+      "file": "lib/ex/port.ex",
+      "version": "1.18.3",
+      "upstream": [
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/port.ex"
+      ],
+      "license": "Apache-2.0",
+      "modifications": "Documentation/specifications stripped; native runtime and compiler adaptations.",
+      "upstreamsha256": {
+        "https://raw.githubusercontent.com/elixir-lang/elixir/v1.18.3/lib/elixir/lib/port.ex": "477a75f783b279fb789b204d05bf2732cd25e814e301f1aa2380b790be83a7e4"
+      },
+      "sha256": "f6e16633f0e5da2494dc7bd984075ac0d7315ab5fb93abb7bec1ff3ddef2b21e"
     }
   ]
 }

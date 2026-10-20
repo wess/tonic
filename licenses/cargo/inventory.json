@@ -1,5 +1,5 @@
 {
-  "cargolocksha256": "e5162c61af71987c8a1177bcd1b29747aa33fef58c13b164c038d123a7a4d652",
+  "cargolocksha256": "1dda99270f951b942560bd8612dfcc58594759f6fbb3f4f72051ecb5911c760c",
   "packages": [
     {
       "name": "autocfg",
@@ -212,6 +212,28 @@
         {
           "file": "licenses/cargo/digest/0.10.7/licensemit.txt",
           "sha256": "9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba",
+          "upstreamfile": "LICENSE-MIT"
+        }
+      ]
+    },
+    {
+      "name": "errno",
+      "version": "0.3.14",
+      "license": "MIT OR Apache-2.0",
+      "selected": "Apache-2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb",
+      "origin": "https://crates.io/crates/errno/0.3.14",
+      "repository": "https://github.com/lambda-fairy/rust-errno",
+      "documents": [
+        {
+          "file": "licenses/cargo/errno/0.3.14/licenseapache.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "upstreamfile": "LICENSE-APACHE"
+        },
+        {
+          "file": "licenses/cargo/errno/0.3.14/licensemit.txt",
+          "sha256": "8764a597675778ddfd4e25f81b08a05dbcf089ac05662df7613fe67f150e3aa2",
           "upstreamfile": "LICENSE-MIT"
         }
       ]
@@ -747,6 +769,28 @@
         {
           "file": "licenses/cargo/shlex/2.0.1/licensemit.txt",
           "sha256": "4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1",
+          "upstreamfile": "LICENSE-MIT"
+        }
+      ]
+    },
+    {
+      "name": "signal-hook-registry",
+      "version": "1.4.8",
+      "license": "MIT OR Apache-2.0",
+      "selected": "Apache-2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b",
+      "origin": "https://crates.io/crates/signal-hook-registry/1.4.8",
+      "repository": "https://github.com/vorner/signal-hook",
+      "documents": [
+        {
+          "file": "licenses/cargo/signalhookregistry/1.4.8/licenseapache.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "upstreamfile": "LICENSE-APACHE"
+        },
+        {
+          "file": "licenses/cargo/signalhookregistry/1.4.8/licensemit.txt",
+          "sha256": "503558bfefe66ca15e4e3f7955b3cb0ec87fd52f29bf24b336af7bd00e946d5c",
           "upstreamfile": "LICENSE-MIT"
         }
       ]
