@@ -32,6 +32,49 @@ defmodule :gen_tcp do
 end
 
 defmodule :inet do
+  def getaddrs(host, family) when family in [:inet, :inet6] do
+    ref = :tonic.inet_getaddrs(host, family)
+
+    receive do
+      {:"$tonic_tcp", ^ref, result} -> result
+    end
+  end
+
+  def getaddr(host, family) do
+    with {:ok, [ip | _]} <- getaddrs(host, family), do: {:ok, ip}
+  end
+
+  def gethostbyname(name), do: gethostbyname(name, :inet)
+
+  def gethostbyname(name, family) do
+    with {:ok, ips} <- getaddrs(name, family) do
+      size = if family == :inet6, do: 16, else: 4
+      {:ok, {:hostent, host_chars(name), [], family, size, ips}}
+    end
+  end
+
+  defp host_chars(name) when is_atom(name), do: Atom.to_charlist(name)
+  defp host_chars(name) when is_binary(name), do: String.to_charlist(name)
+  defp host_chars(name) when is_list(name), do: name
+  defp host_chars(name) when is_tuple(name), do: ntoa(name)
+
+  # the short name: OTP drops the domain
+  def gethostname do
+    {:ok, :tonic.inet_gethostname() |> String.to_charlist() |> Enum.take_while(&(&1 != ?.))}
+  end
+
+  def is_ip_address(address), do: is_ipv4_address(address) or is_ipv6_address(address)
+
+  def is_ipv4_address({a, b, c, d} = ip) when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d),
+    do: Enum.all?(Tuple.to_list(ip), &(&1 in 0..255))
+
+  def is_ipv4_address(_), do: false
+
+  def is_ipv6_address(ip) when is_tuple(ip) and tuple_size(ip) == 8,
+    do: Enum.all?(Tuple.to_list(ip), &(is_integer(&1) and &1 in 0..65535))
+
+  def is_ipv6_address(_), do: false
+
   def setopts(socket, options), do: :tonic.inet_setopts(socket, options)
   def getopts(socket, options), do: :tonic.inet_getopts(socket, options)
   def sockname(socket), do: :tonic.inet_sockname(socket)

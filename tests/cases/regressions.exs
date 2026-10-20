@@ -320,3 +320,46 @@ IO.inspect(trace.(fn -> Regressions.Third.line({1, 2, 3}) end))
 IO.inspect(trace.(fn -> abs(:a) end))
 IO.inspect(Regressions.Frames.run())
 IO.inspect({Regressions.Words.run(0x4242424242), Regressions.Dispatch.run(), Regressions.HostUse.run()})
+
+defmodule Regressions.Behaviour do
+  @callback a() :: :ok
+  @callback b(integer) :: :ok
+  @macrocallback m(term) :: Macro.t()
+  @optional_callbacks b: 1
+end
+
+defmodule Regressions.Deep.Helper do
+  def f, do: :called
+end
+
+defmodule Regressions.Fourth do
+  alias Regressions.Deep.Helper
+  Module.put_attribute(__MODULE__, :custom, 42)
+  def custom, do: @custom
+  def ast, do: quote(do: Helper.f())
+  def tried(x) do
+    try do
+      x
+    else
+      {:ok, v} -> v
+      other -> other
+    end
+  end
+end
+
+IO.inspect({Regressions.Behaviour.behaviour_info(:optional_callbacks), Enum.sort(Regressions.Behaviour.behaviour_info(:callbacks))})
+IO.inspect({Regressions.Fourth.custom(), Regressions.Fourth.ast(), Code.eval_quoted(Regressions.Fourth.ast()) |> elem(0)})
+IO.inspect({Regressions.Fourth.tried({:ok, 1}), ~s[a[b], ~S[a\[b], :calendar.now_to_universal_time({1700, 0, 0})})
+IO.inspect({:inet.is_ip_address({1, 2, 3, 4}), :inet.is_ip_address({1, 2, 3, 256}), :inet.getaddr({10, 0, 0, 1}, :inet)})
+{:ok, listener} = :gen_tcp.listen(0, [:binary, active: false])
+{:ok, tcp_port} = :inet.port(listener)
+spawn(fn -> {:ok, s} = :gen_tcp.accept(listener); :gen_tcp.close(s) end)
+{:ok, client} = :gen_tcp.connect({127, 0, 0, 1}, tcp_port, [:binary, active: false])
+IO.inspect({:gen_tcp.recv(client, 0, 1000), :gen_tcp.send(client, "x"), :gen_tcp.recv(client, 0, 1000), :inet.peername(client)})
+
+defmodule Regressions.Defaults do
+  def new(x) when is_integer(x), do: {:int, x}
+  def new(b, opts \\ []) when is_binary(b), do: {:bin, b, opts}
+end
+
+IO.inspect({Regressions.Defaults.new(1), Regressions.Defaults.new("a"), Regressions.Defaults.new("b", [1])})

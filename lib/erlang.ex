@@ -897,6 +897,13 @@ defmodule :calendar do
 
   def universal_time_to_local_time(dt), do: :erlang.universaltime_to_localtime(dt)
   def local_time_to_universal_time(dt), do: gregorian_seconds_to_datetime(datetime_to_gregorian_seconds(dt) - :tonic.utc_offset())
+  # the daylight-saving hint is ignored: the current offset applies (see compatibility.md)
+  def local_time_to_universal_time(dt, _is_dst), do: local_time_to_universal_time(dt)
+  def local_time_to_universal_time_dst(dt), do: [local_time_to_universal_time(dt)]
+
+  def now_to_universal_time(now), do: now_to_datetime(now)
+  def now_to_datetime({mega, sec, _micro}), do: system_time_to_universal_time(mega * 1_000_000 + sec, :second)
+  def now_to_local_time(now), do: :erlang.universaltime_to_localtime(now_to_universal_time(now))
 
   def is_leap_year(y) when is_integer(y), do: rem(y, 4) == 0 and (rem(y, 100) != 0 or rem(y, 400) == 0)
 

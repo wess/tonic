@@ -15,6 +15,8 @@ The package integration tests fetch exact Hex versions into an isolated project,
 
 The web example in `examples/helloweb` was built natively and exercised over HTTP (create, list, fetch, validation errors, 404s), matching the same project on the BEAM. It covers Plug 1.20.3, Bandit 1.12.5, ThousandIsland 1.5.0, Ecto 3.14.2, Ecto SQL 3.14.0, ecto_sqlite3 0.25.0, exqlite 0.42.0, DBConnection 2.10.2, Jason 1.4.5 and Telemetry 1.4.2. This is a manual verification, not yet an automated test.
 
+Mint 1.11.0 builds natively and fetches over HTTPS (HTTP/2). Req does not compile yet: it stores function captures of modules that only exist at compile time in a module attribute.
+
 These are specific compatibility checks, not a claim that every function in these packages or every Hex package works. The package fixtures are in `tests/fixtures/packages`; the Decimal example is in `examples/packages`.
 
 Decimal uses the patched 3.0.0 release. Earlier versions below 3.0.0 are affected by [CVE-2026-32686](https://github.com/advisories/GHSA-rhv4-8758-jx7v).
@@ -95,4 +97,13 @@ These differ from Elixir 1.18 / OTP 27 in this release. Each is either intention
 - Memory: each blocked process holds at least one page of its stack, so a process costs about 20 KB on Apple Silicon (16 KB pages) and about 7 KB on Linux (4 KB pages), compared to about 3 KB on the BEAM. Deep non-tail recursion works to any depth memory allows, but a stack frame takes about four times the memory of a BEAM frame (10 million frames of `n + f(n - 1)` use about 2 GB, the BEAM about 0.6 GB).
 - Executables include only the standard library functions the compiler can see a program reach. A call whose function name is built at run time (`apply(Mod, String.to_atom(name), args)`) into a standard library function the program does not otherwise use fails with `UndefinedFunctionError`; compile with `TONIC_KEEP_ALL=1` to keep every function.
 - `mix test` with `compilers: [:tonic]` cannot start the application, since no BEAM files are produced; run tests with the default compilers.
+- Output written by a module body (`IO.puts` inside `defmodule`) appears on stderr while the program compiles, not when it runs.
+- Logger's `debug`/`info`/... and `log` are functions, so calling them without `require Logger` works where Elixir raises.
+- Some programs Elixir rejects still compile: a keyword list in a tuple (`{a: 1}`), a nested alias in `as:` (`as: Baz.Qux`), a `defguard` and `def` of the same name and arity, and a second `defoverridable` of an already overridable function. A `@spec` for an undefined function is not reported.
+- Stack traces keep a frame for a function that tail-calls a function the BEAM inlines (such as `String.to_atom/1`), show each frame of repeated body recursion, and add an `erlang.erl` `apply/2` frame to Task crash reports.
+- Sorting terms that compare equal but differ (`1` and `1.0`) can order them differently from `:lists.sort/1`.
+- A few error messages are worded differently: binary construction (`"a" <> 1`), updating a missing map key, `:erlang.binary_to_atom/2` on invalid UTF-8, `Process.exit/2` with a non-pid, and `Base.decode64!/1` on bad padding.
+- `Module.get_attribute(__MODULE__, :doc)` after a `def` still returns the doc that definition consumed.
+- `:inet.getifaddrs/0` is not implemented.
+- `quote bind_quoted:` omits line metadata on the variables it binds, and a variable bound with `var!` in a macro and never used is not warned about.
 

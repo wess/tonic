@@ -190,3 +190,22 @@ fn ungrouped_clauses_and_duplicate_keys_warn_like_elixir() {
         assert!(String::from_utf8_lossy(&output.stderr).contains("Keyword lists must always come last"), "{name}");
     }
 }
+
+#[test]
+fn main_process_exit_banners_match_elixir() {
+    for (name, source, expected) in [
+        ("linked", "spawn_link(fn -> exit(:boom) end)\nProcess.sleep(1000)\n", ") :boom"),
+        ("shutdown", "p = self()\nspawn(fn -> Process.exit(p, {:shutdown, 3}) end)\nProcess.sleep(1000)\n", ") shutdown: 3"),
+    ] {
+        let output = run_case(name, source);
+        assert_eq!(output.status.code(), Some(1), "{name}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.starts_with("** (EXIT from #PID<") && stderr.contains(expected), "{name}: {stderr}");
+    }
+    let output = run_case("clause", "defmodule X do\n  def f(:a), do: 1\nend\nX.f(:b)\n");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("** (FunctionClauseError) no function clause matching in X.f/1    \n    \n    The following arguments were given to X.f/1:\n    \n        # 1\n        :b\n"),
+        "{stderr}"
+    );
+}

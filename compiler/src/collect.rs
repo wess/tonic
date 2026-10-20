@@ -13,6 +13,25 @@ pub struct Import {
     pub module: String,
     pub only: Option<Vec<(String, usize)>>,
     pub except: Vec<(String, usize)>,
+    /// `only: :functions | :macros | :sigils`
+    pub only_kind: Option<String>,
+}
+
+impl Import {
+    /// Whether `name/arity` of the given kind is imported.
+    pub fn allows(&self, name: &str, arity: usize, macro_: bool) -> bool {
+        let listed = match &self.only {
+            Some(only) => only.iter().any(|(n, a)| n == name && *a == arity),
+            None => !self.except.iter().any(|(n, a)| n == name && *a == arity),
+        };
+        listed
+            && match self.only_kind.as_deref() {
+                Some("functions") => !macro_,
+                Some("macros") => macro_,
+                Some("sigils") => name.starts_with("sigil_"),
+                _ => true,
+            }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -61,6 +80,8 @@ pub struct Module {
     pub super_targets: HashMap<(String, usize), String>,
     pub after_compile: bool,
     pub callbacks: HashSet<(String, usize)>,
+    /// `@optional_callbacks` entries, as Erlang sees them
+    pub optional_callbacks: Vec<(String, usize)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -381,8 +402,12 @@ impl Collector {
                     module,
                     only: None,
                     except: vec![],
+                    only_kind: None,
                 };
                 if let Some(opts) = args.get(1) {
+                    if let Some(E { k: K::Atom(kind), .. }) = opts.kw_get("only") {
+                        imp.only_kind = Some(kind.clone());
+                    }
                     if let Some(only) = opts.kw_get("only") {
                         if let Some(kw) = only.as_keyword() {
                             imp.only = Some(
@@ -497,6 +522,7 @@ impl Collector {
             super_targets: HashMap::new(),
             after_compile: false,
             callbacks: HashSet::new(),
+            optional_callbacks: Vec::new(),
         });
         Ok(())
     }
@@ -1563,7 +1589,19 @@ impl Collector {
                         }
                         "doc" | "moduledoc" | "spec" | "impl" | "type" | "typep" | "opaque"
                         | "typedoc" | "since" | "deprecated" | "behaviour" | "dialyzer"
-                        | "optional_callbacks" | "external_resource" | "vsn" => {}
+                        | "external_resource" | "vsn" => {}
+                        "optional_callbacks" => {
+                            for spec in args {
+                                for (n, a) in spec.as_keyword().unwrap_or_default() {
+                                    if let K::Int(a) = &a.k {
+                                        let a: usize = a.parse().unwrap_or(0);
+                                        let m = self.mods.get_mut(module).unwrap();
+                                        let key = if m.callbacks.contains(&(n.clone(), a)) { (n.clone(), a) } else { (format!("MACRO-{}", n), a + 1) };
+                                        m.optional_callbacks.push(key);
+                                    }
+                                }
+                            }
+                        }
                         "compile" => {
                             fn hint(value: &E) -> bool {
                                 // Optimisation and warning options are hints; only
@@ -1622,7 +1660,9 @@ impl Collector {
                                         _ => None,
                                     }
                                 }
-                                if let Some(key) = signature(spec) {
+                                if let Some((n, a)) = signature(spec) {
+                                    // macro callbacks are MACRO-name/arity+1 to the BEAM
+                                    let key = if name == "macrocallback" { (format!("MACRO-{}", n), a + 1) } else { (n, a) };
                                     self.mods.get_mut(module).unwrap().callbacks.insert(key);
                                 }
                             }
@@ -1740,6 +1780,19 @@ impl Collector {
                         "register_attribute" | "put_attribute" | "delete_attribute" | "add_doc"
                     )
                 {
+                    // a value known now is what `@name` reads in later function bodies
+                    if name == "put_attribute" && args.len() == 3 && matches!(&args[0].k, K::Var(v) if v == "__MODULE__") {
+                        if let (K::Atom(attr), Some(value)) = (&args[1].k, crate::ctime::eval(&args[2], &vars, attrs)) {
+                            if !attrs.contains_key(&format!("\u{0}acc:{}", attr)) {
+                                attrs.insert(attr.clone(), value);
+                            }
+                        }
+                    }
+                    if name == "delete_attribute" && args.len() == 2 {
+                        if let K::Atom(attr) = &args[1].k {
+                            attrs.remove(attr);
+                        }
+                    }
                     // accumulated attributes read in function bodies need the whole list
                     if name == "register_attribute" && args.len() == 3 {
                         let accumulate = matches!(args[2].kw_get("accumulate"), Some(E { k: K::Atom(t), .. }) if t == "true");

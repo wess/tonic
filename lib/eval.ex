@@ -834,12 +834,13 @@ defmodule Tonic.Eval do
   defp expand_alias({:__aliases__, meta, [h | t]}, st) when is_atom(h) do
     first = Module.concat([h])
 
-    case List.keyfind(st.aliases, first, 0) do
-      {_, mod} when t != [] -> Module.concat([mod | t])
-      {_, mod} -> mod
-      nil -> Module.concat([h | t])
+    # an alias recorded by quote wins over the evaluation environment's, as in Elixir
+    case {Keyword.get(meta, :alias, false), List.keyfind(st.aliases, first, 0)} do
+      {recorded, _} when is_atom(recorded) and recorded not in [false, nil] -> recorded
+      {_, {_, mod}} when t != [] -> Module.concat([mod | t])
+      {_, {_, mod}} -> mod
+      {_, nil} -> Module.concat([h | t])
     end
-    |> tap(fn _ -> meta end)
   end
 
   defp expand_alias({:__aliases__, _, [h | t]}, st) do
@@ -1092,7 +1093,14 @@ defmodule Tonic.Eval do
 
   # a quote's unquotes run when the macro does, outside the module, so the
   # attributes they read are taken now (Mint's `unquote(@ones * n)`)
-  defp unquote_fragments({:quote, m, args}, %{in_module: true} = st), do: {:quote, m, quoted_attributes(args, st)}
+  # (not with unquote: false, whose unquotes belong to the code it generates,
+  # like Ecto's schema postlude)
+  defp unquote_fragments({:quote, m, args}, %{in_module: true} = st) do
+    if Enum.any?(args, &(Keyword.keyword?(&1) and Keyword.get(&1, :unquote) == false)),
+      do: {:quote, m, args},
+      else: {:quote, m, quoted_attributes(args, st)}
+  end
+
   defp unquote_fragments({:quote, _, _} = q, _st), do: q
 
   defp unquote_fragments({:unquote, _, [e]}, st) do

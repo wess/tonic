@@ -341,6 +341,8 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
             })
             .collect();
         keys.extend(ex.macros.keys().cloned());
+        // defguards are macros too (Integer.is_even/1)
+        keys.extend(ex.mods.values().flat_map(|m| m.guards.keys().map(move |(n, a)| (m.name.clone(), n.clone(), *a))));
         keys.sort();
         keys.dedup();
         let mut clauses: Vec<Clause> = keys

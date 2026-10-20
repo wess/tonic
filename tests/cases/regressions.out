@@ -76,3 +76,11 @@ ArgumentError
 {{:data, 3, 0, "x", nil}, 0, true, {:ping, nil, 0, nil}}
 {{36169534507319296, 565157600297474, 1, 2, 3}, {{:data, 1}, {:ping, 2}},
  {1, [0, 2]}}
+{[b: 1], ["MACRO-m": 2, a: 0, b: 1]}
+{42,
+ {{:., [], [{:__aliases__, [alias: Regressions.Deep.Helper], [:Helper]}, :f]},
+  [], []}, :called}
+{1, "a[b", "a\\[b", {{2023, 11, 14}, {22, 13, 20}}}
+{true, false, {:ok, {10, 0, 0, 1}}}
+{{:error, :closed}, {:error, :closed}, {:error, :enotconn}, {:error, :enotconn}}
+{{:int, 1}, {:bin, "a", []}, {:bin, "b", [1]}}

@@ -293,9 +293,18 @@ defmodule Tonic.Internal do
           stack
       end
 
-    {reason, stack} =
+    {blamed, stack} =
       if main?, do: Exception.blame(kind, reason, stack), else: {Exception.normalize(kind, reason, stack), stack}
-    banner = format_exit(kind, reason)
+
+    # as Kernel.CLI prints it: the clause blame below the plain banner, padded
+    banner =
+      case blamed do
+        %FunctionClauseError{} when main? ->
+          Exception.format_banner(kind, reason, stack) <> pad(FunctionClauseError.blame(blamed, &inspect/1, &blame_match/1))
+
+        _ ->
+          format_exit(kind, blamed)
+      end
 
     case stack do
       [] -> banner
@@ -303,9 +312,19 @@ defmodule Tonic.Internal do
     end
   end
 
-  def format_exit(:error, reason) do
-    e = normalize_error(reason)
-    "** (" <> inspect(e.__struct__) <> ") " <> Exception.message(e)
+  def format_exit(:error, reason), do: Exception.format_banner(:error, normalize_error(reason))
+
+  defp pad(string), do: "    " <> String.replace(string, "\n", "\n    ")
+
+  defp blame_match(%{match?: true, node: node}), do: blame_ansi(:normal, "+", node)
+  defp blame_match(%{match?: false, node: node}), do: blame_ansi(:red, "-", node)
+
+  defp blame_ansi(color, no_ansi, node) do
+    if IO.ANSI.enabled?() do
+      [color | Macro.to_string(node)] |> IO.ANSI.format(true) |> IO.iodata_to_binary()
+    else
+      no_ansi <> Macro.to_string(node) <> no_ansi
+    end
   end
 
   def format_exit(:throw, reason), do: "** (throw) " <> inspect(reason)

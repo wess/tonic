@@ -402,9 +402,16 @@ impl Expander {
         let ndef = defaults.iter().filter(|d| d.is_some()).count();
         let required = arity - ndef;
         let user = self.mods.get(module).map_or(false, |m| !m.is_prelude);
+        // only a definition after the one declaring the defaults conflicts;
+        // an earlier one gains the default clause (Decimal.new/1 and new/2)
+        let declared = self.mods.get(module).and_then(|m| {
+            m.defs.iter().position(|d| {
+                d.name == name && d.arity == arity && d.args.iter().any(|a| matches!(&a.k, K::Bin { op, .. } if op == "\\\\"))
+            })
+        });
         for k in required..arity {
-            if user {
-                if let Some(other) = self.mods[module].defs.iter().find(|d| d.name == name && d.arity == k && !d.is_macro) {
+            if let (true, Some(at)) = (user, declared) {
+                if let Some(other) = self.mods[module].defs.iter().skip(at + 1).find(|d| d.name == name && d.arity == k && !d.is_macro) {
                     let kind = if other.public { "def" } else { "defp" };
                     return Err(format!(
                         "{}:{}: {} {}/{} conflicts with defaults from {}/{}",
@@ -533,9 +540,12 @@ impl Expander {
         if !m.callbacks.is_empty() {
             let mut cbs: Vec<(String, usize)> = m.callbacks.iter().cloned().collect();
             cbs.sort_by_key(key);
+            let mut optional = m.optional_callbacks.clone();
+            optional.sort_by_key(key);
             src.push_str(&format!(
-                "def behaviour_info(:callbacks), do: {}\ndef behaviour_info(:optional_callbacks), do: []\n",
-                kw(&cbs)
+                "def behaviour_info(:callbacks), do: {}\ndef behaviour_info(:optional_callbacks), do: {}\n",
+                kw(&cbs),
+                kw(&optional)
             ));
         }
         self.gen_src_defs(m, env, &src, "__info__")

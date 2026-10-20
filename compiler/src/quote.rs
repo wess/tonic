@@ -102,6 +102,7 @@ impl Expander {
             ctx,
             unquote: true,
             prune: false,
+            aliases: cx.env.aliases.clone(),
         };
         if let Some(o) = opts {
             if let Some(u) = o.kw_get("prune_metadata") {
@@ -191,6 +192,7 @@ pub fn quote_literal(e: &E) -> R<CE> {
         ctx: "nil".into(),
         unquote: false,
         prune: true,
+        aliases: HashMap::new(),
     };
     q.q(&mut NoUnq, e)
 }
@@ -200,6 +202,8 @@ struct Quoter {
     unquote: bool,
     /// `prune_metadata: true`: no metadata at all.
     prune: bool,
+    /// the caller's aliases (short name -> module), recorded as `alias:`
+    aliases: HashMap<String, String>,
 }
 
 impl Quoter {
@@ -274,7 +278,16 @@ impl Quoter {
         let meta = if self.prune {
             CE::Lit(Lit::Nil)
         } else {
-            kw(vec![("alias", CE::atom("false"))])
+            // the lexical alias in effect, as elixir_quote annotates it
+            let (first, rest) = a.split_once('.').map_or((a, None), |(f, r)| (f, Some(r)));
+            let expanded = self.aliases.get(first).map(|full| {
+                let full = if full.starts_with("Elixir.") { full.clone() } else { format!("Elixir.{}", full) };
+                match rest {
+                    Some(r) => format!("{}.{}", full, r),
+                    None => full,
+                }
+            });
+            kw(vec![("alias", expanded.as_deref().map_or(CE::atom("false"), CE::atom))])
         };
         triple(CE::atom("__aliases__"), meta, list(segs))
     }

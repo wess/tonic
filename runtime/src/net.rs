@@ -27,6 +27,9 @@ pub enum Active {
 struct Options {
     active: Active,
     nodelay: bool,
+    /// `exit_on_close: false`: a read that finds the peer gone leaves the
+    /// socket open
+    keep_open: bool,
 }
 
 struct State {
@@ -39,6 +42,9 @@ struct State {
     recv_cnt: u64,
     send_oct: u64,
     send_cnt: u64,
+    keep_open: bool,
+    /// closed by the read that found the peer gone (OTP's exit_on_close)
+    shut: bool,
 }
 
 struct Stream {
@@ -240,7 +246,7 @@ pub extern "C" fn tn_tcp_listen(c: *mut Ctx, port: Term, opts: Term) -> Term {
         return ctx.badarg("argument error");
     }
     let mut ip = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-    let mut options = Options { active: Active::On, nodelay: false };
+    let mut options = Options { active: Active::On, nodelay: false, keep_open: false };
     for item in list_items(opts) {
         match option(item) {
             Some(("ip" | "ifaddr", v)) => match ip_of(v) {
@@ -250,6 +256,7 @@ pub extern "C" fn tn_tcp_listen(c: *mut Ctx, port: Term, opts: Term) -> Term {
             Some(("inet6", _)) => ip = IpAddr::V6(Ipv6Addr::UNSPECIFIED),
             Some(("active", v)) => options.active = active_of(v).unwrap_or(Active::On),
             Some(("nodelay", v)) => options.nodelay = v == TRUE,
+            Some(("exit_on_close", v)) => options.keep_open = v != TRUE,
             _ => {}
         }
     }
@@ -287,6 +294,8 @@ fn adopt(io: TcpStream, owner: u64, options: &Options) -> u64 {
             recv_cnt: 0,
             send_oct: 0,
             send_cnt: 0,
+            keep_open: options.keep_open,
+            shut: false,
         }),
         reads: tokio::sync::Mutex::new(()),
         writes: tokio::sync::Mutex::new(()),
@@ -337,7 +346,7 @@ pub extern "C" fn tn_tcp_accept(c: *mut Ctx, socket: Term, timeout: Term) -> Ter
             Some(Ok((io, _))) => {
                 let id = {
                     let options = listener.options.lock();
-                    let options = Options { active: options.active, nodelay: options.nodelay };
+                    let options = Options { active: options.active, nodelay: options.nodelay, keep_open: options.keep_open };
                     adopt(io, pid, &options)
                 };
                 reply(pid, op, |env| {
@@ -374,11 +383,12 @@ pub extern "C" fn tn_tcp_connect(c: *mut Ctx, address: Term, port: Term, opts: T
         (Some(h), true) => Some((h, small_val(port) as u16)),
         _ => None,
     };
-    let mut options = Options { active: Active::On, nodelay: false };
+    let mut options = Options { active: Active::On, nodelay: false, keep_open: false };
     for item in list_items(opts) {
         match option(item) {
             Some(("active", v)) => options.active = active_of(v).unwrap_or(Active::On),
             Some(("nodelay", v)) => options.nodelay = v == TRUE,
+            Some(("exit_on_close", v)) => options.keep_open = v != TRUE,
             _ => {}
         }
     }
@@ -477,13 +487,23 @@ pub extern "C" fn tn_tcp_recv(c: *mut Ctx, socket: Term, length: Term, timeout: 
         reply(pid, op, |env| error_with(env, "einval"));
         return r;
     };
+    if stream.state.lock().shut {
+        reply(pid, op, |env| error_with(env, "enotconn"));
+        return r;
+    }
     crate::sched::runtime().spawn(async move {
         match with_timeout(timeout, read(&stream, length)).await {
             Some(Read::Data(data)) => reply(pid, op, |env| {
                 let b = env.bytes(&data);
                 ok_with(env, b)
             }),
-            Some(Read::Closed) => reply(pid, op, |env| error_with(env, "closed")),
+            Some(Read::Closed) => {
+                {
+                    let mut st = stream.state.lock();
+                    st.shut = !st.keep_open;
+                }
+                reply(pid, op, |env| error_with(env, "closed"))
+            }
             Some(Read::Failed(reason)) => reply(pid, op, |env| error_with(env, reason)),
             None => reply(pid, op, |env| error_with(env, "timeout")),
         }
@@ -603,7 +623,7 @@ async fn write_all(stream: &Stream, data: &[u8]) -> Result<(), &'static str> {
 pub extern "C" fn tn_tcp_send(c: *mut Ctx, socket: Term, data: Term) -> Term {
     let ctx = cx(c);
     let stream = match lookup(socket) {
-        Some(Socket::Stream(s)) => s,
+        Some(Socket::Stream(s)) if !s.state.lock().shut => s,
         _ => return ctx_result(ctx, None, Some("closed")),
     };
     let mut bytes = Vec::new();
@@ -796,6 +816,8 @@ pub extern "C" fn tn_inet_setopts(c: *mut Ctx, socket: Term, opts: Term) -> Term
                 let _ = s.io.set_nodelay(v == TRUE);
             }
             (Some(("nodelay", v)), Socket::Listener(l)) => l.options.lock().nodelay = v == TRUE,
+            (Some(("exit_on_close", v)), Socket::Stream(s)) => s.state.lock().keep_open = v != TRUE,
+            (Some(("exit_on_close", v)), Socket::Listener(l)) => l.options.lock().keep_open = v != TRUE,
             (Some(("packet", v)), _) if v != small(0) && !(is_atom(v) && crate::atoms::name(atom_idx(v)) == "raw") => {
                 return ctx_result(ctx, None, Some("einval"))
             }
@@ -859,6 +881,7 @@ fn endpoint(c: *mut Ctx, socket: Term, peer: bool) -> Term {
         return crate::udp::endpoint(ctx, udp, peer);
     }
     let addr = match lookup(socket) {
+        Some(Socket::Stream(s)) if s.state.lock().shut => return ctx_result(ctx, None, Some(if peer { "enotconn" } else { "ebadf" })),
         Some(Socket::Stream(s)) => if peer { s.io.peer_addr() } else { s.io.local_addr() },
         Some(Socket::Listener(l)) if !peer => l.io.local_addr(),
         Some(Socket::Listener(_)) => return ctx_result(ctx, None, Some("enotconn")),

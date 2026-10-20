@@ -373,7 +373,7 @@ impl Expander {
                         .iter()
                         .filter(|((m, _, _), d)| m == &imp.module && d.public)
                         .map(|((_, n, a), _)| (n.clone(), *a))
-                        .filter(|fa| imp.only.as_ref().map_or(true, |o| o.contains(fa)) && !imp.except.contains(fa))
+                        .filter(|(n, a)| imp.allows(n, *a, true))
                         .collect();
                     if ms.is_empty() {
                         continue;
@@ -432,11 +432,9 @@ impl Expander {
             return Some(Resolved::Fun(FunKey::new(&m, name, arity)));
         }
         for imp in cx.env.imports.iter().rev() {
-            let allowed = match &imp.only {
-                Some(only) => only.iter().any(|(n, a)| n == name && *a == arity),
-                None => !imp.except.iter().any(|(n, a)| n == name && *a == arity),
-            };
-            if !allowed {
+            // defguards are macros
+            let guard = self.mods.get(&imp.module).map_or(false, |md| md.guards.contains_key(&(name.to_string(), arity)));
+            if !imp.allows(name, arity, guard) {
                 continue;
             }
             if self
@@ -888,6 +886,15 @@ impl Expander {
                     .map(|md| md.guards.contains_key(&(name.to_string(), args.len())))
                     .unwrap_or(false)
                 {
+                    // defguard is a macro: user code must require its module
+                    if !self.required(&m, cx) {
+                        if cx.guard {
+                            let shown = m.trim_start_matches("Elixir.");
+                            return err(cx, line, &format!("cannot invoke remote function {}.{}/{} inside a guard", shown, name, args.len()));
+                        }
+                        let vals = self.exprs(args, cx)?;
+                        return Ok(CE::DynCall(Box::new(CE::atom(&m)), name.to_string(), vals));
+                    }
                     return self.inline_guard(&m, name, args, line, cx);
                 }
                 if cx.guard {
@@ -1057,9 +1064,10 @@ impl Expander {
             return Some(m);
         }
         for imp in &cx.env.imports {
-            if self
-                .macros
-                .contains_key(&(imp.module.clone(), name.to_string(), arity))
+            if imp.allows(name, arity, true)
+                && self
+                    .macros
+                    .contains_key(&(imp.module.clone(), name.to_string(), arity))
             {
                 return Some(imp.module.clone());
             }

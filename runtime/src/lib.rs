@@ -26,6 +26,7 @@ pub mod port;
 pub mod re;
 pub mod ustr;
 pub mod zlib;
+pub mod resolve;
 pub mod sched;
 pub mod stackseg;
 pub mod term;

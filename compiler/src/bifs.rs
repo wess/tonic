@@ -291,6 +291,7 @@ pub fn runtime_syms() -> &'static HashMap<String, usize> {
             include_str!("../../runtime/src/ustr.rs"),
             include_str!("../../runtime/src/nif.rs"),
             include_str!("../../runtime/src/net.rs"),
+            include_str!("../../runtime/src/resolve.rs"),
             include_str!("../../runtime/src/udp.rs"),
             include_str!("../../runtime/src/atomics.rs"),
             include_str!("../../runtime/src/zlib.rs"),
