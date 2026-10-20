@@ -68,6 +68,7 @@ Those separately distributed components retain their own applicable notices.
     checksums = {(p["name"], p["version"]): p.get("checksum") for p in tomllib.loads(lock.decode())["package"]}
     inventory = {"cargolocksha256": digest(lock), "packages": []}
     pcre = None
+    zlib = None
     for package in sorted(metadata["packages"], key=lambda p: (p["name"], p["version"])):
         if not package["source"]:
             continue
@@ -104,8 +105,24 @@ Those separately distributed components retain their own applicable notices.
                 raise RuntimeError("pcre2-sys version changed; review notice and native license texts")
             pcre = directory
             pcrearchive = archivepath
+        if package["name"] == "libz-sys":
+            zlib = (directory, archivepath, package["version"])
     if pcre is None:
         raise RuntimeError("bundled PCRE2 dependency missing")
+    if zlib is None:
+        raise RuntimeError("bundled zlib dependency missing")
+    zdirectory, zarchivepath, zversion = zlib
+    zheader = (zdirectory / "src/zlib/zlib.h").read_text()
+    zlibversion = re.search(r'#define ZLIB_VERSION "([^"]+)"', zheader)[1]
+    if zlibversion != "1.3.2":
+        raise RuntimeError("bundled zlib version changed: review licenses/zlib/license.txt")
+    zarchive = tarfile.open(zarchivepath)
+    zlicense = (zdirectory / "src/zlib/LICENSE").read_bytes()
+    member = zarchive.extractfile(f"libz-sys-{zversion}/src/zlib/LICENSE")
+    if member is None or member.read() != zlicense:
+        raise RuntimeError("bundled zlib license checksum mismatch")
+    zarchive.close()
+    add(files, "licenses/zlib/license.txt", zlicense)
     header = (pcre / "upstream/include/pcre2.h").read_text()
     major = re.search(r"#define PCRE2_MAJOR\s+(\d+)", header)[1]
     minor = re.search(r"#define PCRE2_MINOR\s+(\d+)", header)[1]
@@ -132,9 +149,10 @@ Those separately distributed components retain their own applicable notices.
     add(files, "licenses/pcre2/sourcecopyrights.txt", data)
     sljit = (pcre / "upstream/deps/sljit/sljit_src/sljitLir.h").read_text()
     sljitversion = ".".join(re.search(rf"#define SLJIT_{part}_VERSION\s+(\d+)", sljit)[1] for part in ("MAJOR", "MINOR"))
-    inventory["native"] = {"pcre2": f"{major}.{minor}", "sljit": sljitversion,
-                           "license": "BSD-3-Clause WITH PCRE2-exception; SLJIT BSD-2-Clause",
-                           "documents": ["licenses/pcre2/license.md", "licenses/pcre2/sourcecopyrights.txt", "licenses/unicode/license.txt"]}
+    inventory["native"] = {"pcre2": f"{major}.{minor}", "sljit": sljitversion, "zlib": zlibversion,
+                           "license": "BSD-3-Clause WITH PCRE2-exception; SLJIT BSD-2-Clause; zlib Zlib",
+                           "documents": ["licenses/pcre2/license.md", "licenses/pcre2/sourcecopyrights.txt", "licenses/unicode/license.txt",
+                                         "licenses/zlib/license.txt"]}
     add(files, "licenses/cargo/inventory.json", (json.dumps(inventory, indent=2) + "\n").encode())
 
     sysroot = Path(command("rustc", "--print", "sysroot"))

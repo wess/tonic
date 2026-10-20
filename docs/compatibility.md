@@ -73,7 +73,7 @@ These differ from Elixir 1.18 / OTP 27 in this release. Each is either intention
 - Runtime stack traces can omit or misreport line numbers inside functions.
 - A `quote` of a sigil omits the `delimiter:` metadata.
 - `:atomics` and `:counters` arrays are never freed.
-- `:zlib` is not available.
+- `:zlib` streams that are never closed are not freed, and closing a stream twice raises `:badarg` rather than `:not_initialized`. Compressed bytes come from stock zlib 1.3.2 and match an OTP built against stock zlib; an OTP linked to a different zlib (such as zlib-ng) can produce different bytes, though each decompresses the other's output.
 - `:re` with `[:unicode]` but without `:ucp` matches `\w` and similar classes against ASCII only; use `~r/.../u` (which sets `:ucp`) for Unicode word characters.
 - Converting a very large integer to a float rounds correctly (IEEE 754); the BEAM can differ in the last digit.
 - `Code.string_to_quoted/1` error locations report line 0 without a column, and a compiled regex's `re_pattern` is not a real PCRE binary.

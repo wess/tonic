@@ -89,7 +89,8 @@ dedicated interoperability tests before any compatibility claims.
 
 - [ ] Define a ports and external-process interface.
 - [ ] Extend the `erl_nif` subset (maps, monitors, select, dirty schedulers) and
-  release resources when no term references them.
+  release resources when no term references them. The same release would
+  free unclosed `:zlib` streams and `:atomics` arrays.
 - [ ] SSL and UDP sockets.
 - [ ] Define the scope of distributed-node support and BEAM interoperability.
 - [ ] Decide how dynamic module loading and hot code replacement would work

@@ -290,6 +290,7 @@ pub fn runtime_syms() -> &'static HashMap<String, usize> {
             include_str!("../../runtime/src/nif.rs"),
             include_str!("../../runtime/src/net.rs"),
             include_str!("../../runtime/src/atomics.rs"),
+            include_str!("../../runtime/src/zlib.rs"),
         ];
         let mut m = HashMap::new();
         for src in srcs {

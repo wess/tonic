@@ -33,6 +33,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("erl/genstatem.erl", include_str!("../../lib/erl/genstatem.erl")),
     ("erl/gen_event.erl", include_str!("../../lib/erl/gen_event.erl")),
     ("erl/base64.erl", include_str!("../../lib/erl/base64.erl")),
+    ("erl/zlib.erl", include_str!("../../lib/erl/zlib.erl")),
     ("erl/elixir_tokenizer.erl", include_str!("../../lib/erl/elixir_tokenizer.erl")),
     ("erl/elixir_interpolation.erl", include_str!("../../lib/erl/elixir_interpolation.erl")),
     ("string_tokenizer.ex", include_str!("../../lib/string_tokenizer.ex")),

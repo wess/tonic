@@ -23,5 +23,6 @@ pub mod nif;
 pub mod num;
 pub mod re;
 pub mod ustr;
+pub mod zlib;
 pub mod sched;
 pub mod term;
