@@ -4,18 +4,35 @@ defmodule Record do
   defmacro defrecordp(name, fields), do: Record.definitions(:defmacrop, name, name, fields)
   defmacro defrecordp(name, tag, fields), do: Record.definitions(:defmacrop, name, tag, fields)
 
+  @tbs [{:version, :asn1_DEFAULT}, :serialNumber, :signature, :issuer, :validity, :subject, :subjectPublicKeyInfo,
+         {:issuerUniqueID, :asn1_NOVALUE}, {:subjectUniqueID, :asn1_NOVALUE}, {:extensions, :asn1_NOVALUE}]
+
   # OTP header records, as Record.extract/2 reads them from the headers.
   @otp_records %{
     {"kernel/include/file.hrl", :file_info} =>
       [:size, :type, :access, :atime, :mtime, :ctime, :mode, :links, :major_device, :minor_device, :inode, :uid, :gid],
-    {"kernel/include/file.hrl", :file_descriptor} => [:module, :data]
+    {"kernel/include/file.hrl", :file_descriptor} => [:module, :data],
+    {"public_key/include/OTP-PUB-KEY.hrl", :Certificate} => [:tbsCertificate, :signatureAlgorithm, :signature],
+    {"public_key/include/OTP-PUB-KEY.hrl", :OTPCertificate} => [:tbsCertificate, :signatureAlgorithm, :signature],
+    {"public_key/include/OTP-PUB-KEY.hrl", :TBSCertificate} => @tbs,
+    {"public_key/include/OTP-PUB-KEY.hrl", :OTPTBSCertificate} => @tbs,
+    {"public_key/include/OTP-PUB-KEY.hrl", :AlgorithmIdentifier} => [:algorithm, {:parameters, :asn1_NOVALUE}],
+    {"public_key/include/OTP-PUB-KEY.hrl", :SignatureAlgorithm} => [:algorithm, {:parameters, :asn1_NOVALUE}],
+    {"public_key/include/OTP-PUB-KEY.hrl", :Validity} => [:notBefore, :notAfter],
+    {"public_key/include/OTP-PUB-KEY.hrl", :SubjectPublicKeyInfo} => [:algorithm, :subjectPublicKey],
+    {"public_key/include/OTP-PUB-KEY.hrl", :OTPSubjectPublicKeyInfo} => [:algorithm, :subjectPublicKey],
+    {"public_key/include/OTP-PUB-KEY.hrl", :PublicKeyAlgorithm} => [:algorithm, {:parameters, :asn1_NOVALUE}],
+    {"public_key/include/OTP-PUB-KEY.hrl", :Extension} => [:extnID, {:critical, :asn1_DEFAULT}, :extnValue],
+    {"public_key/include/OTP-PUB-KEY.hrl", :AttributeTypeAndValue} => [:type, :value],
+    {"public_key/include/OTP-PUB-KEY.hrl", :RSAPublicKey} => [:modulus, :publicExponent],
+    {"public_key/include/OTP-PUB-KEY.hrl", :ECPoint} => [:point]
   }
 
   def extract(name, opts) when is_atom(name) and is_list(opts) do
     source = opts[:from_lib] || opts[:from]
 
     case Map.fetch(@otp_records, {source, name}) do
-      {:ok, fields} -> Enum.map(fields, &{&1, :undefined})
+      {:ok, fields} -> Enum.map(fields, fn {field, default} -> {field, default}; field -> {field, :undefined} end)
       :error -> raise ArgumentError, "no record #{name} found at #{source}"
     end
   end
@@ -26,12 +43,50 @@ defmodule Record do
   end
 
   def definitions(kind, name, tag, fields) do
-    fields = if literal_fields?(fields), do: fields, else: elem(Code.eval_quoted(fields), 0)
-    fields = Enum.map(fields, fn
+    if not literal_fields?(fields) and variables?(fields) do
+      deferred(kind, name, tag, fields)
+    else
+      fields = if literal_fields?(fields), do: fields, else: elem(Code.eval_quoted(fields), 0)
+      expanded(kind, name, tag, normalize(fields))
+    end
+  end
+
+  # Fields computed from module-level variables (Mint's `shared ++ [...]`):
+  # bound in the module body, where the variables are, and spliced into the
+  # definitions from there.
+  defp deferred(kind, name, tag, fields) do
+    var = {:tonic_record_fields, [], nil}
+    caller_context = {{:., [], [Map, :get]}, [], [{:__CALLER__, [], nil}, :context]}
+
+    definitions =
+      Enum.map([0, 1, 2], fn arity ->
+        arguments = if arity == 0, do: [], else: Enum.map(1..arity, fn index -> {String.to_atom("record_argument#{index}"), [], nil} end)
+        call = {{:., [], [Record, :expand]}, [], [tag, {:unquote, [], [var]}, arguments, caller_context]}
+        {kind, [], [{name, [], arguments}, [do: call]]}
+      end)
+
+    {:__block__, [], [{:=, [], [var, fields]} | definitions]}
+  end
+
+  defp variables?(ast) do
+    {_, found} =
+      Macro.prewalk(ast, false, fn
+        {name, _, context} = node, _ when is_atom(name) and is_atom(context) -> {node, true}
+        node, found -> {node, found}
+      end)
+
+    found
+  end
+
+  defp normalize(fields) do
+    Enum.map(fields, fn
       field when is_atom(field) -> {field, nil}
       {field, default} when is_atom(field) -> {field, default}
       _ -> raise ArgumentError, "invalid record field"
     end)
+  end
+
+  defp expanded(kind, name, tag, fields) do
     unless is_atom(name) and is_atom(tag) and Keyword.keyword?(fields) do
       raise ArgumentError, "record name and tag must be atoms and fields must be a keyword list"
     end
@@ -53,11 +108,13 @@ defmodule Record do
 
   defp literal_fields?(_), do: false
 
-  def expand(tag, fields, [], context), do: expand(tag, fields, [[]], context)
-  def expand(_tag, fields, [field], _context) when is_atom(field) do
+  def expand(tag, fields, args, context), do: access(tag, normalize(fields), args, context)
+
+  defp access(tag, fields, [], context), do: access(tag, fields, [[]], context)
+  defp access(_tag, fields, [field], _context) when is_atom(field) do
     index(fields, field)
   end
-  def expand(tag, fields, [values], context) when is_list(values) do
+  defp access(tag, fields, [values], context) when is_list(values) do
     validate(fields, values)
     entries = Enum.map(fields, fn {name, default} ->
       Keyword.get(values, name, if(context == :match, do: {:_, [], nil}, else: Macro.escape(default)))
@@ -65,19 +122,19 @@ defmodule Record do
     {:{}, [], [tag | entries]}
   end
   # user(record): the record as a keyword list
-  def expand(tag, fields, [record], _context) do
+  defp access(tag, fields, [record], _context) do
     {{:., [], [Record, :__keyword__]}, [], [tag, Keyword.keys(fields), record]}
   end
-  def expand(_tag, fields, [record, field], _context) when is_atom(field) do
+  defp access(_tag, fields, [record, field], _context) when is_atom(field) do
     {{:., [], [:erlang, :element]}, [], [index(fields, field) + 1, record]}
   end
-  def expand(_tag, fields, [record, values], _context) when is_list(values) do
+  defp access(_tag, fields, [record, values], _context) when is_list(values) do
     validate(fields, values)
     Enum.reduce(values, record, fn {field, value}, result ->
       {{:., [], [:erlang, :setelement]}, [], [index(fields, field) + 1, result, value]}
     end)
   end
-  def expand(_tag, _fields, _args, _context), do: raise(ArgumentError, "invalid record arguments")
+  defp access(_tag, _fields, _args, _context), do: raise(ArgumentError, "invalid record arguments")
 
   @doc false
   def __keyword__(tag, names, record) do

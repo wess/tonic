@@ -67,6 +67,15 @@ defmodule Tonic.ProjectBridge do
           ":application.load({:application, #{literal(metadata.app)}, #{literal(metadata.spec)}})\n"
         end)
 
+      # Mix.Project.config/0 at compile time: each project by its root, the
+      # directory the macro host compiles that project's code from
+      projects =
+        Map.new(applications ++ [current], fn metadata ->
+          {metadata.root, [app: metadata.app, version: metadata.version]}
+        end)
+
+      prefix = prefix <> ":application.set_env(:tonic_config, :projects, #{literal(projects)})\n"
+
       File.write!(configuration, [prefix, specs, settings])
       runtime = config[:runtime_config_path] || "config/runtime.exs"
       runtime_inputs = if File.regular?(runtime), do: [Path.expand(runtime)], else: []
@@ -87,7 +96,9 @@ defmodule Tonic.ProjectBridge do
         app: Atom.to_string(app),
         native_sources: Enum.flat_map(applications ++ [current], & &1.native),
         inputs: [configuration] ++ sources ++ runtime_inputs ++ [entry],
-        macro_inputs: sources,
+        # each mix.exs too: code may call its project module at compile time
+        # (Req's `Req.MixProject.legacy_headers_as_lists?()`)
+        macro_inputs: Enum.flat_map(applications ++ [current], &mix_file/1) ++ sources,
         config_inputs: [configuration]
       ]
 
@@ -191,7 +202,7 @@ defmodule Tonic.ProjectBridge do
       |> Keyword.put(:vsn, String.to_charlist(config[:version] || "0.0.0"))
       |> Keyword.put(:tonic_priv_dir, String.to_charlist(Path.join(root, "priv")))
 
-    [app: app, version: config[:version] || "0.0.0", spec: spec, sources: sources, native: native]
+    [app: app, version: config[:version] || "0.0.0", spec: spec, sources: sources, native: native, root: root]
     |> Map.new()
   end
 
@@ -264,8 +275,13 @@ defmodule Tonic.ProjectBridge do
       |> Keyword.put(:applications, required ++ deps)
       |> Keyword.put(:tonic_priv_dir, String.to_charlist(Path.join(root, "priv")))
 
-    [app: app, version: to_string(properties[:vsn]), spec: spec, sources: files(root, ["src"], ".erl"), native: []]
+    [app: app, version: to_string(properties[:vsn]), spec: spec, sources: files(root, ["src"], ".erl"), native: [], root: root]
     |> Map.new()
+  end
+
+  defp mix_file(%{root: root}) do
+    path = Path.join(root, "mix.exs")
+    if File.regular?(path), do: [path], else: []
   end
 
   defp files(root, paths, extension) do

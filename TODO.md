@@ -90,7 +90,9 @@ dedicated interoperability tests before any compatibility claims.
 - [ ] Extend the `erl_nif` subset (maps, monitors, select, dirty schedulers) and
   release resources when no term references them. The same release would
   free unclosed `:zlib` streams and `:atomics` arrays.
-- [ ] SSL sockets, `:gen_udp.connect` and UDP multicast.
+- [x] SSL sockets: `:ssl` TLS 1.2/1.3 clients and servers on rustls.
+- [ ] `:gen_udp.connect`, UDP multicast, DTLS, and TLS session resumption,
+  custom `verify_fun`/`match_fun`/`sni_fun` callbacks and nested TLS.
 - [ ] Define the scope of distributed-node support and BEAM interoperability.
 - [ ] Decide how dynamic module loading and hot code replacement would work
   with native compilation.

@@ -859,6 +859,18 @@ defmodule Tonic.Eval do
     {exported?(fun, vals), st}
   end
 
+  # apply/3 reaches interpreted modules too (NimbleOptions' :custom types)
+  defp remote_call(mod, :apply, [_, _, _] = args, _meta, st) when mod in [Kernel, :erlang] do
+    {[m, f, a], st} = exprs(args, st)
+    {Tonic.Eval.Modules.apply(m, f, a), st}
+  end
+
+  # struct/2 and struct!/2 on an interpreted struct (Req's `struct!(__MODULE__, options)`)
+  defp remote_call(Kernel, fun, [_, _] = args, _meta, st) when fun in [:struct, :struct!] do
+    {[target, fields], st} = exprs(args, st)
+    {build_struct(fun, target, fields), st}
+  end
+
   defp remote_call(Kernel, fun, args, meta, st) do
     if kernel_macro(fun, length(args)) do
       special_or_local(fun, meta, args, st)
@@ -1078,6 +1090,9 @@ defmodule Tonic.Eval do
   defp caller_unquotes(arguments, state) when is_list(arguments), do: Enum.map(arguments, &caller_unquotes(&1, state))
   defp caller_unquotes(value, _state), do: value
 
+  # a quote's unquotes run when the macro does, outside the module, so the
+  # attributes they read are taken now (Mint's `unquote(@ones * n)`)
+  defp unquote_fragments({:quote, m, args}, %{in_module: true} = st), do: {:quote, m, quoted_attributes(args, st)}
   defp unquote_fragments({:quote, _, _} = q, _st), do: q
 
   defp unquote_fragments({:unquote, _, [e]}, st) do
@@ -1095,6 +1110,21 @@ defmodule Tonic.Eval do
   defp unquote_fragments({a, b}, st), do: {unquote_fragments(a, st), unquote_fragments(b, st)}
   defp unquote_fragments(list, st) when is_list(list), do: splice_fragments(list, st)
   defp unquote_fragments(other, _st), do: other
+
+  defp quoted_attributes(ast, st) do
+    Macro.prewalk(ast, fn
+      {:unquote, m, [e]} -> {:unquote, m, [attributes(e, st)]}
+      {:unquote_splicing, m, [e]} -> {:unquote_splicing, m, [attributes(e, st)]}
+      node -> node
+    end)
+  end
+
+  defp attributes(ast, st) do
+    Macro.prewalk(ast, fn
+      {:@, _, [{name, _, ctx}]} when is_atom(name) and is_atom(ctx) -> escape(Tonic.Eval.Modules.get_attribute(st.module, name))
+      node -> node
+    end)
+  end
 
   defp splice_fragments(list, st) do
     Enum.flat_map(list, fn
@@ -1323,6 +1353,43 @@ defmodule Tonic.Eval do
     end
   end
 
+  # put_in(a.b[:c], v) and friends: the path becomes a root and a key list,
+  # with `.field` as Access.key!/1, as Kernel's macros do
+  defp access_path_call(name, [path | rest]) do
+    {root, keys} = access_path(path, [])
+    {{:., [], [Kernel, name]}, [], [root, keys | rest]}
+  end
+
+  defp access_path({{:., _, [Access, :get]}, _, [inner, key]}, keys), do: access_path(inner, [key | keys])
+
+  defp access_path({{:., _, [inner, field]}, meta, []}, keys) when is_atom(field) do
+    if Keyword.get(meta, :no_parens),
+      do: access_path(inner, [{{:., [], [Access, :key!]}, [], [field]} | keys]),
+      else: {{{:., [], [inner, field]}, meta, []}, keys}
+  end
+
+  defp access_path(root, keys), do: {root, keys}
+
+  defp build_struct(fun, mod, fields) when is_atom(mod) do
+    case Tonic.Eval.Modules.struct_fields(mod) do
+      nil ->
+        apply(Kernel, fun, [mod, fields])
+
+      defaults ->
+        base = Map.new([{:__struct__, mod} | defaults])
+
+        Enum.reduce(fields, base, fn {key, value}, acc ->
+          cond do
+            Map.has_key?(acc, key) and key != :__struct__ -> Map.put(acc, key, value)
+            fun == :struct! -> raise KeyError, key: key, term: mod
+            true -> acc
+          end
+        end)
+    end
+  end
+
+  defp build_struct(fun, target, fields), do: apply(Kernel, fun, [target, fields])
+
   # Interpreted modules export what they define.
   defp exported?(:macro_exported?, [module, name, arity]) do
     Tonic.Eval.Modules.macro?(module, name, arity) or macro_exported?(module, name, arity)
@@ -1367,6 +1434,12 @@ defmodule Tonic.Eval do
       {mod, :function} ->
         {vals, st} = exprs(args, st)
         {Tonic.Eval.Modules.apply(mod, name, vals), st}
+
+      nil when (name == :apply and arity == 3) or (name in [:struct, :struct!] and arity == 2) ->
+        remote_call(Kernel, name, args, meta, st)
+
+      nil when {name, arity} in [{:put_in, 2}, {:update_in, 2}, {:get_and_update_in, 2}, {:pop_in, 1}] ->
+        expr(access_path_call(name, args), st)
 
       nil ->
         if function_exported?(Kernel, name, arity) do

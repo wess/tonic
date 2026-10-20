@@ -51,3 +51,16 @@ defmodule Mix do
   def env, do: Config.config_env()
   def target, do: Config.config_target()
 end
+
+defmodule Mix.Project do
+  @moduledoc false
+  # `Mix.Project.config()` in module bodies (Mint's `@user_agent`): the
+  # project whose root is the current directory, which is where the macro
+  # host compiles each project's code, as Mix does.
+  def config do
+    :application.get_env(:tonic_config, :projects, %{}) |> Map.get(File.cwd!(), [])
+  end
+
+  # mix.exs files load into the macro host so their functions can be called
+  defmacro __using__(_options), do: :ok
+end

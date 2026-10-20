@@ -1,13 +1,14 @@
 [package]
-name = "tonic-rt"
+name = "tonic-rt-core"
 version = "0.1.0-beta.2"
 edition = "2021"
 license = "Apache-2.0"
 
+# The runtime proper; runtime/staticlib bundles it with runtime/tls into
+# libtonic_rt.a.
 [lib]
-name = "tonic_rt"
+name = "tonic_core"
 path = "src/lib.rs"
-crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 tonic-shared = { path = "../shared" }

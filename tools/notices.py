@@ -34,6 +34,10 @@ def add(files, path, data):
 def selected(expression):
     if expression == "(MIT OR Apache-2.0) AND Unicode-3.0":
         return "Apache-2.0 AND Unicode-3.0"
+    if expression == "Apache-2.0 AND ISC":
+        return expression
+    if expression in ("ISC", "BSD-3-Clause"):
+        return expression
     if "Apache-2.0" in expression:
         return "Apache-2.0"
     if expression in ("MIT", "Unlicense OR MIT"):
@@ -69,6 +73,7 @@ Those separately distributed components retain their own applicable notices.
     inventory = {"cargolocksha256": digest(lock), "packages": []}
     pcre = None
     zlib = None
+    ring = None
     for package in sorted(metadata["packages"], key=lambda p: (p["name"], p["version"])):
         if not package["source"]:
             continue
@@ -107,10 +112,29 @@ Those separately distributed components retain their own applicable notices.
             pcrearchive = archivepath
         if package["name"] == "libz-sys":
             zlib = (directory, archivepath, package["version"])
+        if package["name"] == "ring":
+            if package["version"] != "0.17.14":
+                raise RuntimeError("ring version changed; review notice and its bundled third-party licenses")
+            ring = (directory, archivepath)
     if pcre is None:
         raise RuntimeError("bundled PCRE2 dependency missing")
     if zlib is None:
         raise RuntimeError("bundled zlib dependency missing")
+    if ring is None:
+        raise RuntimeError("bundled ring dependency missing")
+    # ring's root license files are in its cargo inventory entry; these sit
+    # deeper in its sources: fiat-crypto's generated code and the once_cell polyfill
+    rdirectory, rarchivepath = ring
+    rarchive = tarfile.open(rarchivepath)
+    for source, name in (("third_party/fiat/LICENSE", "fiatlicense.txt"),
+                         ("src/polyfill/once_cell/LICENSE-MIT", "oncecelllicensemit.txt"),
+                         ("src/polyfill/once_cell/LICENSE-APACHE", "oncecelllicenseapache.txt")):
+        data = (rdirectory / source).read_bytes()
+        member = rarchive.extractfile(f"ring-0.17.14/{source}")
+        if member is None or member.read() != data:
+            raise RuntimeError(f"bundled ring license checksum mismatch: {source}")
+        add(files, f"licenses/ring/{name}", data)
+    rarchive.close()
     zdirectory, zarchivepath, zversion = zlib
     zheader = (zdirectory / "src/zlib/zlib.h").read_text()
     zlibversion = re.search(r'#define ZLIB_VERSION "([^"]+)"', zheader)[1]
@@ -149,10 +173,12 @@ Those separately distributed components retain their own applicable notices.
     add(files, "licenses/pcre2/sourcecopyrights.txt", data)
     sljit = (pcre / "upstream/deps/sljit/sljit_src/sljitLir.h").read_text()
     sljitversion = ".".join(re.search(rf"#define SLJIT_{part}_VERSION\s+(\d+)", sljit)[1] for part in ("MAJOR", "MINOR"))
-    inventory["native"] = {"pcre2": f"{major}.{minor}", "sljit": sljitversion, "zlib": zlibversion,
-                           "license": "BSD-3-Clause WITH PCRE2-exception; SLJIT BSD-2-Clause; zlib Zlib",
+    inventory["native"] = {"pcre2": f"{major}.{minor}", "sljit": sljitversion, "zlib": zlibversion, "ring": "0.17.14",
+                           "license": "BSD-3-Clause WITH PCRE2-exception; SLJIT BSD-2-Clause; zlib Zlib; "
+                                      "ring Apache-2.0 AND ISC (BoringSSL-derived), fiat-crypto Apache-2.0",
                            "documents": ["licenses/pcre2/license.md", "licenses/pcre2/sourcecopyrights.txt", "licenses/unicode/license.txt",
-                                         "licenses/zlib/license.txt"]}
+                                         "licenses/zlib/license.txt", "licenses/ring/fiatlicense.txt",
+                                         "licenses/ring/oncecelllicensemit.txt", "licenses/ring/oncecelllicenseapache.txt"]}
     add(files, "licenses/cargo/inventory.json", (json.dumps(inventory, indent=2) + "\n").encode())
 
     sysroot = Path(command("rustc", "--print", "sysroot"))

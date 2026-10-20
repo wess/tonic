@@ -289,6 +289,8 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
                 "ex_unit"
             } else if k.starts_with("Elixir.") || k.starts_with("elixir_") {
                 "elixir"
+            } else if matches!(k.as_str(), "ssl" | "public_key") {
+                k.as_str()
             } else if matches!(
                 k.as_str(),
                 "file" | "io" | "os" | "code" | "global" | "application" | "filename_kernel" | "inet"
@@ -362,6 +364,11 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
     // object; protocol dispatchers and generated tables depend on the
     // program and are compiled with it.
     let per_program_mod = |m: &str| ex.protocols.contains_key(m) || m == "Elixir.Tonic.Script";
+    // Compiled into a program only when it reaches them, never into the
+    // prelude object: that object refers to every runtime function its code
+    // calls, and the TLS runtime brings assembly the linker cannot strip
+    // again. Nothing else in the prelude may call these modules.
+    let on_demand = |m: &str| matches!(m, "ssl" | "public_key" | "Elixir.Tonic.X509" | "Elixir.Tonic.Der");
     let generated: HashSet<FunKey> = [
         FunKey::new("Elixir.Tonic.Internal", "module_app", 1),
         FunKey::new("Elixir.Tonic.Internal", "macro_exported?", 3),
@@ -372,6 +379,7 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
     let is_prelude_def = |f: &FunDef| {
         ex.mods.get(&f.key.module).map(|m| m.is_prelude).unwrap_or(false)
             && !per_program_mod(&f.key.module)
+            && !on_demand(&f.key.module)
             && !generated.contains(&f.key)
     };
     // A program that redefines standard library modules is compiled whole.
@@ -382,7 +390,11 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
         let per_program_syms: HashSet<String> = ex
             .out
             .iter()
-            .filter(|f| !is_prelude_def(f) && (per_program_mod(&f.key.module) || generated.contains(&f.key)) && f.key.module != "Elixir.Tonic.Script")
+            .filter(|f| {
+                !is_prelude_def(f)
+                    && (per_program_mod(&f.key.module) || on_demand(&f.key.module) || generated.contains(&f.key))
+                    && f.key.module != "Elixir.Tonic.Script"
+            })
             .map(|f| f.key.symbol())
             .collect();
         match prelude_object(o, &ex, &prelude_defs, &per_program_syms) {
@@ -392,7 +404,11 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
     }
     let tr = std::time::Instant::now();
     let extra_roots: Vec<FunKey> = if prelude.is_some() {
-        ex.out.iter().filter(|f| !is_prelude_def(f) && !user_mods.contains(&f.key.module)).map(|f| f.key.clone()).collect()
+        ex.out
+            .iter()
+            .filter(|f| !is_prelude_def(f) && !on_demand(&f.key.module) && !user_mods.contains(&f.key.module))
+            .map(|f| f.key.clone())
+            .collect()
     } else {
         Vec::new()
     };

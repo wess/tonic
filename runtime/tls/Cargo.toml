@@ -1,0 +1,20 @@
+[package]
+name = "tonic-tls"
+version = "0.1.0-beta.2"
+edition = "2021"
+license = "Apache-2.0"
+
+# :ssl, kept out of the runtime crate so its objects (and ring's assembly,
+# which the linker cannot dead-strip) are only linked by programs that use it.
+[lib]
+name = "tonic_tls"
+path = "src/lib.rs"
+
+[dependencies]
+tonic-rt-core = { path = ".." }
+tokio = { version = "1", features = ["rt-multi-thread", "rt", "time", "sync", "macros", "net", "io-util"] }
+parking_lot = "0.12"
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
+rustls-pki-types = { version = "=1.15.1", features = ["std"] }
+rustls-webpki = { version = "=0.103.15", default-features = false, features = ["ring", "std"] }

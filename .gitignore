@@ -133,6 +133,8 @@ secrets.*
 *.key
 *.p12
 *.keystore
+# throwaway test CA and keys for the TLS fixture
+!tests/cases/ssl/*.pem
 
 # ---------------------------------------------------------------------------
 # Logs, temp & runtime

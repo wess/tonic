@@ -66,6 +66,7 @@ const TABLE: &[(&str, &str, usize, &str, &str)] = &[
     ("erlang", "element", 2, "tn_element", "G"),
     ("erlang", "setelement", 3, "tn_setelement", ""),
     ("erlang", "tuple_size", 1, "tn_tuple_size", "G"),
+    ("erlang", "size", 1, "tn_size", "G"),
     ("erlang", "map_size", 1, "tn_map_size", "G"),
     ("erlang", "byte_size", 1, "tn_byte_size", "G"),
     ("erlang", "bit_size", 1, "tn_bit_size", "G"),
@@ -294,6 +295,10 @@ pub fn runtime_syms() -> &'static HashMap<String, usize> {
             include_str!("../../runtime/src/atomics.rs"),
             include_str!("../../runtime/src/zlib.rs"),
             include_str!("../../runtime/src/port/bif.rs"),
+            include_str!("../../runtime/tls/src/roots.rs"),
+            include_str!("../../runtime/tls/src/open.rs"),
+            include_str!("../../runtime/tls/src/control.rs"),
+            include_str!("../../runtime/tls/src/info.rs"),
         ];
         let mut m = HashMap::new();
         for src in srcs {

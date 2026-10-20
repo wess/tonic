@@ -588,6 +588,14 @@ fn shutdown_status(reason: Term) -> Option<i32> {
     None
 }
 
+/// Cleanup run when any process exits, registered by subsystems on first use
+/// so the scheduler does not have to link them.
+static EXIT_HOOKS: parking_lot::RwLock<Vec<fn(u64)>> = parking_lot::const_rwlock(Vec::new());
+
+pub fn on_exit(hook: fn(u64)) {
+    EXIT_HOOKS.write().push(hook);
+}
+
 fn process_exit(ctx: &mut Ctx) {
     let me = ctx.pid();
     let shared = unsafe { &*ctx.shared };
@@ -605,6 +613,9 @@ fn process_exit(ctx: &mut Ctx) {
     crate::net::owner_exited(me);
     crate::udp::owner_exited(me);
     crate::bif_file::owner_exited(me);
+    for hook in EXIT_HOOKS.read().iter() {
+        hook(me);
+    }
     group_leaders().lock().remove(&me);
     watcher_exited(me);
     aliases_exited(me);

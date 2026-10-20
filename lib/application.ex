@@ -82,10 +82,19 @@ defmodule :application do
   defp builtin(:eex),
     do: [description: ~c"eex", vsn: @tonic_vsn, registered: [], applications: [:kernel, :stdlib, :elixir], env: []]
 
-  defp builtin(app) when app in [:crypto, :asn1, :public_key, :ssl, :inets, :sasl, :runtime_tools],
+  # versions of OTP 27.3, which libraries compare against (Mint reads ssl's)
+  defp builtin(:crypto), do: otp_app(~c"5.5.3", [:kernel, :stdlib])
+  defp builtin(:asn1), do: otp_app(~c"5.3.4", [:kernel, :stdlib])
+  defp builtin(:public_key), do: otp_app(~c"1.17.1", [:asn1, :crypto, :kernel, :stdlib])
+  defp builtin(:ssl), do: otp_app(~c"11.2.12", [:kernel, :stdlib, :crypto, :public_key])
+  defp builtin(:inets), do: otp_app(~c"9.3.2", [:kernel, :stdlib])
+
+  defp builtin(app) when app in [:sasl, :runtime_tools],
     do: [description: @otp_desc, vsn: ~c"0.0.0", registered: [], applications: [:kernel, :stdlib], env: []]
 
   defp builtin(_), do: nil
+
+  defp otp_app(vsn, apps), do: [description: @otp_desc, vsn: vsn, registered: [], applications: apps, env: []]
 
   # Applications running when a script starts (as `elixir` boots them).
   @boot [:kernel, :stdlib, :compiler, :elixir, :logger]

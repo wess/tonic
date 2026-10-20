@@ -834,6 +834,18 @@ impl Collector {
         let mut fargs: Vec<E> = fargs.iter().map(|a| sub(a, &mut warnings)).collect();
         let guard = guard.map(|g| sub(&g, &mut warnings));
         let body = body.map(|b| sub(&b, &mut warnings));
+        // a private macro only expands in this module, so attributes in its
+        // quotes are this module's (Mint's `@ones` inside `has_byte/2`)
+        let body = if kind == "defmacrop" {
+            body.map(|b| {
+                map_expr(&b, &mut |x: &E| match &x.k {
+                    K::Attr(name) => attrs.get(name).cloned(),
+                    _ => None,
+                })
+            })
+        } else {
+            body
+        };
         self.warnings = warnings;
         let m = self.mods.get_mut(module).unwrap();
         let key = (fname.clone(), fargs.len());
