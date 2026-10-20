@@ -1,6 +1,6 @@
 # Compatibility
 
-Tonic 0.1.0-beta.2 compiles supported Elixir and Erlang source to LLVM and links a native runtime. `.exs` scripts use the same compiler. Native executables do not contain BEAM bytecode.
+Tonic 0.1.0-beta.3 compiles supported Elixir and Erlang source to LLVM and links a native runtime. `.exs` scripts use the same compiler. Native executables do not contain BEAM bytecode.
 
 ## Package coverage
 

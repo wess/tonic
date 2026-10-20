@@ -1,6 +1,6 @@
 # tonic
 
-**0.1.0-beta.2 · beta.** Start with scripts and small native applications.
+**0.1.0-beta.3 · beta.** Start with scripts and small native applications.
 Visit the [Tonic website](https://wess.io/tonic/).
 See the [release guide](docs/release.md) for installation and the
 [compatibility report](docs/compatibility.md) for tested packages and limitations.

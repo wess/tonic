@@ -1,6 +1,6 @@
 # Tonic TODO
 
-Tonic is in public beta (0.1.0-beta.2), for scripts and applications within
+Tonic is in public beta (0.1.0-beta.3), for scripts and applications within
 the supported boundary in docs/compatibility.md. The next priority is broader
 Elixir source and runtime compatibility, backed by comparisons against
 Elixir/OTP. Supporting `.ex` and `.exs` files does not establish full BEAM
@@ -9,6 +9,8 @@ compatibility.
 ## Releases
 
 - [x] 0.1.0-beta.1 (2026-10-16): first public release.
+- [x] 0.1.0-beta.3: TLS, UDP, ports, zlib, growable stacks, Elixir's warnings
+  and stricter compile errors, OTP-exact phash2/URI/RFC 3339.
 - [x] 0.1.0-beta.2: generational collector, tree-shaken executables, smaller
   process footprint.
 

@@ -1,4 +1,4 @@
-# Tonic 0.1.0-beta.2
+# Tonic 0.1.0-beta.3
 
 Beta Elixir-to-native compiler with LLVM code generation, a moving
 garbage collector, and a concurrent process runtime. Supports `.ex` modules,
@@ -8,9 +8,35 @@ garbage collector, and a concurrent process runtime. Supports `.ex` modules,
 This release is intended for scripts and small applications. Compatibility is
 limited to the language and runtime APIs Tonic implements. See
 [compatibility.md](compatibility.md) for packages and supervision scenarios
-verified by the release tests. Distributed BEAM nodes, hot code loading, ports,
-arbitrary NIFs, custom dependency build systems, and umbrella root builds are
+verified by the release tests. Distributed BEAM nodes, hot code loading, port
+drivers, arbitrary NIFs, custom dependency build systems, and umbrella root builds are
 outside the current support boundary.
+
+## What changed in 0.1.0-beta.3
+
+- TLS: `:ssl` client and server on rustls (TLS 1.2 and 1.3), with
+  verification against the system trust store, ALPN, client certificates and
+  the `:public_key` functions HTTP clients use. Mint builds natively and
+  fetches over HTTPS (HTTP/2).
+- New runtime APIs: `:gen_udp`, ports to external programs (`Port.open/2`;
+  `System.cmd/3`, `System.shell/2` and `:os.cmd/1,2` now run on ports and no
+  longer block a scheduler thread), `:zlib` (byte-identical to OTP), and
+  `:inet.getaddr/2`, `getaddrs/2`, `gethostbyname/1,2`, `gethostname/0`.
+- OTP-exact values: `:erlang.phash2/1,2`, `URI` and `:uri_string` parsing
+  (OTP's own `uri_string`), and `:calendar` RFC 3339 conversion.
+- Deep recursion no longer ends the program: process stacks grow in segments,
+  so body recursion (such as `Enum.map/2` over millions of elements in a Task)
+  is bounded by memory, as on the BEAM.
+- Compiler: remote macros require `require`, `import only:`/`except:` filter
+  macros, `@doc`/`@moduledoc` and `Module.put_attribute/3` values are
+  readable, `Macro.expand/2` expands Kernel and imported macros, and quoted
+  aliases keep their lexical alias.
+- Elixir's unused variable, ungrouped clause and duplicate map key warnings,
+  and more invalid programs rejected with Elixir's errors.
+- Errors: stack traces carry lines for failed matches, `case` and `cond`; the
+  main process killed by an exit signal prints Elixir's `** (EXIT from ...)`
+  banner; FunctionClauseError output matches Elixir's layout.
+- Smaller executables: hello world is about 4.5 MB.
 
 ## What changed in 0.1.0-beta.2
 
@@ -62,9 +88,9 @@ Remaining differences are listed in [compatibility.md](compatibility.md#known-di
 
 Download the bundle matching your machine from the release assets:
 
-* `tonic0.1.0-beta.2.linuxx64.tar.gz`: Linux x86-64, built on Ubuntu 24.04; glibc 2.39
+* `tonic0.1.0-beta.3.linuxx64.tar.gz`: Linux x86-64, built on Ubuntu 24.04; glibc 2.39
   or newer is the supported baseline.
-* `tonic0.1.0-beta.2.macosarm64.tar.gz`: Apple Silicon macOS, built on macOS 14.
+* `tonic0.1.0-beta.3.macosarm64.tar.gz`: Apple Silicon macOS, built on macOS 14.
 
 Compilation requires clang/LLVM 18 or newer. Mix project loading and archive
 tasks additionally require Elixir 1.18 / OTP 27; native programs run without
@@ -74,8 +100,8 @@ Verify the matching `.tar.sha256` file before extracting (Linux: `sha256sum -c`;
 macOS: `shasum -a 256 -c`). Then:
 
 ```sh
-tar -xzf tonic0.1.0-beta.2.macosarm64.tar.gz
-cd tonic0.1.0-beta.2
+tar -xzf tonic0.1.0-beta.3.macosarm64.tar.gz
+cd tonic0.1.0-beta.3
 bash install.sh "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 tonic run hello.exs
@@ -119,5 +145,5 @@ different toolchain versions.
 
 The GitHub release workflow first requires the full Linux/macOS CI suite,
 builds and verifies both installation bundles, then publishes a prerelease on
-a `v0.1.0-beta.2` tag. A manual workflow run verifies and uploads build artifacts
+a `v0.1.0-beta.3` tag. A manual workflow run verifies and uploads build artifacts
 without publishing a release. Tag and manifest versions must match.
