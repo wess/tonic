@@ -214,109 +214,6 @@ defmodule :elixir_config do
   defp default_value(_key, default), do: default
 end
 
-defmodule :uri_string do
-  # RFC 3986, appendix B.
-  def parse(uri) when is_binary(uri) do
-    try do
-      do_parse(uri)
-    catch
-      :throw, {:uri_invalid, c} -> {:error, :invalid_uri, String.to_charlist(c)}
-    end
-  end
-
-  defp do_parse(uri) do
-    case Regex.run(~r/^(([a-zA-Z][a-zA-Z0-9+.-]*):)?(\/\/([^\/?#]*))?([^?#]*)(\?([^#]*))?(#(.*))?$/s, uri, return: :index) do
-      nil ->
-        {:error, :invalid_uri, ""}
-
-      caps ->
-        part = fn i ->
-          case Enum.at(caps, i) do
-            {-1, _} -> nil
-            nil -> nil
-            {s, l} -> binary_part(uri, s, l)
-          end
-        end
-
-        bad =
-          Enum.find_value([{part.(5), ~c"/:@"}, {part.(7), ~c"/:@?"}, {part.(9), ~c"/:@?"}], fn
-            {nil, _} -> nil
-            {str, extra} -> invalid_char(str, extra)
-          end)
-
-        if bad, do: throw({:uri_invalid, bad})
-
-        # path-noscheme: a relative reference's first segment has no ':'
-        if part.(2) == nil and part.(4) == nil do
-          [first | _] = String.split(part.(5) || "", "/", parts: 2)
-          if String.contains?(first, ":"), do: throw({:uri_invalid, ":"})
-        end
-
-        m = %{path: part.(5) || ""}
-        m = if (s = part.(2)) != nil, do: Map.put(m, :scheme, s), else: m
-        m = if (q = part.(7)) != nil, do: Map.put(m, :query, q), else: m
-        m = if (f = part.(9)) != nil, do: Map.put(m, :fragment, f), else: m
-
-        case part.(4) do
-          nil ->
-            m
-
-          auth ->
-            {userinfo, hostport} =
-              case :binary.split(auth, "@") do
-                [u, hp] -> {u, hp}
-                [hp] -> {nil, hp}
-              end
-
-            m = if userinfo, do: Map.put(m, :userinfo, userinfo), else: m
-
-            {host, port} =
-              case Regex.run(~r/^(\[[^\]]*\]|[^:]*)(:([0-9]*))?$/, hostport) do
-                [_, h] -> {h, nil}
-                [_, h, _, ""] -> {h, :empty}
-                [_, h, _, p] -> {h, String.to_integer(p)}
-                _ -> {hostport, nil}
-              end
-
-            if host != nil and String.contains?(host, ["%", " "]) and not String.starts_with?(host, "[") and false do
-              {:error, :invalid_uri, ":"}
-            else
-              host = String.trim_leading(host, "[") |> String.trim_trailing("]")
-              m = Map.put(m, :host, host)
-
-              case port do
-                nil -> m
-                :empty -> m
-                p -> Map.put(m, :port, p)
-              end
-            end
-        end
-    end
-  end
-
-  def parse(uri) when is_list(uri), do: parse(List.to_string(uri))
-
-  # First character not allowed by RFC 3986 (pchar plus `extra`); Unicode
-  # characters are accepted as in OTP.
-  defp invalid_char(<<>>, _extra), do: nil
-
-  defp invalid_char(<<?%, a, b, rest::binary>>, extra)
-       when a in ?0..?9 or a in ?a..?f or a in ?A..?F,
-       do: if(b in ?0..?9 or b in ?a..?f or b in ?A..?F, do: invalid_char(rest, extra), else: <<?%>>)
-
-  defp invalid_char(<<?%, _::binary>>, _extra), do: <<?%>>
-
-  defp invalid_char(<<c, rest::binary>>, extra)
-       when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c in ~c"-._~!$&'()*+,;=",
-       do: invalid_char(rest, extra)
-
-  defp invalid_char(<<c::utf8, rest::binary>>, extra) do
-    if c > 127 or c in extra, do: invalid_char(rest, extra), else: <<c::utf8>>
-  end
-
-  defp invalid_char(<<c, _::binary>>, _extra), do: <<c>>
-end
-
 defmodule :math do
   def sin(x), do: :tonic.math1(1, x)
   def cos(x), do: :tonic.math1(2, x)
@@ -610,10 +507,42 @@ defmodule :erlang do
 
   def now, do: timestamp()
 
-  def convert_time_unit(time, from, to), do: System.convert_time_unit(time, from, to)
+  # The BIF itself: accepts the deprecated plural units and reports bad
+  # arguments the way erl_erts_errors does.
+  def convert_time_unit(time, from, to) do
+    f = time_unit_parts(from)
+    t = time_unit_parts(to)
+
+    if is_integer(time) and f != nil and t != nil do
+      Integer.floor_div(time * t, f)
+    else
+      errs = if is_integer(time), do: %{}, else: %{1 => "not an integer"}
+      errs = if f == nil, do: Map.put(errs, 2, "invalid time unit"), else: errs
+      errs = if t == nil, do: Map.put(errs, 3, "invalid time unit"), else: errs
+      :tonic.badarg_args(errs)
+    end
+  end
+
+  defp time_unit_parts(parts) when is_integer(parts) and parts > 0, do: parts
+  defp time_unit_parts(unit) when unit in [:second, :seconds], do: 1
+  defp time_unit_parts(unit) when unit in [:millisecond, :milli_seconds], do: 1_000
+  defp time_unit_parts(unit) when unit in [:microsecond, :micro_seconds], do: 1_000_000
+  defp time_unit_parts(unit) when unit in [:nanosecond, :nano_seconds, :native, :perf_counter], do: 1_000_000_000
+  defp time_unit_parts(_), do: nil
 
   def universaltime, do: :calendar.system_time_to_universal_time(:erlang.system_time(:second), :second)
   def localtime, do: :calendar.local_time()
+
+  def universaltime_to_localtime({{y, mo, d} = date, {h, mi, s}})
+      when is_integer(y) and is_integer(mo) and is_integer(d) and
+             is_integer(h) and h in 0..23 and is_integer(mi) and mi in 0..59 and is_integer(s) and s in 0..59 do
+    unless :calendar.valid_date(date), do: :tonic.badarg_args(%{1 => "not a valid universal time"})
+    secs = :calendar.datetime_to_gregorian_seconds({{y, mo, d}, {h, mi, s}})
+    :calendar.gregorian_seconds_to_datetime(secs + :tonic.utc_offset_at(secs - 62_167_219_200))
+  end
+
+  def universaltime_to_localtime(_dt), do: :tonic.badarg_args(%{1 => "not a valid universal time"})
+
   def date, do: elem(localtime(), 0)
   def time, do: elem(localtime(), 1)
 
@@ -948,28 +877,32 @@ defmodule :calendar do
   end
 
   def system_time_to_local_time(time, unit) do
-    secs = System.convert_time_unit(time, unit, :second)
-    gregorian_seconds_to_datetime(secs + 62_167_219_200 + :tonic.utc_offset())
+    :erlang.universaltime_to_localtime(system_time_to_universal_time(time, unit))
   end
 
-  def universal_time_to_local_time(dt), do: gregorian_seconds_to_datetime(datetime_to_gregorian_seconds(dt) + :tonic.utc_offset())
+  def universal_time_to_local_time(dt), do: :erlang.universaltime_to_localtime(dt)
   def local_time_to_universal_time(dt), do: gregorian_seconds_to_datetime(datetime_to_gregorian_seconds(dt) - :tonic.utc_offset())
 
   def is_leap_year(y) when is_integer(y), do: rem(y, 4) == 0 and (rem(y, 100) != 0 or rem(y, 400) == 0)
 
-  def last_day_of_the_month(y, 2), do: if(is_leap_year(y), do: 29, else: 28)
-  def last_day_of_the_month(_y, m) when m in [4, 6, 9, 11], do: 30
-  def last_day_of_the_month(_y, m) when is_integer(m) and m >= 1 and m <= 12, do: 31
+  # Guards and failure modes follow OTP: bad input raises function_clause or
+  # if_clause rather than returning a value.
+  def last_day_of_the_month(y, m) when is_integer(y) and y >= 0, do: last_day_of_the_month1(y, m)
+
+  defp last_day_of_the_month1(_y, m) when m in [4, 6, 9, 11], do: 30
+  defp last_day_of_the_month1(y, 2), do: if(is_leap_year(y), do: 29, else: 28)
+  defp last_day_of_the_month1(_y, m) when is_integer(m) and m > 0 and m < 13, do: 31
 
   def valid_date({y, m, d}), do: valid_date(y, m, d)
-  def valid_date(y, m, d) when is_integer(y) and is_integer(m) and is_integer(d) do
-    m >= 1 and m <= 12 and d >= 1 and d <= last_day_of_the_month(y, m)
-  end
-  def valid_date(_, _, _), do: false
+  def valid_date(y, m, d) when is_integer(y) and is_integer(m) and is_integer(d), do: valid_date1(y, m, d)
+
+  defp valid_date1(y, m, d) when y >= 0 and m > 0 and m < 13 and d > 0, do: d <= last_day_of_the_month(y, m)
+  defp valid_date1(_, _, _), do: false
 
   def date_to_gregorian_days({y, m, d}), do: date_to_gregorian_days(y, m, d)
 
-  def date_to_gregorian_days(year, month, day) do
+  def date_to_gregorian_days(year, month, day) when is_integer(day) and day > 0 do
+    if day > last_day_of_the_month(year, month), do: :erlang.error(:if_clause)
     # days from 0000-01-01
     y = if month <= 2, do: year - 1, else: year
     era = div(if(y >= 0, do: y, else: y - 399), 400)
@@ -997,7 +930,7 @@ defmodule :calendar do
     date_to_gregorian_days(date) * 86400 + h * 3600 + mi * 60 + s
   end
 
-  def gregorian_seconds_to_datetime(secs) when is_integer(secs) do
+  def gregorian_seconds_to_datetime(secs) when secs >= 0 do
     days = div(secs, 86400)
     rest = rem(secs, 86400)
     {gregorian_days_to_date(days), {div(rest, 3600), div(rem(rest, 3600), 60), rem(rest, 60)}}
@@ -1006,7 +939,7 @@ defmodule :calendar do
   def day_of_the_week({y, m, d}), do: day_of_the_week(y, m, d)
   def day_of_the_week(y, m, d), do: rem(date_to_gregorian_days(y, m, d) + 5, 7) + 1
 
-  def time_to_seconds({h, m, s}), do: h * 3600 + m * 60 + s
+  def time_to_seconds({h, m, s}) when is_integer(h) and is_integer(m) and is_integer(s), do: h * 3600 + m * 60 + s
 
   def iso_week_number do
     {date, _} = local_time()
@@ -1036,12 +969,167 @@ defmodule :calendar do
     dow = day_of_the_week(year, 1, 1)
     if dow <= 4, do: d0101 - dow + 1, else: d0101 + 7 - dow + 1
   end
-  def seconds_to_time(secs), do: {div(secs, 3600), div(rem(secs, 3600), 60), rem(secs, 60)}
-  def seconds_to_daystime(secs), do: {div(secs, 86400), seconds_to_time(rem(secs, 86400))}
+  def seconds_to_time(secs) when secs >= 0 and secs < 86400,
+    do: {div(secs, 3600), div(rem(secs, 3600), 60), rem(secs, 60)}
+
+  def seconds_to_daystime(secs) do
+    days0 = div(secs, 86400)
+    secs0 = rem(secs, 86400)
+    if secs0 < 0, do: {days0 - 1, seconds_to_time(secs0 + 86400)}, else: {days0, seconds_to_time(secs0)}
+  end
 
   def time_difference(t1, t2) do
     seconds_to_daystime(datetime_to_gregorian_seconds(t2) - datetime_to_gregorian_seconds(t1))
   end
+
+  # RFC 3339 conversions, ported clause for clause from OTP 27.3 calendar.erl
+  # so option handling, rounding and error terms match.
+  @seconds_from_0_to_1970 719_528 * 86400
+  @seconds_from_0_to_10000 2_932_897 * 86400
+
+  def rfc3339_to_system_time(date_time_string), do: rfc3339_to_system_time(date_time_string, [])
+
+  def rfc3339_to_system_time(date_time_string, options) do
+    unit = :proplists.get_value(:unit, options, :second)
+    # _t is the character separating the date and the time
+    [y1, y2, y3, y4, ?-, mon1, mon2, ?-, d1, d2, _t, h1, h2, ?:, min1, min2, ?:, s1, s2 | time_str] =
+      date_time_string
+
+    hour = :erlang.list_to_integer([h1, h2])
+    min = :erlang.list_to_integer([min1, min2])
+    sec = :erlang.list_to_integer([s1, s2])
+    year = :erlang.list_to_integer([y1, y2, y3, y4])
+    month = :erlang.list_to_integer([mon1, mon2])
+    day = :erlang.list_to_integer([d1, d2])
+    date_time = {{year, month, day}, {hour, min, sec}}
+    is_fraction_char = fn c -> (c >= ?0 and c <= ?9) or c === ?. end
+    {fraction_str, utc_offset} = :lists.splitwith(is_fraction_char, time_str)
+    time = datetime_to_system_time(date_time)
+    secs = time - offset_string_adjustment(time, :second, utc_offset)
+    check(date_time_string, options, secs)
+    scaled_epoch = :erlang.convert_time_unit(secs, :second, unit)
+    scaled_epoch + copy_sign(fraction(unit, fraction_str), scaled_epoch)
+  end
+
+  def system_time_to_rfc3339(time), do: system_time_to_rfc3339(time, [])
+
+  def system_time_to_rfc3339(time, options) do
+    unit = :proplists.get_value(:unit, options, :second)
+    offset_opt0 = :proplists.get_value(:offset, options, ~c"")
+
+    case unit do
+      :native ->
+        time_ms = :erlang.convert_time_unit(time, :native, :millisecond)
+
+        offset_opt1 =
+          if is_integer(offset_opt0),
+            do: :erlang.convert_time_unit(offset_opt0, :native, :millisecond),
+            else: offset_opt0
+
+        system_time_to_rfc3339_do(time_ms, options, :millisecond, offset_opt1)
+
+      _ ->
+        system_time_to_rfc3339_do(time, options, unit, offset_opt0)
+    end
+  end
+
+  defp system_time_to_rfc3339_do(time, options, unit, offset_option) do
+    t = :proplists.get_value(:time_designator, options, ?T)
+    adjustment_secs = offset_adjustment(time, unit, offset_option)
+    offset = offset(offset_option, adjustment_secs)
+    adjustment = :erlang.convert_time_unit(adjustment_secs, :second, unit)
+    adjusted_time = time + adjustment
+    factor = factor(unit)
+    secs = div(adjusted_time, factor)
+    check(time, options, secs)
+    {{year, month, day}, {hour, min, sec}} = system_time_to_datetime(secs)
+    fraction_str = fraction_str(factor, adjusted_time)
+
+    :lists.append([pad4(year), ~c"-", pad2(month), ~c"-", pad2(day), [t],
+      pad2(hour), ~c":", pad2(min), ~c":", pad2(sec), fraction_str, offset])
+  end
+
+  defp check(_arg, _options, secs) when secs >= -@seconds_from_0_to_1970 and secs < @seconds_from_0_to_10000, do: :ok
+  defp check(arg, options, _secs), do: :erlang.error({:badarg, [arg, options]})
+
+  defp datetime_to_system_time(date_time), do: datetime_to_gregorian_seconds(date_time) - @seconds_from_0_to_1970
+  defp system_time_to_datetime(seconds), do: gregorian_seconds_to_datetime(seconds + @seconds_from_0_to_1970)
+
+  defp offset(offset_option, secs0) when offset_option === ~c"" or is_integer(offset_option) do
+    sign = if secs0 < 0, do: ?-, else: ?+
+    secs = abs(secs0)
+    [sign | :lists.append([pad2(div(secs, 3600)), ~c":", pad2(div(rem(secs, 3600), 60))])]
+  end
+
+  defp offset(offset_option, _secs), do: offset_option
+
+  defp offset_adjustment(time, unit, ~c""), do: local_offset(time, unit)
+  defp offset_adjustment(time, unit, offset_string) when is_list(offset_string),
+    do: offset_string_adjustment(time, unit, offset_string)
+  defp offset_adjustment(_time, unit, offset) when is_integer(offset),
+    do: :erlang.convert_time_unit(offset, unit, :second)
+
+  defp offset_string_adjustment(_time, _unit, ~c"Z"), do: 0
+  defp offset_string_adjustment(_time, _unit, ~c"z"), do: 0
+
+  defp offset_string_adjustment(_time, _unit, tz) do
+    [sign, h1, h2 | minutes_diff] = tz
+    hour = :erlang.list_to_integer([h1, h2])
+
+    min =
+      case minutes_diff do
+        [?:, m1, m2] -> :erlang.list_to_integer([m1, m2])
+        [] -> 0
+      end
+
+    adjustment = 3600 * hour + 60 * min
+
+    case sign do
+      ?- -> -adjustment
+      ?+ -> adjustment
+    end
+  end
+
+  defp local_offset(system_time, unit) do
+    universal_time = system_time_to_universal_time(system_time, unit)
+    local_time = :erlang.universaltime_to_localtime(universal_time)
+    datetime_to_gregorian_seconds(local_time) - datetime_to_gregorian_seconds(universal_time)
+  end
+
+  defp fraction_str(1, _time), do: ~c""
+
+  defp fraction_str(factor, time) do
+    s = :erlang.integer_to_list(abs(rem(time, factor)))
+    [?. | pad(log10(factor) - length(s), s)]
+  end
+
+  defp fraction(:second, _), do: 0
+  defp fraction(_, ~c""), do: 0
+  defp fraction(unit, fraction_str), do: round(factor(unit) * :erlang.list_to_float([?0 | fraction_str]))
+
+  defp copy_sign(n1, n2) when n2 < 0, do: -n1
+  defp copy_sign(n1, _n2), do: n1
+
+  defp factor(:second), do: 1
+  defp factor(:millisecond), do: 1000
+  defp factor(:microsecond), do: 1_000_000
+  defp factor(:nanosecond), do: 1_000_000_000
+  defp factor(:native), do: :erlang.convert_time_unit(1, :second, :native)
+
+  defp log10(1000), do: 3
+  defp log10(1_000_000), do: 6
+  defp log10(1_000_000_000), do: 9
+
+  defp pad(0, s), do: s
+  defp pad(i, s), do: [?0 | pad(i - 1, s)]
+
+  defp pad2(n) when n < 10, do: [?0 | :erlang.integer_to_list(n)]
+  defp pad2(n), do: :erlang.integer_to_list(n)
+
+  defp pad4(n) when n < 10, do: [?0, ?0, ?0 | :erlang.integer_to_list(n)]
+  defp pad4(n) when n < 100, do: [?0, ?0 | :erlang.integer_to_list(n)]
+  defp pad4(n) when n < 1000, do: [?0 | :erlang.integer_to_list(n)]
+  defp pad4(n), do: :erlang.integer_to_list(n)
 end
 
 defmodule :crypto do

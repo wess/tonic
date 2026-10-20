@@ -30,8 +30,9 @@ Known differences are listed in docs/compatibility.md. In priority order:
   space is still mapped) and the per-process baseline.
 - [ ] Match OTP's `:erlang.phash2/1,2`.
 - [ ] Expand Kernel macros in `Macro.expand/2`; read `@moduledoc`/`@doc` in
-  function bodies; port `:calendar` RFC 3339 functions.
-- [ ] Match `URI.new/1` / `:uri_string.parse/1` validation.
+  function bodies.
+- [ ] Make `:calendar.local_time_to_universal_time/1` use the offset in effect
+  at that local time, as the BEAM does.
 - [ ] Emit Elixir's compile warnings (unused variables, ungrouped clauses) and
   reject the invalid programs still accepted; fix runtime stack trace lines.
 

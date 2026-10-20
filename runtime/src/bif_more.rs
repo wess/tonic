@@ -319,10 +319,21 @@ pub extern "C" fn tn_utc_offset(_c: *mut Ctx) -> Term {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
+    small(gmtoff(now))
+}
+
+/// Seconds east of UTC at the given Unix second, so DST matches that instant
+/// the way erlang:universaltime_to_localtime/1 does.
+#[no_mangle]
+pub extern "C" fn tn_utc_offset_at(_c: *mut Ctx, secs: Term) -> Term {
+    small(gmtoff(small_val(secs)))
+}
+
+fn gmtoff(secs: i64) -> i64 {
     let mut tm = Tm { sec: 0, min: 0, hour: 0, mday: 0, mon: 0, year: 0, wday: 0, yday: 0, isdst: 0, _pad: [0; 4] };
-    unsafe { localtime_r(&now, &mut tm) };
+    unsafe { localtime_r(&secs, &mut tm) };
     // tm_gmtoff follows the 9 ints (+4 bytes padding) on both macOS and glibc.
-    small(tm._pad[0] as i64)
+    tm._pad[0] as i64
 }
 
 // ---------------------------------------------------------------- external term format
