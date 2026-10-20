@@ -76,11 +76,11 @@ pub struct Env {
 const CHUNK: usize = 1024;
 
 impl Env {
-    pub(crate) fn new(ctx: *mut Ctx, priv_data: *mut c_void) -> Env {
+    pub fn new(ctx: *mut Ctx, priv_data: *mut c_void) -> Env {
         Env { ctx, fragments: Vec::new(), chunks: Vec::new(), used: 0, buffers: Vec::new(), exception: None, priv_data }
     }
 
-    pub(crate) fn alloc(&mut self, words: usize) -> *mut u64 {
+    pub fn alloc(&mut self, words: usize) -> *mut u64 {
         let fits = self.chunks.last().map(|c| c.len() - self.used >= words).unwrap_or(false);
         if !fits {
             self.chunks.push(vec![0u64; words.max(CHUNK)].into_boxed_slice());
@@ -103,13 +103,13 @@ impl Env {
     }
 
     /// Takes ownership of a fragment; returns its term.
-    pub(crate) fn adopt(&mut self, fragment: Fragment) -> Term {
+    pub fn adopt(&mut self, fragment: Fragment) -> Term {
         let root = fragment.root;
         self.fragments.push(fragment);
         root
     }
 
-    pub(crate) fn owns_address(&self, addr: usize) -> bool {
+    pub fn owns_address(&self, addr: usize) -> bool {
         self.owns(addr)
     }
 
@@ -122,7 +122,7 @@ impl Env {
     }
 
     /// Copies a term of this environment into a standalone fragment.
-    pub(crate) fn export(&self, t: Term) -> Fragment {
+    pub fn export(&self, t: Term) -> Fragment {
         let inside = |a: usize| self.owns(a);
         let words = crate::heap::copy_size_by(t, &inside);
         let mut buf: Vec<u64> = vec![0; words.max(1)];
@@ -139,7 +139,7 @@ impl Env {
         self.exception = None;
     }
 
-    pub(crate) fn tuple(&mut self, items: &[Term]) -> Term {
+    pub fn tuple(&mut self, items: &[Term]) -> Term {
         if items.is_empty() {
             return crate::heap::empty_tuple();
         }
@@ -151,7 +151,7 @@ impl Env {
         p as Term
     }
 
-    pub(crate) fn cons(&mut self, h: Term, t: Term) -> Term {
+    pub fn cons(&mut self, h: Term, t: Term) -> Term {
         let p = self.alloc(3);
         unsafe {
             *p = header(T_CONS, 2);
@@ -171,13 +171,13 @@ impl Env {
         }
     }
 
-    pub(crate) fn bytes(&mut self, bytes: &[u8]) -> Term {
+    pub fn bytes(&mut self, bytes: &[u8]) -> Term {
         let (t, d) = self.binary(bytes.len());
         unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), d, bytes.len()) };
         t
     }
 
-    pub(crate) fn integer(&mut self, v: i128) -> Term {
+    pub fn integer(&mut self, v: i128) -> Term {
         if v >= SMALL_MIN as i128 && v <= SMALL_MAX as i128 {
             return small(v as i64);
         }
@@ -845,7 +845,7 @@ pub unsafe extern "C" fn enif_inspect_binary(_e: *mut Env, t: Term, bin: *mut Ni
     1
 }
 
-pub(crate) fn flatten_iolist(t: Term, out: &mut Vec<u8>) -> bool {
+pub fn flatten_iolist(t: Term, out: &mut Vec<u8>) -> bool {
     if is_binary(t) {
         out.extend_from_slice(bin_bytes(t));
         return true;

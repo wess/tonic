@@ -1,0 +1,68 @@
+der size: 385
+plain: {:Certificate,
+ {:TBSCertificate, :v3, 277347307960617527731511725539065837285992449854,
+  {:AlgorithmIdentifier, {1, 2, 840, 10045, 4, 3, 2}, :asn1_NOVALUE},
+  {:rdnSequence,
+   [[{:AttributeTypeAndValue, {2, 5, 4, 3}, "\f\rTonic Test CA"}]]},
+  {:Validity, {:utcTime, ~c"261020190056Z"},
+   {:generalTime, ~c"21260926190056Z"}},
+  {:rdnSequence, [[{:AttributeTypeAndValue, {2, 5, 4, 3}, "\f\tlocalhost"}]]},
+  {:SubjectPublicKeyInfo,
+   {:AlgorithmIdentifier, {1, 2, 840, 10045, 2, 1},
+    <<6, 8, 42, 134, 72, 206, 61, 3, 1, 7>>},
+   <<4, 131, 160, 78, 54, 245, 176, 99, 108, 231, 230, 65, 136, 234, 151, 249,
+     251, 1, 124, 117, 82, 169, 100, 81, 0, 46, 8, 134, 21, 206, 161, 188, 222,
+     167, 90, 224, 242, 198, 248, 148, 195, 169, 85, 252, 168, 178, 188, 107,
+     65, 61, 107, 197, 83, 209, 62, 215, 132, 241, 229, 3, 226, 42, 166, 198,
+     177>>}, :asn1_NOVALUE, :asn1_NOVALUE,
+  [
+    {:Extension, {2, 5, 29, 17}, false,
+     <<48, 17, 130, 9, 108, 111, 99, 97, 108, 104, 111, 115, 116, 135, 4, 127,
+       0, 0, 1>>},
+    {:Extension, {2, 5, 29, 19}, false, <<48, 0>>},
+    {:Extension, {2, 5, 29, 15}, true, <<3, 2, 7, 128>>},
+    {:Extension, {2, 5, 29, 37}, false,
+     <<48, 10, 6, 8, 43, 6, 1, 5, 5, 7, 3, 1>>}
+  ]}, {:AlgorithmIdentifier, {1, 2, 840, 10045, 4, 3, 2}, :asn1_NOVALUE},
+ <<48, 68, 2, 32, 21, 138, 160, 205, 194, 139, 97, 179, 176, 228, 25, 1, 63,
+   154, 45, 9, 43, 126, 46, 228, 241, 76, 155, 242, 215, 184, 19, 213, 14, 66,
+   38, 124, 2, 32, 30, 70, 13, 207, 141, 72, 193, 237, 16, 233, 254, 17, 249,
+   247, 61, 176, 40, 183, 120, 23, 184, 0, 7, 153, 161, 209, 12, 73, 57, 196,
+   158, 155>>}
+same: true
+otp sigalg: {:SignatureAlgorithm, {1, 2, 840, 10045, 4, 3, 2}, :asn1_NOVALUE}
+sig: 70
+otp tbs: [
+  :OTPTBSCertificate,
+  :v3,
+  277347307960617527731511725539065837285992449854,
+  {:SignatureAlgorithm, {1, 2, 840, 10045, 4, 3, 2}, :asn1_NOVALUE},
+  {:rdnSequence,
+   [[{:AttributeTypeAndValue, {2, 5, 4, 3}, {:utf8String, "Tonic Test CA"}}]]},
+  {:Validity, {:utcTime, ~c"261020190056Z"},
+   {:generalTime, ~c"21260926190056Z"}},
+  {:rdnSequence,
+   [[{:AttributeTypeAndValue, {2, 5, 4, 3}, {:utf8String, "localhost"}}]]},
+  {:OTPSubjectPublicKeyInfo,
+   {:PublicKeyAlgorithm, {1, 2, 840, 10045, 2, 1},
+    {:namedCurve, {1, 2, 840, 10045, 3, 1, 7}}},
+   {:ECPoint,
+    <<4, 131, 160, 78, 54, 245, 176, 99, 108, 231, 230, 65, 136, 234, 151, 249,
+      251, 1, 124, 117, 82, 169, 100, 81, 0, 46, 8, 134, 21, 206, 161, 188, 222,
+      167, 90, 224, 242, 198, 248, 148, 195, 169, 85, 252, 168, 178, 188, 107,
+      65, 61, 107, 197, 83, 209, 62, 215, 132, 241, 229, 3, 226, 42, 166, 198,
+      177>>}},
+  :asn1_NOVALUE,
+  :asn1_NOVALUE
+]
+key der: 138
+key type: :ECPrivateKey
+key version: 1
+key curve: {:namedCurve, {1, 2, 840, 10045, 3, 1, 7}}
+pem roundtrip: false
+wild: true
+wild other: false
+default: :default
+str_to_suite: %{key_exchange: :ecdhe_ecdsa, cipher: :aes_256_gcm, mac: :aead, prf: :sha384}
+suite_to_str: ~c"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+ssl vsn: nil

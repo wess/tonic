@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["shared", "runtime", "compiler"]
+members = ["shared", "runtime", "runtime/tls", "runtime/staticlib", "compiler"]
 
 [profile.release]
 opt-level = 3

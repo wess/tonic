@@ -244,6 +244,19 @@ defmodule Regressions.Expand do
   defmacro up(x), do: quote(do: String.upcase(unquote(x)))
 end
 
+# record fields from a module-level variable (Mint's HTTP/2 frames)
+defmodule Regressions.Frames do
+  import Record
+  shared = [:stream_id, {:flags, 0x00}]
+  defrecord :data, shared ++ [:data, :padding]
+  defrecord :ping, shared ++ [:opaque]
+
+  def run do
+    d = data(stream_id: 3, data: "x")
+    {d, data(d, :flags), match?(data(stream_id: 3), d), ping()}
+  end
+end
+
 defmodule Regressions.Third do
   import Regressions.Expand
   def expansions do
@@ -265,3 +278,4 @@ IO.inspect(Regressions.Third.expansions())
 IO.inspect(trace.(fn -> Regressions.Third.unrequired() end))
 IO.inspect(trace.(fn -> Regressions.Third.line({1, 2, 3}) end))
 IO.inspect(trace.(fn -> abs(:a) end))
+IO.inspect(Regressions.Frames.run())

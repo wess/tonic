@@ -1,0 +1,65 @@
+start: {:ok, [:crypto, :asn1, :public_key, :ssl]}
+ssl.start: :ok
+versions: [:"tlsv1.3", :"tlsv1.2"]
+listen port: true
+getopts: {:ok, [packet: 0, mode: :list, active: false]}
+alpn: {:ok, "h2"}
+protocol: :"tlsv1.3"
+suite keys: [:cipher, :key_exchange, :mac, :prf]
+info/1: [protocol: :"tlsv1.3"]
+peercert der: true
+sockname: {{127, 0, 0, 1}, true}
+peername: {{127, 0, 0, 1}, true}
+recv list: {:ok, ~c"pong"}
+server saw: {~c"ping", :"tlsv1.3", "h2", {127, 0, 0, 1}}
+close again: :ok
+send closed: {:error, :closed}
+recv closed: {:error, :closed}
+no alpn: {:error, {:tls_alert, :no_application_protocol}}
+server no alpn: {:handshake, {:tls_alert, :no_application_protocol}}
+unknown ca: {:error, {:tls_alert, :unknown_ca}}
+server unknown ca: {:handshake, {:tls_alert, :unknown_ca}}
+hostname: {:error, {:tls_alert, :handshake_failure}}
+tls1.2: {:"tlsv1.2", :ecdhe_ecdsa, :aead}
+alpn none: {:error, :protocol_not_negotiated}
+server tls1.2: {:ok, ~c"twelve"}
+verify_none: {:ok, ~c"unverified"}
+no verify opt: {:error, {:options, :incompatible, [verify: :verify_peer, cacerts: :undefined]}}
+active true tag: :ssl
+once: "two"
+after once: {:ok, [active: false]}
+nothing while passive: []
+recv passive: {:ok, "three"}
+n1: "a"
+n2: "b"
+ssl_passive
+after n: {:ok, [active: false]}
+recv while active: {:error, :einval}
+echo end: {:error, :closed}
+timeout: {:error, :timeout}
+after timeout: {:ok, "late"}
+ssl_closed
+data then: {:ok, "bye"}
+closed: {:error, :closed}
+packet 1: {~c"first", ~c"second message"}
+packet 2: {~c"first", ~c"second message"}
+packet 4: {~c"first", ~c"second message"}
+line: "line one\n"
+line: "line two\n"
+line opt: {:ok, [packet: :line]}
+packet 2 opts: {:ok, [mode: :binary, packet: 2]}
+raw server sees prefix: {:ok, [0, 6, 102, 114, 97, 109, 101, 100]}
+1MB back: {1048576, true}
+1MB server: true
+controlling_process: :ok
+new owner got: "for the new owner"
+server after owner exit: {:error, :closed}
+send after owner exit: {:error, :closed}
+client cert: {true, ~c"with cert"}
+no client cert fails: true
+server without cert: {:handshake, {:tls_alert, :certificate_required}}
+upgrade: {:ok, ~c"upgraded"}
+refused: {:error, :econnrefused}
+accept closed: {:error, :closed}
+suites: true
+suites 1.2: true

@@ -42,6 +42,13 @@ The runtime statically bundles zlib 1.3.2 through libz-sys 1.1.30.
 zlib: Copyright (C) 1995-2026 Jean-loup Gailly and Mark Adler.
 Its zlib license is in licenses/zlib/license.txt.
 
+The TLS runtime (runtime/tls, linked only into programs that use :ssl)
+bundles rustls 0.23.46, rustls-webpki 0.103.15 and ring 0.17.14. ring
+contains code and assembly derived from BoringSSL under Apache-2.0 and ISC
+terms, reproduced in licenses/cargo/ring/0.17.14/; its fiat-crypto
+generated code (Apache-2.0) and once_cell polyfill (MIT/Apache-2.0) license
+files are in licenses/ring/.
+
 Every locked third-party Cargo package, including runtime, compiler,
 build-time, proc-macro, and platform-specific dependencies, is listed with
 its exact version, published archive checksum, license selection, source,

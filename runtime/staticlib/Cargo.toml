@@ -1,0 +1,15 @@
+[package]
+name = "tonic-rt"
+version = "0.1.0-beta.2"
+edition = "2021"
+license = "Apache-2.0"
+
+# libtonic_rt.a, the archive compiled programs link against.
+[lib]
+name = "tonic_rt"
+path = "src/lib.rs"
+crate-type = ["staticlib"]
+
+[dependencies]
+tonic-rt-core = { path = ".." }
+tonic-tls = { path = "../tls" }

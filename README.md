@@ -321,9 +321,10 @@ definition and before-compilation hooks but does not run after-compilation hooks
 
 * Compile-time execution uses Tonic's evaluator and bundled library, so it is
   limited to the language and APIs implemented here. It is not a BEAM VM.
-* No BEAM hot code loading, distributed nodes, port drivers or SSL. NIFs must be
-  C sources compiled into the executable, using the implemented `erl_nif`
-  subset. Process and system introspection cover a subset of Erlang's APIs.
+* No BEAM hot code loading, distributed nodes or port drivers; TLS is rustls
+  (TLS 1.2 and 1.3, no DTLS). NIFs must be C sources compiled into the
+  executable, using the implemented `erl_nif` subset. Process and system
+  introspection cover a subset of Erlang's APIs.
 * Mix project loading requires installed Mix. Native compilation supports
   fetched sources, not arbitrary BEAM dependencies or custom package build tasks.
 * Map iteration order and anonymous-function identifiers can differ from

@@ -71,5 +71,6 @@ ArgumentError
   {"String.upcase(\"x\")", "String.upcase(\"x\")"}
 ]
 "Y"
-{MatchError, [{Regressions.Third, :line, 1, 257}]}
+{MatchError, [{Regressions.Third, :line, 1, 270}]}
 {ArgumentError, [{:erlang, :abs, 1, nil}]}
+{{:data, 3, 0, "x", nil}, 0, true, {:ping, nil, 0, nil}}

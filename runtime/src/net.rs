@@ -17,7 +17,7 @@ use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 
 #[derive(Clone, Copy, PartialEq)]
-pub(crate) enum Active {
+pub enum Active {
     Passive,
     Once,
     On,
@@ -77,11 +77,11 @@ fn lookup(t: Term) -> Option<Socket> {
     SOCKETS.lock().as_ref().and_then(|m| m.get(&word(t, 1)).cloned())
 }
 
-pub(crate) fn a(name: &str) -> Term {
+pub fn a(name: &str) -> Term {
     atom(crate::atoms::intern(name))
 }
 
-pub(crate) fn posix(e: &std::io::Error) -> &'static str {
+pub fn posix(e: &std::io::Error) -> &'static str {
     use std::io::ErrorKind::*;
     match e.raw_os_error() {
         Some(libc::EMSGSIZE) => return "emsgsize",
@@ -108,7 +108,7 @@ pub(crate) fn posix(e: &std::io::Error) -> &'static str {
 // Messages built outside any process heap
 // ---------------------------------------------------------------------------
 
-pub(crate) fn socket_term(env: &mut Env, id: u64) -> Term {
+pub fn socket_term(env: &mut Env, id: u64) -> Term {
     let p = env.alloc(2);
     unsafe {
         *p = header(T_REF, 1);
@@ -117,7 +117,7 @@ pub(crate) fn socket_term(env: &mut Env, id: u64) -> Term {
     p as Term
 }
 
-pub(crate) fn deliver(pid: u64, build: impl FnOnce(&mut Env) -> Term) {
+pub fn deliver(pid: u64, build: impl FnOnce(&mut Env) -> Term) {
     let mut env = Env::new(std::ptr::null_mut(), std::ptr::null_mut());
     let message = build(&mut env);
     crate::sched::send_fragment(pid, env.export(message));
@@ -132,15 +132,15 @@ fn reply(pid: u64, op: u64, result: impl FnOnce(&mut Env) -> Term) {
     })
 }
 
-pub(crate) fn ok_with(env: &mut Env, value: Term) -> Term {
+pub fn ok_with(env: &mut Env, value: Term) -> Term {
     env.tuple(&[atom(a::OK), value])
 }
 
-pub(crate) fn error_with(env: &mut Env, reason: &str) -> Term {
+pub fn error_with(env: &mut Env, reason: &str) -> Term {
     env.tuple(&[atom(a::ERROR), a(reason)])
 }
 
-pub(crate) fn ip_term(env: &mut Env, ip: IpAddr) -> Term {
+pub fn ip_term(env: &mut Env, ip: IpAddr) -> Term {
     match ip {
         IpAddr::V4(v4) => {
             let o = v4.octets();
@@ -162,7 +162,7 @@ fn address_term(env: &mut Env, addr: SocketAddr) -> Term {
 // Option parsing (terms of the calling process)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn list_items(mut l: Term) -> Vec<Term> {
+pub fn list_items(mut l: Term) -> Vec<Term> {
     let mut items = Vec::new();
     while is_cons(l) {
         items.push(head(l));
@@ -171,7 +171,7 @@ pub(crate) fn list_items(mut l: Term) -> Vec<Term> {
     items
 }
 
-pub(crate) fn option(t: Term) -> Option<(&'static str, Term)> {
+pub fn option(t: Term) -> Option<(&'static str, Term)> {
     if is_atom(t) {
         return Some((crate::atoms::name(atom_idx(t)), TRUE));
     }
@@ -181,7 +181,7 @@ pub(crate) fn option(t: Term) -> Option<(&'static str, Term)> {
     None
 }
 
-pub(crate) fn active_of(v: Term) -> Option<Active> {
+pub fn active_of(v: Term) -> Option<Active> {
     if v == TRUE {
         Some(Active::On)
     } else if v == FALSE {
@@ -195,7 +195,7 @@ pub(crate) fn active_of(v: Term) -> Option<Active> {
     }
 }
 
-pub(crate) fn ip_of(v: Term) -> Option<IpAddr> {
+pub fn ip_of(v: Term) -> Option<IpAddr> {
     if !is_tuple(v) {
         return None;
     }
@@ -210,7 +210,7 @@ pub(crate) fn ip_of(v: Term) -> Option<IpAddr> {
     }
 }
 
-pub(crate) fn timeout_of(t: Term) -> Option<Duration> {
+pub fn timeout_of(t: Term) -> Option<Duration> {
     if is_small(t) && small_val(t) >= 0 {
         Some(Duration::from_millis(small_val(t) as u64))
     } else {
@@ -218,7 +218,7 @@ pub(crate) fn timeout_of(t: Term) -> Option<Duration> {
     }
 }
 
-pub(crate) fn ctx_result(ctx: &mut Ctx, ok: Option<Term>, error: Option<&str>) -> Term {
+pub fn ctx_result(ctx: &mut Ctx, ok: Option<Term>, error: Option<&str>) -> Term {
     match (ok, error) {
         (_, Some(reason)) => {
             let r = a(reason);
@@ -302,12 +302,12 @@ fn adopt(io: TcpStream, owner: u64, options: &Options) -> u64 {
 
 /// Starts an operation: returns its reference to the caller, who waits for
 /// the reply message.
-pub(crate) fn operation(ctx: &mut Ctx) -> (Term, u64, u64) {
+pub fn operation(ctx: &mut Ctx) -> (Term, u64, u64) {
     let op = crate::sched::next_ref_id();
     (crate::sched::mk_ref_term(ctx, op), op, ctx.pid())
 }
 
-pub(crate) async fn with_timeout<T>(timeout: Option<Duration>, f: impl std::future::Future<Output = T>) -> Option<T> {
+pub async fn with_timeout<T>(timeout: Option<Duration>, f: impl std::future::Future<Output = T>) -> Option<T> {
     match timeout {
         Some(d) => tokio::time::timeout(d, f).await.ok(),
         None => Some(f.await),
@@ -353,7 +353,7 @@ pub extern "C" fn tn_tcp_accept(c: *mut Ctx, socket: Term, timeout: Term) -> Ter
 }
 
 /// An address tuple, or a host name as an atom, charlist or binary.
-pub(crate) fn host_of(address: Term) -> Option<String> {
+pub fn host_of(address: Term) -> Option<String> {
     if is_tuple(address) {
         ip_of(address).map(|ip| ip.to_string())
     } else if is_atom(address) {
@@ -668,6 +668,32 @@ fn close(socket: Socket) {
         }
         Socket::Listener(l) => l.closed.notify_waiters(),
     }
+}
+
+/// Hands a connected stream to another layer (`:ssl.connect/3`): the registry
+/// forgets it without shutting the connection down.
+pub fn detach(socket: Term) -> Option<std::net::TcpStream> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    if !is_ref(socket) {
+        return None;
+    }
+    let mut sockets = SOCKETS.lock();
+    let m = sockets.as_mut()?;
+    let Some(Socket::Stream(s)) = m.get(&word(socket, 1)).cloned() else { return None };
+    let fd = unsafe { libc::dup(s.io.as_raw_fd()) };
+    if fd < 0 {
+        return None;
+    }
+    m.remove(&word(socket, 1));
+    drop(sockets);
+    {
+        // a reader still waiting must not tell the old owner it closed
+        let mut st = s.state.lock();
+        st.owner = 0;
+        st.closed = true;
+    }
+    s.closed.notify_waiters();
+    Some(unsafe { std::net::TcpStream::from_raw_fd(fd) })
 }
 
 fn owner_of(socket: &Socket) -> u64 {

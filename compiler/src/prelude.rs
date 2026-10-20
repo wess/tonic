@@ -117,6 +117,10 @@ pub const FILES: &[(&str, &str)] = &[
     ("net.ex", include_str!("../../lib/net.ex")),
     ("udp.ex", include_str!("../../lib/udp.ex")),
     ("packet.ex", include_str!("../../lib/packet.ex")),
+    ("ssl.ex", include_str!("../../lib/ssl.ex")),
+    ("publickey.ex", include_str!("../../lib/publickey.ex")),
+    ("x509.ex", include_str!("../../lib/x509.ex")),
+    ("der.ex", include_str!("../../lib/der.ex")),
     ("ex/eexengine.ex", include_str!("../../lib/ex/eexengine.ex")),
     ("ex/eexsmartengine.ex", include_str!("../../lib/ex/eexsmartengine.ex")),
     ("ex/eexcompiler.ex", include_str!("../../lib/ex/eexcompiler.ex")),
@@ -129,6 +133,36 @@ pub fn erl_include(name: &str) -> Option<String> {
         "logger.hrl" => Some(include_str!("../../lib/erl/include/logger.hrl").to_string()),
         "elixir.hrl" => Some(include_str!("../../lib/erl/include/elixir.hrl").to_string()),
         "elixir_tokenizer.hrl" => Some(include_str!("../../lib/erl/include/elixir_tokenizer.hrl").to_string()),
+        "public_key.hrl" | "OTP-PUB-KEY.hrl" => Some(PUBLIC_KEY_HRL.to_string()),
         _ => None,
     }
 }
+
+/// The X.509 records and object identifiers of public_key's headers that
+/// :public_key's certificate decoding produces (lib/publickey.ex).
+const PUBLIC_KEY_HRL: &str = "\
+-record('Certificate', {tbsCertificate, signatureAlgorithm, signature}).
+-record('TBSCertificate', {version = asn1_DEFAULT, serialNumber, signature, issuer, validity, subject, subjectPublicKeyInfo, issuerUniqueID = asn1_NOVALUE, subjectUniqueID = asn1_NOVALUE, extensions = asn1_NOVALUE}).
+-record('OTPCertificate', {tbsCertificate, signatureAlgorithm, signature}).
+-record('OTPTBSCertificate', {version = asn1_DEFAULT, serialNumber, signature, issuer, validity, subject, subjectPublicKeyInfo, issuerUniqueID = asn1_NOVALUE, subjectUniqueID = asn1_NOVALUE, extensions = asn1_NOVALUE}).
+-record('AlgorithmIdentifier', {algorithm, parameters = asn1_NOVALUE}).
+-record('SignatureAlgorithm', {algorithm, parameters = asn1_NOVALUE}).
+-record('Validity', {notBefore, notAfter}).
+-record('SubjectPublicKeyInfo', {algorithm, subjectPublicKey}).
+-record('OTPSubjectPublicKeyInfo', {algorithm, subjectPublicKey}).
+-record('PublicKeyAlgorithm', {algorithm, parameters = asn1_NOVALUE}).
+-record('Extension', {extnID, critical = asn1_DEFAULT, extnValue}).
+-record('AttributeTypeAndValue', {type, value}).
+-record('RSAPublicKey', {modulus, publicExponent}).
+-record('ECPoint', {point}).
+-define('id-ce-subjectAltName', {2,5,29,17}).
+-define('id-ce-basicConstraints', {2,5,29,19}).
+-define('id-ce-keyUsage', {2,5,29,15}).
+-define('id-ce-extKeyUsage', {2,5,29,37}).
+-define('id-ce-subjectKeyIdentifier', {2,5,29,14}).
+-define('id-ce-authorityKeyIdentifier', {2,5,29,35}).
+-define('id-at-commonName', {2,5,4,3}).
+-define('id-at-countryName', {2,5,4,6}).
+-define('id-ecPublicKey', {1,2,840,10045,2,1}).
+-define('rsaEncryption', {1,2,840,113549,1,1,1}).
+";
