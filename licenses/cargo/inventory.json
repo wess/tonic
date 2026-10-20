@@ -1,5 +1,5 @@
 {
-  "cargolocksha256": "821607f9a79c5f8eec2e74bfccff14e38589d0d181bb096f3d1b83fdfe07f2bf",
+  "cargolocksha256": "65043aa2ecc16e2dae96fc3e1fb810220c4232d7ba6ca4c2255c9e813148c916",
   "packages": [
     {
       "name": "autocfg",

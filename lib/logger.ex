@@ -156,34 +156,47 @@ defmodule :logger do
 
   # ---- configuration (public ETS table, created on first use)
 
+  # Created once by a single registered owner; the :ready entry is written
+  # last, so concurrent first loggers never see a half-filled table.
   defp table do
-    if :ets.whereis(@table) == :undefined do
-      parent = self()
+    if ready?(), do: @table, else: init_table()
+  end
 
-      spawn(fn ->
-        try do
-          :ets.new(@table, [:set, :public, :named_table])
-          level = Application.get_env(:logger, :level, :debug)
-          :ets.insert(@table, {:primary, %{level: level, filter_default: :log, filters: [], metadata: %{}}})
-          :ets.insert(@table, {:translator, true})
-          :ets.insert(@table, {{:handler, :default}, default_handler()})
-        rescue
-          _ -> :ok
-        end
+  defp ready? do
+    :ets.whereis(@table) != :undefined and :ets.lookup(@table, :ready) != []
+  end
 
-        send(parent, :tonic_logger_ready)
+  defp init_table do
+    spawn(fn ->
+      try do
+        :erlang.register(:tonic_logger_owner, self())
+      rescue
+        # another process is already creating the table
+        _ -> exit(:normal)
+      end
 
-        receive do
-          :tonic_never -> :ok
-        end
-      end)
+      :ets.new(@table, [:set, :public, :named_table])
+      level = Application.get_env(:logger, :level, :debug)
+      :ets.insert(@table, {:primary, %{level: level, filter_default: :log, filters: [], metadata: %{}}})
+      :ets.insert(@table, {:translator, true})
+      :ets.insert(@table, {{:handler, :default}, default_handler()})
+      :ets.insert(@table, {:ready, true})
 
       receive do
-        :tonic_logger_ready -> :ok
+        :tonic_never -> :ok
       end
-    end
+    end)
 
-    @table
+    wait_ready()
+  end
+
+  defp wait_ready do
+    if ready?() do
+      @table
+    else
+      Process.sleep(1)
+      wait_ready()
+    end
   end
 
   defp default_handler do

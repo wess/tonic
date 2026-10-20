@@ -117,6 +117,8 @@ defmodule :application do
           end
 
           :ets.insert(@apps, {:started, Enum.reverse(Enum.map(@boot, &{&1, :permanent, nil}))})
+          # written last: concurrent first callers wait for it, not for the table
+          :ets.insert(@apps, {:ready, true})
           Kernel.send(parent, :tonic_app_ready)
           controller_loop()
         end)
@@ -127,13 +129,14 @@ defmodule :application do
 
         wait_tables()
 
+      # registered, but possibly still loading the boot applications
       _ ->
-        :ok
+        wait_tables()
     end
   end
 
   defp wait_tables do
-    if :ets.whereis(@apps) == :undefined do
+    if :ets.whereis(@apps) == :undefined or :ets.lookup(@apps, :ready) == [] do
       receive do
       after
         1 -> wait_tables()

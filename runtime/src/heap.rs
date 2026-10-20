@@ -1,7 +1,21 @@
-//! Per-process heaps and the copying garbage collector.
+//! Per-process heaps and the generational copying garbage collector.
 //!
-//! Every Elixir process owns a private semispace heap. Collection is a Cheney
-//! copy driven from precise roots:
+//! Every Elixir process owns a private heap in two generations, as on the
+//! BEAM. New objects go to a small young heap. A minor collection copies the
+//! young heap's survivors: objects that already survived one collection
+//! (below the high-water mark) are promoted to the old heap, the rest stay
+//! young. A major collection copies everything into a fresh old heap; it runs
+//! only when the old heap has no room for the next promotions. Long-lived data
+//! is therefore copied once per major collection instead of on every
+//! collection.
+//!
+//! Minor collections never scan the old heap. That is sound because terms are
+//! immutable: an object only points to objects created before it, so nothing
+//! old points into the young heap. Promotion after two survivals keeps
+//! objects the runtime is still filling in young. TONIC_GC_VERIFY=1 checks the
+//! invariant after every minor collection.
+//!
+//! Collection is a Cheney copy driven from precise roots:
 //!
 //! * the shadow-stack frame chain (every live Elixir value in compiled code
 //!   lives in a frame slot, so moving objects is safe),
@@ -14,7 +28,8 @@
 use crate::term::*;
 use std::collections::VecDeque;
 
-pub const MIN_HEAP_WORDS: usize = 2048;
+/// Initial heap of a process, in words: the BEAM's default min_heap_size.
+pub const MIN_HEAP_WORDS: usize = 233;
 
 #[repr(C)]
 pub struct Ctx {
@@ -23,6 +38,10 @@ pub struct Ctx {
     pub hp: *mut u64,    // 8
     pub hend: *mut u64,  // 16
     pub reds: i64,       // 24
+    /// Allocation limit for compiled code's inline bump allocation: `hend`,
+    /// or the heap start under GC stress so every allocation reaches the
+    /// runtime (and collects).
+    pub hlim: *mut u64, // 32
     // ---- runtime private ----
     pub heap_start: *mut u64,
     pub heap_words: usize,
@@ -30,6 +49,21 @@ pub struct Ctx {
     pub min_heap: usize,
     /// Shadow-stack words scanned by the last collection.
     pub last_stack_words: usize,
+    /// Words that survived the last collection (heap plus half the stack).
+    pub last_live: usize,
+    /// Old generation: promoted objects, bump-allocated by minor collections.
+    pub old_buf: Vec<u64>,
+    pub old_start: *mut u64,
+    pub old_words: usize,
+    pub old_top: *mut u64,
+    /// Young objects below this address survived a collection already; the
+    /// next minor collection promotes them.
+    pub hwm: *mut u64,
+    /// Size the young heap returns to after a collection, adapted to how much
+    /// survives.
+    pub young_target: usize,
+    /// Old-heap words live after the last major collection.
+    pub last_major_live: usize,
     pub roots: Vec<Term>,
     pub exc_kind: Term,
     pub exc_reason: Term,
@@ -81,12 +115,21 @@ impl Ctx {
             frame: std::ptr::null_mut(),
             hp: start,
             hend: unsafe { start.add(min_heap) },
+            hlim: if gc_stress() { start } else { unsafe { start.add(min_heap) } },
             reds: REDUCTIONS,
             heap_start: start,
             heap_words: min_heap,
             heap_buf,
             min_heap,
             last_stack_words: 0,
+            last_live: 0,
+            old_buf: Vec::new(),
+            old_start: std::ptr::null_mut(),
+            old_words: 0,
+            old_top: std::ptr::null_mut(),
+            hwm: start,
+            young_target: min_heap,
+            last_major_live: 0,
             roots: Vec::with_capacity(64),
             exc_kind: 0,
             exc_reason: 0,
@@ -154,112 +197,190 @@ impl Ctx {
     }
 
     #[inline]
+    pub fn in_young(&self, a: usize) -> bool {
+        a >= self.heap_start as usize && a < self.heap_start as usize + self.heap_words * 8
+    }
+
+    #[inline]
+    pub fn in_old(&self, a: usize) -> bool {
+        a >= self.old_start as usize && a < self.old_start as usize + self.old_words * 8
+    }
+
+    #[inline]
     pub fn in_heap(&self, p: *const u64) -> bool {
-        p >= self.heap_start as *const u64
-            && (p as usize) < self.heap_start as usize + self.heap_words * 8
+        self.in_young(p as usize) || self.in_old(p as usize)
+    }
+
+    /// Words in use in both generations.
+    pub fn used_words(&self) -> usize {
+        let young = (self.hp as usize - self.heap_start as usize) / 8;
+        let old = if self.old_start.is_null() { 0 } else { (self.old_top as usize - self.old_start as usize) / 8 };
+        young + old
     }
 
     pub fn gc(&mut self, need: usize) {
-        let used = (self.hp as usize - self.heap_start as usize) / 8;
-        let to_words = self.min_heap.max(used + need + 64);
-        self.collect_into(to_words);
-        let live = (self.hp as usize - self.heap_start as usize) / 8;
-        // Like the BEAM (whose stack lives in the heap block), a deep stack
-        // counts towards the heap size so deep recursion doesn't trigger a
-        // full stack scan every few allocations.
-        let live = live + self.last_stack_words / 2;
-        if (live + need) * 2 > self.heap_words {
-            // Grow: copy once more into a heap with comfortable headroom.
-            let grown = ((live + need) * 3).max(self.min_heap);
-            self.collect_into(grown);
-        } else if self.heap_words > self.min_heap * 4 && (live + need) * 8 < self.heap_words {
-            let shrunk = ((live + need) * 3).max(self.min_heap);
-            self.collect_into(shrunk);
+        self.gc_count += 1;
+        // promotion takes the aged objects and anything they point to: at most
+        // the whole young heap
+        let promote = (self.hp as usize - self.heap_start as usize) / 8;
+        let old_free = if self.old_start.is_null() {
+            0
+        } else {
+            (self.old_start as usize + self.old_words * 8 - self.old_top as usize) / 8
+        };
+        // under stress, exercise major collections too
+        let stress_major = gc_stress() && self.gc_count % 4 == 0;
+        if promote > old_free || stress_major {
+            self.major(need);
+        } else {
+            self.minor(need);
         }
+        let live = self.used_words() + self.last_stack_words / 2;
+        self.last_live = live;
     }
 
-    fn collect_into(&mut self, to_words: usize) {
-        self.gc_count += 1;
+    /// Young survivors stay young once, then move to the old heap.
+    fn minor(&mut self, need: usize) {
+        let survivors_bound = (self.hp as usize - self.hwm as usize) / 8;
+        let to_words = (survivors_bound + need + 64).max(self.young_target);
         let mut to: Vec<u64> = Vec::with_capacity(to_words);
         let to_start = to.as_mut_ptr();
         unsafe { to.set_len(to_words) };
-        let from_lo = self.heap_start as usize;
-        let from_hi = from_lo + self.heap_words * 8;
+        let young_lo = self.heap_start as usize;
         let mut gc = Cheney {
-            from_lo,
-            from_hi,
-            free: to_start,
+            young_lo,
+            young_hi: young_lo + self.heap_words * 8,
+            old_lo: 0,
+            old_hi: 0,
+            hwm: self.hwm as usize,
+            major: false,
+            young_free: to_start,
+            old_free: self.old_top,
+        };
+        let old_scan = self.old_top;
+        unsafe {
+            self.evac_roots(&mut gc);
+            gc.scan(to_start, old_scan);
+        }
+        let young_used = (gc.young_free as usize - to_start as usize) / 8;
+        self.old_top = gc.old_free;
+        self.set_young(to, to_start, to_words, young_used);
+        // next young size: room for four times what survived
+        self.young_target = (young_used * 4 + need).max(self.min_heap);
+        if std::env::var_os("TONIC_GC_VERIFY").is_some() {
+            self.verify_generations();
+        }
+    }
+
+    /// Everything live, young and old, into a fresh old heap.
+    fn major(&mut self, need: usize) {
+        let old_used = if self.old_start.is_null() { 0 } else { (self.old_top as usize - self.old_start as usize) / 8 };
+        let young_used = (self.hp as usize - self.heap_start as usize) / 8;
+        // room for everything that could survive, and for the old heap to grow
+        // to twice its live size so promotions don't force the next major soon
+        let old_words = (old_used + young_used).max(self.last_major_live * 2) + self.young_target * 2 + 64;
+        let mut old: Vec<u64> = Vec::with_capacity(old_words);
+        let old_start = old.as_mut_ptr();
+        unsafe { old.set_len(old_words) };
+        let young_lo = self.heap_start as usize;
+        let mut gc = Cheney {
+            young_lo,
+            young_hi: young_lo + self.heap_words * 8,
+            old_lo: self.old_start as usize,
+            old_hi: self.old_start as usize + self.old_words * 8,
+            hwm: 0,
+            major: true,
+            young_free: std::ptr::null_mut(),
+            old_free: old_start,
         };
         unsafe {
-            // Frame chain.
-            let mut f = self.frame;
-            let mut stack_words = 0usize;
-            while !f.is_null() {
-                let n = *f.add(1) as usize;
-                stack_words += n + 4;
-                for i in 0..n {
-                    let s = f.add(4 + i);
-                    *s = gc.evac(*s);
-                }
-                f = *f as *mut u64;
+            self.evac_roots(&mut gc);
+            gc.scan(std::ptr::null_mut(), old_start);
+        }
+        self.old_buf = old;
+        self.old_start = old_start;
+        self.old_words = old_words;
+        self.old_top = gc.old_free;
+        self.last_major_live = (gc.old_free as usize - old_start as usize) / 8;
+        // the young heap starts over empty
+        let young_words = (self.young_target + need + 64).max(self.min_heap);
+        let mut young: Vec<u64> = Vec::with_capacity(young_words);
+        let young_start = young.as_mut_ptr();
+        unsafe { young.set_len(young_words) };
+        self.set_young(young, young_start, young_words, 0);
+    }
+
+    fn set_young(&mut self, buf: Vec<u64>, start: *mut u64, words: usize, used: usize) {
+        self.heap_buf = buf;
+        self.heap_start = start;
+        self.heap_words = words;
+        self.hp = unsafe { start.add(used) };
+        // everything now young survived a collection
+        self.hwm = self.hp;
+        self.hend = unsafe { start.add(words) };
+        self.hlim = if gc_stress() { start } else { self.hend };
+    }
+
+    unsafe fn evac_roots(&mut self, gc: &mut Cheney) {
+        // Frame chain.
+        let mut f = self.frame;
+        let mut stack_words = 0usize;
+        while !f.is_null() {
+            let n = *f.add(1) as usize;
+            stack_words += n + 4;
+            for i in 0..n {
+                let s = f.add(4 + i);
+                *s = gc.evac(*s);
             }
-            self.last_stack_words = stack_words;
-            for r in self.roots.iter_mut() {
-                *r = gc.evac(*r);
-            }
-            self.exc_kind = gc.evac(self.exc_kind);
-            self.exc_reason = gc.evac(self.exc_reason);
-            self.exc_stack = gc.evac(self.exc_stack);
-            self.pending_args = gc.evac(self.pending_args);
-            self.kill_reason = gc.evac(self.kill_reason);
-            self.dict = gc.evac(self.dict);
-            for m in self.saveq.iter_mut() {
-                *m = gc.evac(*m);
-            }
-            self.spawn_fun = gc.evac(self.spawn_fun);
-            self.exit_reason = gc.evac(self.exit_reason);
-            // Cheney scan.
-            let mut scan = to_start;
-            while scan < gc.free {
-                let h = *scan;
+            f = *f as *mut u64;
+        }
+        self.last_stack_words = stack_words;
+        for r in self.roots.iter_mut() {
+            *r = gc.evac(*r);
+        }
+        self.exc_kind = gc.evac(self.exc_kind);
+        self.exc_reason = gc.evac(self.exc_reason);
+        self.exc_stack = gc.evac(self.exc_stack);
+        self.pending_args = gc.evac(self.pending_args);
+        self.kill_reason = gc.evac(self.kill_reason);
+        self.dict = gc.evac(self.dict);
+        for m in self.saveq.iter_mut() {
+            *m = gc.evac(*m);
+        }
+        self.spawn_fun = gc.evac(self.spawn_fun);
+        self.exit_reason = gc.evac(self.exit_reason);
+    }
+
+    /// TONIC_GC_VERIFY: no old object may point into the young heap.
+    fn verify_generations(&self) {
+        if self.old_start.is_null() {
+            return;
+        }
+        let mut p = self.old_start;
+        while p < self.old_top {
+            unsafe {
+                let h = *p;
                 let n = size_of_hdr(h) as usize;
-                match tag_of_hdr(h) {
-                    T_TUPLE => {
-                        for i in 1..=n {
-                            *scan.add(i) = gc.evac(*scan.add(i));
+                let range: Option<(usize, usize)> = match tag_of_hdr(h) {
+                    T_TUPLE | T_MAPNODE | T_HAMT => Some((1, n)),
+                    T_CONS => Some((1, 2)),
+                    T_MAP => Some((2, 2)),
+                    T_CLOSURE => Some((4, n)),
+                    T_SUBBIN => Some((1, 1)),
+                    _ => None,
+                };
+                if let Some((lo, hi)) = range {
+                    for i in lo..=hi {
+                        let v = *p.add(i);
+                        if v & 7 == 0 && v != 0 && self.in_young(v as usize) {
+                            eprintln!("tonic: GC invariant violated: old object {:p} (tag {}) points into the young heap", p, tag_of_hdr(h));
+                            std::process::abort();
                         }
                     }
-                    T_CONS => {
-                        *scan.add(1) = gc.evac(*scan.add(1));
-                        *scan.add(2) = gc.evac(*scan.add(2));
-                    }
-                    T_MAP => {
-                        *scan.add(2) = gc.evac(*scan.add(2));
-                    }
-                    T_MAPNODE | T_HAMT => {
-                        for i in 1..=n {
-                            *scan.add(i) = gc.evac(*scan.add(i));
-                        }
-                    }
-                    T_CLOSURE => {
-                        for i in 4..=n {
-                            *scan.add(i) = gc.evac(*scan.add(i));
-                        }
-                    }
-                    T_SUBBIN => {
-                        *scan.add(1) = gc.evac(*scan.add(1));
-                    }
-                    _ => {}
                 }
-                scan = scan.add(1 + n.max(1));
+                p = p.add(1 + n.max(1));
             }
         }
-        let used_words = (gc.free as usize - to_start as usize) / 8;
-        self.heap_buf = to;
-        self.heap_start = to_start;
-        self.heap_words = to_words;
-        self.hp = unsafe { to_start.add(used_words) };
-        self.hend = unsafe { to_start.add(to_words) };
     }
 
     // ---------- root helpers ----------
@@ -282,21 +403,40 @@ impl Ctx {
     }
 }
 
+/// One collection's copying state: what moves (the young heap, and in a major
+/// collection the old heap too) and where it goes.
 struct Cheney {
-    from_lo: usize,
-    from_hi: usize,
-    free: *mut u64,
+    young_lo: usize,
+    young_hi: usize,
+    old_lo: usize,
+    old_hi: usize,
+    /// Young objects below this survived before and are promoted (minor).
+    hwm: usize,
+    major: bool,
+    young_free: *mut u64,
+    old_free: *mut u64,
 }
 
 impl Cheney {
     #[inline(always)]
     unsafe fn evac(&mut self, t: u64) -> u64 {
+        self.evac_to(t, false)
+    }
+
+    /// `force_old`: the referring object is in the old heap, so whatever it
+    /// points to is promoted with it; the old heap then never points into the
+    /// young heap, even for an object the runtime finished filling after it
+    /// last survived a collection.
+    #[inline(always)]
+    unsafe fn evac_to(&mut self, t: u64, force_old: bool) -> u64 {
         if t & 7 != 0 || t == 0 {
             return t;
         }
         let a = t as usize;
-        if a < self.from_lo || a >= self.from_hi {
-            return t; // static literal or foreign
+        let young = a >= self.young_lo && a < self.young_hi;
+        let old = self.major && a >= self.old_lo && a < self.old_hi;
+        if !young && !old {
+            return t; // old (in a minor collection), static literal or foreign
         }
         let p = t as *mut u64;
         let h = *p;
@@ -304,12 +444,65 @@ impl Cheney {
             return *p.add(1);
         }
         let n = 1 + (size_of_hdr(h) as usize).max(1);
-        let dst = self.free;
+        let to_old = self.major || force_old || a < self.hwm;
+        let dst = if to_old { self.old_free } else { self.young_free };
         std::ptr::copy_nonoverlapping(p, dst, n);
-        self.free = dst.add(n);
+        if to_old {
+            self.old_free = dst.add(n);
+        } else {
+            self.young_free = dst.add(n);
+        }
         *p = T_FORWARD;
         *p.add(1) = dst as u64;
         dst as u64
+    }
+
+    /// Scan copied objects in both destinations until no new copies appear.
+    unsafe fn scan(&mut self, mut young: *mut u64, mut old: *mut u64) {
+        loop {
+            let mut moved = false;
+            while !young.is_null() && young < self.young_free {
+                young = self.scan_object(young, false);
+                moved = true;
+            }
+            while old < self.old_free {
+                old = self.scan_object(old, true);
+                moved = true;
+            }
+            if !moved {
+                break;
+            }
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn scan_object(&mut self, scan: *mut u64, old: bool) -> *mut u64 {
+        let h = *scan;
+        let n = size_of_hdr(h) as usize;
+        match tag_of_hdr(h) {
+            T_TUPLE | T_MAPNODE | T_HAMT => {
+                for i in 1..=n {
+                    *scan.add(i) = self.evac_to(*scan.add(i), old);
+                }
+            }
+            T_CONS => {
+                *scan.add(1) = self.evac_to(*scan.add(1), old);
+                *scan.add(2) = self.evac_to(*scan.add(2), old);
+            }
+            T_MAP => {
+                *scan.add(2) = self.evac_to(*scan.add(2), old);
+            }
+            T_CLOSURE => {
+                for i in 4..=n {
+                    *scan.add(i) = self.evac_to(*scan.add(i), old);
+                }
+            }
+            T_SUBBIN => {
+                *scan.add(1) = self.evac_to(*scan.add(1), old);
+            }
+            _ => {}
+        }
+        scan.add(1 + n.max(1))
     }
 }
 
@@ -835,13 +1028,12 @@ pub unsafe fn copy_term_by<F: Fn(usize) -> bool>(t: Term, inside: &F, free: &mut
 impl Ctx {
     /// Copy a term out of this process heap into a standalone fragment.
     pub fn to_fragment(&self, t: Term) -> Fragment {
-        let lo = self.heap_start as usize;
-        let hi = lo + self.heap_words * 8;
-        let words = copy_size(t, lo, hi);
+        let inside = |a: usize| self.in_young(a) || self.in_old(a);
+        let words = copy_size_by(t, &inside);
         let mut buf: Vec<u64> = Vec::with_capacity(words.max(1));
         unsafe { buf.set_len(words.max(1)) };
         let mut free = buf.as_mut_ptr();
-        let root = unsafe { copy_term(t, lo, hi, &mut free) };
+        let root = unsafe { copy_term_by(t, &inside, &mut free) };
         Fragment { buf, root }
     }
 

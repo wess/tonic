@@ -1,24 +1,16 @@
 # Tonic TODO
 
-Tonic 0.1.0-beta.1 is the first public release: a beta for scripts and small
-applications. The next priority is broader Elixir source and runtime
-compatibility, backed by comparisons against Elixir/OTP. Supporting `.ex` and
-`.exs` files does not establish full BEAM compatibility.
+Tonic is in public beta (0.1.0-beta.2), for scripts and applications within
+the supported boundary in docs/compatibility.md. The next priority is broader
+Elixir source and runtime compatibility, backed by comparisons against
+Elixir/OTP. Supporting `.ex` and `.exs` files does not establish full BEAM
+compatibility.
 
-## Publish 0.1.0-beta.1
+## Releases
 
-- [x] Set the compiler, runtime, shared crate, and Mix archive to 0.1.0-beta.1.
-- [x] Record provenance for the imported EEx, `base64` and `array` sources and
-  regenerate notices (also covers the crates tokio's `net` feature added).
-- [x] Package and verify a clean macOS installation locally
-  (`tools/release.py`, `tests/release.py`).
-- [ ] Commit and push to `main`; confirm Linux and macOS CI pass.
-- [ ] Verify the website deployment at https://wess.io/tonic/ on desktop and
-  mobile; its download button points at the `v0.1.0-beta.1` release.
-- [ ] Create and push `v0.1.0-beta.1`; verify that the release workflow
-  publishes the prerelease and both platform bundles.
-
-Git commits, pushes, and tags remain user-owned under the shared project guidance.
+- [x] 0.1.0-beta.1 (2026-10-16): first public release.
+- [x] 0.1.0-beta.2: generational collector, tree-shaken executables, smaller
+  process footprint.
 
 ## Beta follow-ups
 
@@ -26,8 +18,14 @@ Known differences are listed in docs/compatibility.md. In priority order:
 
 - [ ] Grow process stacks on demand (or catch overflow per process) instead of
   ending the program; the BEAM handles ten million frames.
-- [ ] Reduce heap growth peaks (copying into three times live data while the old
-  space is still mapped) and the per-process baseline.
+- [x] Generational collection: long-lived data is no longer copied on every
+  collection, and heap growth copies once.
+- [ ] Per-process baseline: a blocked process holds a stack page (16 KB on
+  Apple Silicon). Copying small stacks out on block would approach the BEAM's
+  ~3 KB.
+- [ ] Executable size: PCRE2 and the inspect/exception machinery are always
+  linked (hello world is ~4.5 MB); make regex and exception formatting
+  reachable only when used.
 - [ ] Match OTP's `:erlang.phash2/1,2`.
 - [ ] Expand Kernel macros in `Macro.expand/2`; read `@moduledoc`/`@doc` in
   function bodies; port `:calendar` RFC 3339 functions.

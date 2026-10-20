@@ -1,4 +1,4 @@
-# Tonic 0.1.0-beta.1
+# Tonic 0.1.0-beta.2
 
 Beta Elixir-to-native compiler with LLVM code generation, a moving
 garbage collector, and a concurrent process runtime. Supports `.ex` modules,
@@ -12,9 +12,25 @@ verified by the release tests. Distributed BEAM nodes, hot code loading, ports,
 arbitrary NIFs, custom dependency build systems, and umbrella root builds are
 outside the current support boundary.
 
-## Stability in this beta
+## What changed in 0.1.0-beta.2
 
-This first public release follows a differential bug hunt against Elixir
+- Generational garbage collection, as on the BEAM: a small young heap with
+  inline bump allocation, promotion after two survivals, and major collections
+  only when the old heap is full. A process holding large long-lived state no
+  longer copies it on every collection; peak memory for large live data drops
+  by about a third.
+- Smaller executables: only the standard library functions a program can reach
+  are linked, and symbols are stripped. A hello world is about 4.5 MB instead
+  of 11.5 MB. `TONIC_KEEP_ALL=1` keeps everything for programs that build
+  function names at run time.
+- Processes start with a 233-word heap (was 2048): 100,000 idle processes use
+  about 40% less memory.
+- Fixed races that could drop the first Logger report or return unset
+  application settings when several processes started at once.
+
+## Stability in the beta
+
+The first public release (0.1.0-beta.1) followed a differential bug hunt against Elixir
 1.18.3 / OTP 27 across the core language, standard library, processes and OTP,
 the CLI, and Mix integration. Fixes include:
 
@@ -46,9 +62,9 @@ Remaining differences are listed in [compatibility.md](compatibility.md#known-di
 
 Download the bundle matching your machine from the release assets:
 
-* `tonic0.1.0-beta.1.linuxx64.tar.gz`: Linux x86-64, built on Ubuntu 24.04; glibc 2.39
+* `tonic0.1.0-beta.2.linuxx64.tar.gz`: Linux x86-64, built on Ubuntu 24.04; glibc 2.39
   or newer is the supported baseline.
-* `tonic0.1.0-beta.1.macosarm64.tar.gz`: Apple Silicon macOS, built on macOS 14.
+* `tonic0.1.0-beta.2.macosarm64.tar.gz`: Apple Silicon macOS, built on macOS 14.
 
 Compilation requires clang/LLVM 18 or newer. Mix project loading and archive
 tasks additionally require Elixir 1.18 / OTP 27; native programs run without
@@ -58,8 +74,8 @@ Verify the matching `.tar.sha256` file before extracting (Linux: `sha256sum -c`;
 macOS: `shasum -a 256 -c`). Then:
 
 ```sh
-tar -xzf tonic0.1.0-beta.1.macosarm64.tar.gz
-cd tonic0.1.0-beta.1
+tar -xzf tonic0.1.0-beta.2.macosarm64.tar.gz
+cd tonic0.1.0-beta.2
 bash install.sh "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 tonic run hello.exs
@@ -101,5 +117,5 @@ different toolchain versions.
 
 The GitHub release workflow first requires the full Linux/macOS CI suite,
 builds and verifies both installation bundles, then publishes a prerelease on
-a `v0.1.0-beta.1` tag. A manual workflow run verifies and uploads build artifacts
+a `v0.1.0-beta.2` tag. A manual workflow run verifies and uploads build artifacts
 without publishing a release. Tag and manifest versions must match.

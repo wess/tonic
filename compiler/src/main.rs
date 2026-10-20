@@ -382,7 +382,15 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
         Vec::new()
     };
     let mut defs = ex.reachable(&user_mods, &extra_roots);
+    // reachable prelude functions are linked from the precompiled object;
+    // listing only those in the program's table lets the linker drop the rest
+    let mut table_externs = Vec::new();
     if prelude.is_some() {
+        table_externs = defs
+            .iter()
+            .filter(|f| is_prelude_def(f))
+            .map(|f| (f.key.module.clone(), f.key.name.clone(), f.key.arity, f.key.symbol()))
+            .collect();
         defs.retain(|f| !is_prelude_def(f));
     }
     if o.verbose {
@@ -398,6 +406,7 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
     if prelude.is_some() {
         g.mode = codegen::Mode::Program;
         g.externs = ex.out.iter().filter(|f| is_prelude_def(f)).map(|f| f.key.symbol()).collect();
+        g.table_externs = table_externs;
     }
     g.files = module_files(&ex);
 
@@ -439,14 +448,16 @@ fn find_runtime() -> Result<PathBuf, String> {
     Err("could not find libtonic_rt.a (set TONIC_RUNTIME)".into())
 }
 
-/// One macOS deployment target for every object tonic compiles and links,
-/// so the linker sees consistent versions (and stays quiet).
+/// Flags for every object tonic compiles and links: one macOS deployment
+/// target (so the linker sees consistent versions and stays quiet), or
+/// per-function sections elsewhere (macOS splits by symbol already).
 pub fn target_flags() -> Vec<String> {
     if cfg!(target_os = "macos") {
         let version = std::env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "14.0".into());
         vec![format!("-mmacosx-version-min={}", version)]
     } else {
-        Vec::new()
+        // one section per function, so --gc-sections drops unused prelude code
+        vec!["-ffunction-sections".into(), "-fdata-sections".into()]
     }
 }
 
@@ -517,6 +528,11 @@ fn build_in(o: &Opts, ir: &str, prelude: Option<&Path>, out: &Path, tmp: &Path) 
         cmd.arg("-Wl,-dead_strip");
     } else {
         cmd.arg("-Wl,--gc-sections");
+    }
+    // stack traces come from tonic's own frame tables, not symbol names;
+    // --keep leaves symbols in for debuggers
+    if !o.keep {
+        cmd.arg(if cfg!(target_os = "macos") { "-Wl,-x" } else { "-s" });
     }
     let st = cmd.status().map_err(|e| format!("failed to run linker: {}", e))?;
     if !st.success() {

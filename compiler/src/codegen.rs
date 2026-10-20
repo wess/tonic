@@ -67,6 +67,9 @@ pub struct Gen {
     fun_syms: HashSet<String>,
     ref_wrappers: HashMap<String, String>,
     pub fun_table: Vec<(String, String, usize, String)>,
+    /// Functions of the precompiled prelude this program can reach; the
+    /// program's table lists them so the linker can drop the rest.
+    pub table_externs: Vec<(String, String, usize, String)>,
     max_arity: usize,
 }
 
@@ -148,6 +151,7 @@ impl Gen {
             fun_syms: HashSet::new(),
             ref_wrappers: HashMap::new(),
             fun_table: Vec::new(),
+            table_externs: Vec::new(),
             max_arity: 8,
         };
         for a in tonic_shared::FIXED_ATOMS {
@@ -361,28 +365,30 @@ impl Gen {
         out.push_str(INLINE_HELPERS);
         // Fun table
         let mut entries = Vec::new();
-        let ft = std::mem::take(&mut self.fun_table);
+        let mut ft = std::mem::take(&mut self.fun_table);
+        // the prelude object has no table of its own: anything referencing all
+        // of its functions would keep the linker from dropping unused ones
+        if self.mode != Mode::Prelude {
+            for (m, n, a, sym) in std::mem::take(&mut self.table_externs) {
+                if !self.fun_syms.contains(&sym) {
+                    self.ext_used.insert(sym.clone(), a);
+                    ft.push((m, n, a, sym));
+                }
+            }
+        }
         for (m, n, a, sym) in &ft {
             let ma = self.atom(m);
             let na = self.atom(n);
             entries.push(format!("{{ i64, i64, i64, ptr }} {{ i64 {}, i64 {}, i64 {}, ptr @{} }}", ma, na, a, q(sym)));
         }
         self.fun_table = ft;
-        let funs_name = if self.mode == Mode::Prelude { "tonic_prelude_funs" } else { "tonic_funs" };
-        let _ = writeln!(
-            out,
-            "@{} = {}constant [{} x {{ i64, i64, i64, ptr }}] [{}], align 8",
-            funs_name,
-            if self.mode == Mode::Prelude { "" } else { "private " },
-            entries.len(),
-            entries.join(", ")
-        );
-        if self.mode == Mode::Prelude {
-            let _ = writeln!(out, "@tonic_prelude_nfuns = constant i64 {}, align 8", entries.len());
-        }
-        if self.mode == Mode::Program {
-            out.push_str("@tonic_prelude_funs = external constant [0 x { i64, i64, i64, ptr }], align 8\n");
-            out.push_str("@tonic_prelude_nfuns = external constant i64, align 8\n");
+        if self.mode != Mode::Prelude {
+            let _ = writeln!(
+                out,
+                "@tonic_funs = private constant [{} x {{ i64, i64, i64, ptr }}] [{}], align 8",
+                entries.len(),
+                entries.join(", ")
+            );
         }
         // Trampolines (need max arity)
         let tramp = if self.mode == Mode::Prelude { String::new() } else { self.trampolines() };
@@ -428,14 +434,8 @@ impl Gen {
             "define i64 @tonic_main_entry(ptr %ctx) {{\n  %r = call tailcc i64 @{}(ptr %ctx)\n  ret i64 %r\n}}\n",
             q("Elixir.Tonic.Script.__script__/0")
         );
-        let (pf, np) = if self.mode == Mode::Program {
-            out.push_str("define internal i64 @tonic_prelude_n() {\n  %n = load i64, ptr @tonic_prelude_nfuns\n  ret i64 %n\n}\n");
-            ("ptr @tonic_prelude_funs", "%pn")
-        } else {
-            ("ptr null", "0")
-        };
-        let pre = if self.mode == Mode::Program { "  %pn = call i64 @tonic_prelude_n()\n" } else { "" };
-        let pre = format!("{}  call void @tn_set_ext_tramps(ptr @tonic_ext_tramps, i64 {})\n", pre, EXT_FUN_MAX_ARITY + 1);
+        let (pf, np) = ("ptr null", "0");
+        let pre = format!("  call void @tn_set_ext_tramps(ptr @tonic_ext_tramps, i64 {})\n", EXT_FUN_MAX_ARITY + 1);
         let pre = match self.script_file_static.clone() {
             Some(g) => {
                 out.push_str("declare void @tn_set_script_file(ptr)\n");
@@ -1588,7 +1588,7 @@ impl<'a> FnGen<'a> {
         let n = ops.len();
         let words = 1 + n.max(1);
         let p = self.t();
-        self.emit(&format!("{} = call ptr @tn_alloc(ptr %ctx, i64 {})", p, words));
+        self.emit(&format!("{} = call ptr @tonic_alloc(ptr %ctx, i64 {})", p, words));
         self.emit(&format!("store i64 {}, ptr {}", hdr as i64, p));
         for (i, o) in ops.iter().enumerate() {
             let v = self.load(o);
@@ -1606,7 +1606,7 @@ impl<'a> FnGen<'a> {
     fn alloc_list(&mut self, items: &[Op], tail: &Op) -> Op {
         let n = items.len();
         let p = self.t();
-        self.emit(&format!("{} = call ptr @tn_alloc(ptr %ctx, i64 {})", p, 3 * n));
+        self.emit(&format!("{} = call ptr @tonic_alloc(ptr %ctx, i64 {})", p, 3 * n));
         let hdr = enc::header(enc::T_CONS, 2) as i64;
         for (i, o) in items.iter().enumerate() {
             let cell = self.t();
@@ -1670,7 +1670,7 @@ impl<'a> FnGen<'a> {
         }
         let n = free.len();
         let p = self.t();
-        self.emit(&format!("{} = call ptr @tn_alloc(ptr %ctx, i64 {})", p, 4 + n));
+        self.emit(&format!("{} = call ptr @tonic_alloc(ptr %ctx, i64 {})", p, 4 + n));
         self.emit(&format!("store i64 {}, ptr {}", enc::header(enc::T_CLOSURE, 3 + n as u64) as i64, p));
         let f1 = self.t();
         self.emit(&format!("{} = getelementptr i64, ptr {}, i64 1", f1, p));
@@ -2500,6 +2500,23 @@ declare i64 @tn_not(ptr, i64)
 "#;
 
 const INLINE_HELPERS: &str = r#"
+; bump allocation: the runtime is called only when the heap is full
+define internal ptr @tonic_alloc(ptr %ctx, i64 %w) alwaysinline {
+  %hpp = getelementptr i8, ptr %ctx, i64 8
+  %hp = load ptr, ptr %hpp
+  %limp = getelementptr i8, ptr %ctx, i64 32
+  %lim = load ptr, ptr %limp
+  %new = getelementptr i64, ptr %hp, i64 %w
+  %ok = icmp ule ptr %new, %lim
+  br i1 %ok, label %fast, label %slow
+fast:
+  store ptr %new, ptr %hpp
+  ret ptr %hp
+slow:
+  %p = call ptr @tn_alloc(ptr %ctx, i64 %w)
+  ret ptr %p
+}
+
 define internal i1 @tn_truthy(i64 %v) alwaysinline {
   %a = icmp ne i64 %v, 2
   %b = icmp ne i64 %v, 18

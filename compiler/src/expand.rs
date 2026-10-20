@@ -839,19 +839,56 @@ impl Expander {
         let mut stack: Vec<FunKey> = Vec::new();
         let mut seen_mods: HashSet<String> = HashSet::new();
         let mut mod_queue: Vec<String> = Vec::new();
+        let debug = std::env::var("TONIC_DEBUG_REACH").is_ok();
+        let mut why: HashMap<String, String> = HashMap::new();
         for f in &self.out {
             if user_modules.contains(&f.key.module) || f.key.module == "Elixir.Tonic.Script" {
                 stack.push(f.key.clone());
             }
         }
         stack.extend(extra_roots.iter().cloned());
+        // debugging aid: extra roots as lines "Module.name/arity"
+        if let Ok(path) = std::env::var("TONIC_DEBUG_ROOTS") {
+            for line in std::fs::read_to_string(path).unwrap_or_default().lines() {
+                if let Some((mn, ar)) = line.rsplit_once('/') {
+                    if let (Some((m, n)), Ok(ar)) = (mn.rsplit_once('.'), ar.parse()) {
+                        stack.push(FunKey::new(m, n, ar));
+                    }
+                }
+            }
+        }
         for extra in [
             FunKey::new("Elixir.Tonic.Internal", "format_exit", 2),
             FunKey::new("Elixir.Tonic.Internal", "protocol_undefined", 2),
+            // the runtime names this module in the error info of failed BIFs
+            FunKey::new("erl_erts_errors", "format_error", ANY_ARITY),
         ] {
             stack.push(extra);
         }
         let all_mods: HashSet<&str> = self.out.iter().map(|f| f.key.module.as_str()).collect();
+        // Public functions by module, for modules that may be called dynamically.
+        let mut publics: HashMap<&str, Vec<&FunKey>> = HashMap::new();
+        for f in &self.out {
+            if f.public {
+                publics.entry(f.key.module.as_str()).or_default().push(&f.key);
+            }
+        }
+        // Atoms in reachable code; a dynamic call needs its function's name as one.
+        let mut live_names: HashSet<String> = HashSet::new();
+        // `mod.fun(args)` sites with an unknown module, and every atom that names a
+        // module: each such module keeps its public fun/arity for each site
+        let mut dyn_sites: HashSet<(String, usize)> = HashSet::new();
+        let mut module_atoms: HashSet<String> = HashSet::new();
+        // Code evaluated at run time can call any function by name, so a
+        // program that evaluates code keeps every public function of a live module.
+        let eval_entry = |k: &FunKey| {
+            (k.module == "Elixir.Code"
+                && (k.name.starts_with("eval") || k.name.starts_with("compile") || k.name == "require_file"))
+                || k.module == "Elixir.Tonic.Eval"
+        };
+        // TONIC_KEEP_ALL=1 keeps every public function, for programs whose
+        // dynamic calls the analysis cannot see (names built at run time)
+        let mut keep_all = std::env::var("TONIC_KEEP_ALL").map(|v| v == "1").unwrap_or(false);
         // Modules the runtime refers to by fixed atoms (exceptions, etc.).
         for a in tonic_shared::FIXED_ATOMS {
             if a.starts_with("Elixir.") && all_mods.contains(a) && seen_mods.insert(a.to_string()) {
@@ -862,8 +899,53 @@ impl Expander {
         // struct's module is live: (struct module, refs, atoms).
         let mut conditional: Vec<(String, Vec<FunKey>, Vec<String>)> = Vec::new();
         let is_struct_mod = |m: &str| self.mods.get(m).map(|x| x.struct_fields.is_some()).unwrap_or(false);
+        let mut arities: HashMap<(&str, &str), Vec<&FunKey>> = HashMap::new();
+        for f in &self.out {
+            arities.entry((f.key.module.as_str(), f.key.name.as_str())).or_default().push(&f.key);
+        }
+        // The evaluator counts only if the program certainly runs it: it is in
+        // the static call closure of the roots, not just in code kept in case
+        // of a dynamic call. Then every public function stays.
+        {
+            let mut certain: HashSet<FunKey> = HashSet::new();
+            let mut work: Vec<FunKey> = stack.clone();
+            while let Some(k) = work.pop() {
+                if k.arity == ANY_ARITY {
+                    work.extend(arities.get(&(k.module.as_str(), k.name.as_str())).into_iter().flatten().map(|x| (*x).clone()));
+                    continue;
+                }
+                if !certain.insert(k.clone()) {
+                    continue;
+                }
+                if eval_entry(&k) {
+                    keep_all = true;
+                    break;
+                }
+                if let Some(f) = by_key.get(&k) {
+                    let (mut r, mut a) = (Vec::new(), Vec::new());
+                    collect_refs(&f.body, &mut r, &mut a);
+                    work.extend(r.into_iter().filter(|x| !certain.contains(x)));
+                }
+            }
+        }
+        if keep_all {
+            for m in &all_mods {
+                if seen_mods.insert(m.to_string()) {
+                    mod_queue.push(m.to_string());
+                }
+            }
+        }
+        let mut progressed_names = false;
         loop {
             while let Some(k) = stack.pop() {
+                if k.arity == ANY_ARITY {
+                    for key in arities.get(&(k.module.as_str(), k.name.as_str())).map(|v| v.as_slice()).unwrap_or(&[]) {
+                        if !seen.contains(*key) {
+                            stack.push((*key).clone());
+                        }
+                    }
+                    continue;
+                }
                 if !seen.insert(k.clone()) {
                     continue;
                 }
@@ -871,7 +953,31 @@ impl Expander {
                     let mut refs = Vec::new();
                     let mut atoms = Vec::new();
                     let is_proto = self.protocols.contains_key(&f.key.module);
-                    if is_proto && f.key.name == "__protocol__" {
+                    let app_spec = f.key.module == "application" && f.key.name == "builtin";
+                    if let (true, CE::Case(_, clauses, _)) = (app_spec, &f.body) {
+                        // an application's callback module and settings matter
+                        // only once something uses that application
+                        for c in clauses {
+                            let (mut r2, mut a2) = (Vec::new(), Vec::new());
+                            collect_refs(&c.body, &mut r2, &mut a2);
+                            match c.pats.first() {
+                                Some(Pat::Lit(Lit::Atom(app))) if app == "ex_unit" || app == "logger" => {
+                                    let m = if app == "ex_unit" { "Elixir.ExUnit" } else { "Elixir.Logger" };
+                                    conditional.push((m.to_string(), r2, a2));
+                                }
+                                Some(Pat::Lit(Lit::Atom(app))) if app == "elixir" => {
+                                    // dbg_callback is never applied at run time: the
+                                    // compiler expands dbg itself
+                                    refs.extend(r2.into_iter().filter(|r| r.module != "Elixir.Macro"));
+                                    atoms.extend(a2);
+                                }
+                                _ => {
+                                    refs.extend(r2);
+                                    atoms.extend(a2);
+                                }
+                            }
+                        }
+                    } else if is_proto && f.key.name == "__protocol__" {
                         // impl lists are informational; don't keep impls alive
                     } else if let (true, CE::Case(subj, clauses, _)) = (is_proto, &f.body) {
                         for sj in subj {
@@ -893,13 +999,61 @@ impl Expander {
                     }
                     for r in refs {
                         if !seen.contains(&r) {
+                            if debug {
+                                why.entry(format!("{}.{}/{}", r.module, r.name, r.arity)).or_insert(format!("{}.{}/{}", k.module, k.name, k.arity));
+                                why.entry(r.module.clone()).or_insert(format!("{}.{}/{}", k.module, k.name, k.arity));
+                            }
                             stack.push(r);
                         }
                     }
+                    // atoms these functions hold are data (a struct's own tag,
+                    // application metadata, cosmetic stack frames), never call targets
+                    let data_only = matches!(
+                        k.name.as_str(),
+                        "__struct__" | "__struct_fields__" | "__inspect_derive__" | "__derive_opts__"
+                    ) || matches!(
+                        (k.module.as_str(), k.name.as_str()),
+                        ("Elixir.Tonic.Internal", "format_exit") | ("elixir_errors", "parse_error")
+                    );
                     for a in atoms {
-                        if all_mods.contains(a.as_str()) && seen_mods.insert(a.clone()) {
-                            mod_queue.push(a);
+                        if let Some(site) = a.strip_prefix(DYN_SITE) {
+                            if let Some((n, ar)) = site.rsplit_once('/') {
+                                if dyn_sites.insert((n.to_string(), ar.parse().unwrap_or(0))) {
+                                    progressed_names = true;
+                                }
+                            }
+                            continue;
                         }
+                        if all_mods.contains(a.as_str()) && module_atoms.insert(a.clone()) {
+                            progressed_names = true;
+                        }
+                        if let Some(name) = a.strip_prefix(AST_ATOMS) {
+                            // still a possible module for mod.fun(...) call sites
+                            if all_mods.contains(name) && module_atoms.insert(name.to_string()) {
+                                progressed_names = true;
+                            }
+                            live_names.insert(name.to_string());
+                            continue;
+                        }
+                        if data_only {
+                            live_names.insert(a);
+                            continue;
+                        }
+                        // stdlib code is known, so its Erlang module atoms only
+                        // matter through the call-site rules; user code is not
+                        // stdlib code is known: its dynamic calls are covered by the
+                        // call-site rules (callback tuples, consecutive literal
+                        // arguments, mod.fun(...) sites, protocol dispatch). Atoms
+                        // in user code may reach any function of their module.
+                        let module_atom = user_modules.contains(&k.module) || k.module == "Elixir.Tonic.Script";
+                        if module_atom && all_mods.contains(a.as_str()) && seen_mods.insert(a.clone()) {
+                            if debug {
+                                why.entry(a.clone()).or_insert(format!("atom in {}.{}/{}", k.module, k.name, k.arity));
+                                eprintln!("dyn {} <- {}.{}/{}", a, k.module, k.name, k.arity);
+                            }
+                            mod_queue.push(a.clone());
+                        }
+                        live_names.insert(a);
                     }
                 }
             }
@@ -919,26 +1073,73 @@ impl Expander {
                         }
                     }
                     for m in a {
-                        if all_mods.contains(m.as_str()) && seen_mods.insert(m.clone()) {
-                            mod_queue.push(m);
+                        if m.starts_with("Elixir.") && all_mods.contains(m.as_str()) && seen_mods.insert(m.clone()) {
+                            mod_queue.push(m.clone());
                             progressed = true;
                         }
+                        live_names.insert(m);
                     }
                 } else {
                     i += 1;
                 }
             }
-            // Modules referenced by atom (dynamic calls): keep all their functions.
-            if mod_queue.is_empty() {
-                if progressed {
-                    continue;
+            // A module referenced by atom may be called dynamically. That only
+            // reaches its public functions, and only those whose names are atoms
+            // somewhere in reachable code; private functions stay if a kept one
+            // calls them.
+            mod_queue.clear();
+            if progressed_names {
+                progressed_names = false;
+                for m in &module_atoms {
+                    for (n, ar) in &dyn_sites {
+                        let k = FunKey::new(m, n, *ar);
+                        if !seen.contains(&k) && by_key.get(&k).is_some_and(|f| f.public) {
+                            stack.push(k);
+                            progressed = true;
+                        }
+                    }
                 }
+            }
+            for m in &seen_mods {
+                for k in publics.get(m.as_str()).map(|v| v.as_slice()).unwrap_or(&[]) {
+                    if !seen.contains(*k) && (keep_all || live_names.contains(&k.name)) {
+                        if debug {
+                            why.entry(format!("{}.{}/{}", k.module, k.name, k.arity)).or_insert(format!("dynamic {}", m));
+                        }
+                        stack.push((*k).clone());
+                        progressed = true;
+                    }
+                }
+            }
+            if stack.is_empty() && !progressed {
                 break;
             }
-            for m in mod_queue.drain(..) {
-                for f in &self.out {
-                    if f.key.module == m && !seen.contains(&f.key) {
-                        stack.push(f.key.clone());
+        }
+        if let Ok(path) = std::env::var("TONIC_DEBUG_REACH_LIST") {
+            let mut names: Vec<String> = seen.iter().map(|k| format!("{}.{}/{}", k.module, k.name, k.arity)).collect();
+            names.sort();
+            let _ = std::fs::write(path, names.join("\n"));
+        }
+        if std::env::var("TONIC_DEBUG_REACH").is_ok() {
+            let mut per: HashMap<&str, usize> = HashMap::new();
+            for k in &seen {
+                *per.entry(k.module.as_str()).or_default() += 1;
+            }
+            let mut v: Vec<_> = per.into_iter().collect();
+            v.sort_by(|a, b| b.1.cmp(&a.1));
+            for (m, n) in v.iter().take(40) {
+                eprintln!("reach {} {}{}", n, m, if seen_mods.contains(*m) { " (by atom)" } else { "" });
+            }
+            eprintln!("reach modules {} by-atom {}", v.len(), seen_mods.len());
+            if let Ok(target) = std::env::var("TONIC_DEBUG_WHY") {
+                let mut cur = target;
+                for _ in 0..30 {
+                    let Some(p) = why.get(&cur).cloned() else { break };
+                    eprintln!("why {} <- {}", cur, p);
+                    cur = p.trim_start_matches("atom in ").to_string();
+                    if !why.contains_key(&cur) {
+                        let m = cur.rsplit_once('.').map(|x| x.0.to_string()).unwrap_or_default();
+                        if why.contains_key(&m) { cur = m; }
                     }
                 }
             }
@@ -951,15 +1152,88 @@ impl Expander {
     }
 }
 
-fn collect_refs(e: &CE, refs: &mut Vec<FunKey>, atoms: &mut Vec<String>) {
-    match e {
-        CE::Lit(Lit::Atom(a)) => {
-            if a.starts_with("Elixir.") {
-                atoms.push(a.clone())
+/// `spawn(:proc_lib, :init_p, args)`, `apply(Mod, :fun, args)`: consecutive
+/// literal atom arguments name the function a call reaches dynamically.
+fn mfa_args(args: &[CE], refs: &mut Vec<FunKey>, atoms: &mut Vec<String>) {
+    for w in args.windows(2) {
+        if let (CE::Lit(Lit::Atom(m)), CE::Lit(Lit::Atom(f))) = (&w[0], &w[1]) {
+            refs.push(FunKey::new(m, f, ANY_ARITY));
+        }
+    }
+    // (module, :name, arity) as in make_fun / function_exported?, and
+    // (module, :name, [args]) as in apply / spawn: a call site with a known
+    // name and arity whatever the module is
+    for w in args.windows(2) {
+        if let CE::Lit(Lit::Atom(f)) = &w[0] {
+            let arity = match &w[1] {
+                CE::Lit(Lit::Int(n)) if *n >= 0 => Some(*n as usize),
+                list @ (CE::Cons(..) | CE::Lit(Lit::Nil)) => fixed_length(list),
+                _ => None,
+            };
+            if let Some(n) = arity {
+                atoms.push(format!("{}{}/{}", DYN_SITE, f, n));
             }
         }
+    }
+}
+
+/// Length of a list literal with no unknown tail.
+fn fixed_length(e: &CE) -> Option<usize> {
+    match e {
+        CE::Lit(Lit::Nil) => Some(0),
+        CE::Cons(_, t) => fixed_length(t).map(|n| n + 1),
+        _ => None,
+    }
+}
+
+/// Arity of a reference to every arity of a function (from a callback tuple).
+const ANY_ARITY: usize = usize::MAX;
+/// A `mod.fun(args)` call site with an unknown module: "name/arity".
+const DYN_SITE: &str = "\u{0}dyn:";
+/// Marks atoms from quoted AST data.
+const AST_ATOMS: &str = "\u{0}ast:";
+
+fn collect_refs(e: &CE, refs: &mut Vec<FunKey>, atoms: &mut Vec<String>) {
+    match e {
+        CE::Lit(Lit::Atom(a)) => atoms.push(a.clone()),
         CE::Lit(_) | CE::Var(_) => {}
-        CE::Tuple(v) | CE::Block(v) | CE::Interp(v) | CE::Bif(_, v) => {
+        // quoted AST {name, meta, args} built at run time: code only the
+        // evaluator would run, so its atoms are data
+        CE::Tuple(v) if v.len() == 3 && matches!(v[0], CE::Lit(Lit::Atom(_))) && matches!(v[1], CE::Cons(..) | CE::Lit(Lit::Nil)) => {
+            let mut inner = Vec::new();
+            for x in v {
+                collect_refs(x, refs, &mut inner);
+            }
+            atoms.extend(inner.into_iter().map(|a| if a.starts_with(AST_ATOMS) || a.starts_with(DYN_SITE) { a } else { format!("{}{}", AST_ATOMS, a) }));
+        }
+        // {Module, :fun} / {Module, :fun, args}: a callback naming one function
+        // (any arity); reachable() checks that Module is a module
+        CE::Tuple(v)
+            if (v.len() == 2 || v.len() == 3)
+                && matches!((&v[0], &v[1]), (CE::Lit(Lit::Atom(_)), CE::Lit(Lit::Atom(_)))) =>
+        {
+            if let (CE::Lit(Lit::Atom(m)), CE::Lit(Lit::Atom(f))) = (&v[0], &v[1]) {
+                refs.push(FunKey::new(m, f, ANY_ARITY));
+                // the same shape is a child spec {Module, arg}
+                refs.push(FunKey::new(m, "child_spec", ANY_ARITY));
+                refs.push(FunKey::new(m, "start_link", ANY_ARITY));
+                // the atoms stay ordinary too: {:via, Registry, name} and
+                // {:key, Module} have this shape, and their modules are reached
+                // through mod.fun(...) call sites
+                atoms.push(m.clone());
+                atoms.push(f.clone());
+            }
+            for x in &v[2..] {
+                collect_refs(x, refs, atoms);
+            }
+        }
+        CE::Bif(_, v) => {
+            mfa_args(v, refs, atoms);
+            for x in v {
+                collect_refs(x, refs, atoms)
+            }
+        }
+        CE::Tuple(v) | CE::Block(v) | CE::Interp(v) => {
             for x in v {
                 collect_refs(x, refs, atoms)
             }
@@ -1013,11 +1287,14 @@ fn collect_refs(e: &CE, refs: &mut Vec<FunKey>, atoms: &mut Vec<String>) {
         }
         CE::Call(k, args) => {
             refs.push(k.clone());
+            mfa_args(args, refs, atoms);
             for x in args {
                 collect_refs(x, refs, atoms)
             }
         }
-        CE::DynCall(m, _, args) => {
+        CE::DynCall(m, name, args) => {
+            atoms.push(name.clone());
+            atoms.push(format!("{}{}/{}", DYN_SITE, name, args.len()));
             collect_refs(m, refs, atoms);
             for x in args {
                 collect_refs(x, refs, atoms)
@@ -1034,11 +1311,14 @@ fn collect_refs(e: &CE, refs: &mut Vec<FunKey>, atoms: &mut Vec<String>) {
                 collect_clause(c, refs, atoms);
             }
         }
-        CE::FunRef(_, t) => {
-            if let Target::Fun(k) = t {
-                refs.push(k.clone());
+        CE::FunRef(key, t) => match t {
+            Target::Fun(k) => refs.push(k.clone()),
+            Target::Dynamic => {
+                refs.push(key.clone());
+                atoms.push(key.name.clone());
             }
-        }
+            _ => {}
+        },
         CE::Match(p, e) => {
             collect_pat(p, refs, atoms);
             collect_refs(e, refs, atoms);

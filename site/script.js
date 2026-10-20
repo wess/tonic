@@ -33,7 +33,7 @@ document.querySelectorAll('[data-platform]').forEach(button => {
       item.setAttribute('aria-pressed', String(item === button));
     });
     const platform = button.dataset.platform === 'linux' ? 'linuxx64' : 'macosarm64';
-    document.getElementById('install-code').textContent = `tar -xzf tonic0.1.0-beta.1.${platform}.tar.gz\ncd tonic0.1.0-beta.1\nbash install.sh "$HOME/.local"\nexport PATH="$HOME/.local/bin:$PATH"\ntonic run hello.exs`;
+    document.getElementById('install-code').textContent = `tar -xzf tonic0.1.0-beta.2.${platform}.tar.gz\ncd tonic0.1.0-beta.2\nbash install.sh "$HOME/.local"\nexport PATH="$HOME/.local/bin:$PATH"\ntonic run hello.exs`;
   });
 });
 document.querySelectorAll('[data-copy]').forEach(button => {

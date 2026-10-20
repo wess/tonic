@@ -1,6 +1,6 @@
 # tonic
 
-**0.1.0-beta.1 · beta.** Start with scripts and small native applications.
+**0.1.0-beta.2 · beta.** Start with scripts and small native applications.
 Visit the [Tonic website](https://wess.io/tonic/).
 See the [release guide](docs/release.md) for installation and the
 [compatibility report](docs/compatibility.md) for tested packages and limitations.
@@ -209,13 +209,31 @@ as every running BEAM VM. Sort entries when order matters.
 
 ### Garbage collection
 
-Each process owns a private semispace heap collected by a **precise Cheney
+Each process owns a private heap collected by a **precise, generational,
 copying collector**. Compiled code keeps every live value in a *shadow-stack
 frame* (`[prev, n, function_info, line, slot…]` allocated in the native frame
 and linked from the process context), so the collector knows every root exactly and can move
 objects. Immediates may live in registers since they never move. Because heaps
 are per process and messages are copied on send (like the BEAM), collection
 never stops other processes.
+
+As on the BEAM, a heap has two generations. New objects are bump-allocated
+(inline, without a runtime call) in a small young heap that starts at 233
+words. A *minor* collection copies only the young heap: objects that survive a
+second time move to the old heap, the rest stay young. A *major* collection
+copies everything into a fresh old heap, and runs only when the old heap has
+no room for the next promotions. Long-lived data, such as a server's state, is
+therefore not copied again on every collection. Minor collections never scan
+the old heap: terms are immutable, so an older object cannot point to a newer
+one. `TONIC_GC_VERIFY=1` checks that invariant after every minor collection.
+
+Executables carry only the standard library code a program can reach. The
+analysis follows static calls and the shapes dynamic calls take (`mod.fun(...)`
+with an unknown module, `apply/3` and `spawn/3` arguments, callback tuples such
+as `{Mod, :fun, args}`, protocol dispatch); atoms in user code keep their
+module's public functions. Programs that evaluate code at run time
+(`Code.eval_string/2` and friends) keep everything. A hello world is about
+4.5 MB.
 
 ### Processes on tokio
 
@@ -238,8 +256,13 @@ Native programs read these environment variables at startup:
 | `TONIC_SCHEDULERS` | CPU count | Scheduler threads running processes |
 | `TONIC_PROC_STACK_MB` | 256 | Stack reserved for each spawned process |
 | `TONIC_MAIN_STACK_MB` | 1024 | Stack reserved for the main process |
-| `TONIC_MIN_HEAP` | 2048 | Initial heap of each process, in words |
-| `TONIC_GC_STRESS` | off | Collect on every allocation (testing only) |
+| `TONIC_MIN_HEAP` | 233 | Initial heap of each process, in words |
+| `TONIC_GC_STRESS` | off | Collect on every allocation, alternating minor and major collections (testing only) |
+| `TONIC_GC_VERIFY` | off | Check the generational invariant after every minor collection (testing only) |
+
+`TONIC_KEEP_ALL=1` at compile time keeps every public standard library
+function in the executable, for programs that call functions whose names they
+build at run time (for example `apply(String, String.to_atom(name), args)`).
 
 Process stacks are reserved address space; memory is only committed as a
 process uses it. Unlike the BEAM, a process stack does not grow without
