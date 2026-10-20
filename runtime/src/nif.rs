@@ -648,6 +648,11 @@ pub extern "C" fn enif_is_ref(_e: *mut Env, t: Term) -> c_int {
 }
 
 #[no_mangle]
+pub extern "C" fn enif_is_port(_e: *mut Env, t: Term) -> c_int {
+    is_port(t) as c_int
+}
+
+#[no_mangle]
 pub extern "C" fn enif_is_empty_list(_e: *mut Env, t: Term) -> c_int {
     (t == NIL_LIST) as c_int
 }
@@ -680,6 +685,8 @@ pub extern "C" fn enif_term_type(_e: *mut Env, t: Term) -> c_int {
         7
     } else if is_pid(t) {
         8
+    } else if is_port(t) {
+        9
     } else if is_ref(t) {
         10
     } else {

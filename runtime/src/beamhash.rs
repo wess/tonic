@@ -53,6 +53,10 @@ fn beam_immediate(t: Term) -> Option<u64> {
     if is_pid(t) {
         return Some((pid_id(t) << 4) | 0x3);
     }
+    // local ports are immediates on the BEAM
+    if is_port(t) {
+        return Some((word(t, 1) << 4) | 0x7);
+    }
     None
 }
 

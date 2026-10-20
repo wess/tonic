@@ -240,3 +240,9 @@ pub struct FunInfo {
 pub fn is_ref(t: Term) -> bool {
     is_boxed_tag(t, T_REF)
 }
+
+// ---- Ports ----
+#[inline(always)]
+pub fn is_port(t: Term) -> bool {
+    is_boxed_tag(t, T_PORT)
+}

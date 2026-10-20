@@ -294,6 +294,9 @@ pub mod enc {
     /// Growable byte buffer behind appended binaries: [hdr, used bytes, data...].
     /// Never a term itself; only sub-binaries over it reach programs.
     pub const T_WBUF: u64 = 14;
+    /// Port identifier: [hdr, port number]. Like a reference, the payload is
+    /// raw data the collector copies but never scans.
+    pub const T_PORT: u64 = 15;
 
     #[inline(always)]
     pub const fn header(tag: u64, payload_words: u64) -> u64 {

@@ -703,7 +703,23 @@ defmodule :erlang do
 
   def fun_to_list(fun) when is_function(fun), do: :tonic.str_to_charlist(:tonic.fun_to_string(fun))
   def ref_to_list(ref) when is_reference(ref), do: :tonic.str_to_charlist("#Ref" <> String.trim_leading(:tonic.ref_to_string(ref), "#Reference"))
-  def port_to_list(port), do: :tonic.str_to_charlist("#Port<0.0>") |> tap(fn _ -> port end)
+  def port_to_list(port), do: :tonic.str_to_charlist(:tonic.port_to_string(port))
+
+  def open_port(name, options), do: :tonic.port_open(name, options)
+  def port_command(port, data), do: :tonic.port_command(port, data)
+
+  # Commands never wait for the program, so :force and :nosuspend change nothing.
+  def port_command(port, data, options) when is_list(options) do
+    if Enum.all?(options, &(&1 in [:force, :nosuspend])),
+      do: :tonic.port_command(port, data),
+      else: :erlang.error(:badarg, [port, data, options])
+  end
+
+  def port_close(port), do: :tonic.port_close(port)
+  def port_connect(port, pid), do: :tonic.port_connect(port, pid)
+  def port_info(port), do: :tonic.port_info(port)
+  def port_info(port, item), do: :tonic.port_info_item(port, item)
+  def ports, do: :tonic.ports()
   def pid_to_list(pid) when is_pid(pid), do: :tonic.str_to_charlist(String.trim_leading(:tonic.pid_to_string(pid), "#PID"))
   def yield, do: :tonic.yield()
   def garbage_collect(_pid), do: :erlang.garbage_collect()
@@ -1186,7 +1202,76 @@ defmodule :os do
   def system_time, do: :erlang.system_time()
   def system_time(unit), do: :erlang.system_time(unit)
   def timestamp, do: :erlang.timestamp()
-  def cmd(command), do: :tonic.str_to_charlist(elem(System.shell(List.to_string(command)), 0))
+  # os:cmd/1,2 as OTP 27 runs it: the command goes to a shell's stdin and an
+  # EOT the shell echoes afterwards marks the end, so background jobs started
+  # by the command do not hold the call open.
+  def cmd(command), do: cmd(command, %{})
+
+  def cmd(command, opts) do
+    if not is_map(opts), do: :erlang.error(:badarg, [command, opts])
+    max = Map.get(opts, :max_size, :infinity)
+    text = :tonic.port_cmd_text(command)
+    port = :erlang.open_port({:spawn, ~c"/bin/sh -s unix:cmd"}, [:binary, :stderr_to_stdout, :stream, :in, :hide, :out])
+    ref = :erlang.monitor(:port, port)
+    true = :erlang.port_command(port, ["(", text, "\n) </dev/null; echo \"", 4, "\"\n"])
+    bytes = cmd_data(port, ref, [], 0, max)
+    :erlang.demonitor(ref, [:flush])
+
+    case :unicode.characters_to_list(bytes) do
+      list when is_list(list) -> list
+      _ -> :erlang.binary_to_list(bytes)
+    end
+  end
+
+  defp cmd_data(port, ref, sofar, size, max) do
+    receive do
+      {^port, {:data, bytes}} ->
+        case cmd_eot(bytes, size, max) do
+          :more ->
+            cmd_data(port, ref, [sofar, bytes], size + byte_size(bytes), max)
+
+          last ->
+            try do
+              :erlang.port_close(port)
+            rescue
+              _ -> :ok
+            end
+
+            cmd_flush_until_down(port, ref)
+            :erlang.iolist_to_binary([sofar, last])
+        end
+
+      {:DOWN, ^ref, _, _, _} ->
+        cmd_flush_exit(port)
+        :erlang.iolist_to_binary(sofar)
+    end
+  end
+
+  defp cmd_eot(bytes, size, max) do
+    case :binary.match(bytes, <<4>>) do
+      {pos, _} when max == :infinity or size + pos < max -> :binary.part(bytes, 0, pos)
+      _ -> cmd_limit(bytes, size, max)
+    end
+  end
+
+  defp cmd_limit(_bytes, _size, :infinity), do: :more
+  defp cmd_limit(bytes, size, max) when size + byte_size(bytes) < max, do: :more
+  defp cmd_limit(bytes, size, max), do: :binary.part(bytes, 0, max - size)
+
+  defp cmd_flush_until_down(port, ref) do
+    receive do
+      {^port, {:data, _}} -> cmd_flush_until_down(port, ref)
+      {:DOWN, ^ref, _, _, _} -> cmd_flush_exit(port)
+    end
+  end
+
+  defp cmd_flush_exit(port) do
+    receive do
+      {:EXIT, ^port, _} -> :ok
+    after
+      0 -> :ok
+    end
+  end
 end
 
 

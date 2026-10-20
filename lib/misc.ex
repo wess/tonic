@@ -47,39 +47,150 @@ defmodule System do
     user_home() || raise RuntimeError, "could not find the user home, please set the HOME environment variable"
   end
 
+  # System.cmd/3 and System.shell/2 as Elixir 1.18 writes them, over ports.
   def cmd(command, args, opts \\ []) when is_binary(command) and is_list(args) do
-    if not Enum.all?(args, &is_binary/1), do: raise(ArgumentError, "all arguments for System.cmd/3 must be binaries")
-    exe = if String.contains?(command, "/"), do: command, else: find_executable(command)
+    assert_no_null_byte!(command, "System.cmd/3")
 
-    if exe == nil do
-      :erlang.error(:enoent)
+    if not Enum.all?(args, &is_binary/1) do
+      raise ArgumentError, "all arguments for System.cmd/3 must be binaries"
     end
 
-    env = for {k, v} <- Keyword.get(opts, :env, []), do: {to_string(k), v && to_string(v)}
-    cd = Keyword.get(opts, :cd)
-    merge = Keyword.get(opts, :stderr_to_stdout, false)
+    cmd =
+      if Path.type(command) == :absolute do
+        command
+      else
+        find_executable(command) || :erlang.error(:enoent, [command, args, opts])
+      end
 
-    case :tonic.system_cmd(exe, args, cd && to_string(cd), env, merge) do
-      {:error, reason} ->
-        :erlang.error(reason)
-
-      {out, status} ->
-        into = Keyword.get(opts, :into, "")
-        lines = Keyword.get(opts, :lines)
-
-        collected =
-          cond do
-            into == "" -> out
-            lines -> Enum.into(String.split(out, ~r/(?<=\n)/, trim: true) |> Enum.map(&String.trim_trailing(&1, "\n")), into)
-            true -> Enum.into([out], into)
-          end
-
-        {collected, status}
-    end
+    do_cmd({:spawn_executable, cmd}, [args: args], opts)
   end
 
   def shell(command, opts \\ []) when is_binary(command) do
-    cmd("/bin/sh", ["-c", command], opts)
+    command |> String.trim() |> do_shell(opts)
+  end
+
+  defp do_shell("", _opts), do: {"", 0}
+
+  defp do_shell(command, opts) do
+    assert_no_null_byte!(command, "System.shell/2")
+    {close_stdin?, opts} = Keyword.pop(opts, :close_stdin, false)
+    shell_path = find_executable("sh") || :erlang.error(:enoent, [command, opts])
+    close_stdin = if close_stdin?, do: " </dev/null", else: ""
+    command = IO.iodata_to_binary(["(", command, "\n)", close_stdin])
+    do_cmd({:spawn_executable, shell_path}, [args: ["-c", command]], opts)
+  end
+
+  defp do_cmd(port_init, base_opts, opts) do
+    {use_stdio?, opts} = Keyword.pop(opts, :use_stdio, true)
+
+    {into, line, opts} =
+      cmd_opts(opts, [:exit_status, :binary, :hide] ++ base_opts, "", false, use_stdio?)
+
+    {initial, fun} = Collectable.into(into)
+
+    try do
+      case line do
+        true -> do_port_line(Port.open(port_init, opts), initial, fun, [])
+        false -> do_port_byte(Port.open(port_init, opts), initial, fun)
+      end
+    catch
+      kind, reason ->
+        fun.(initial, :halt)
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    else
+      {acc, status} -> {fun.(acc, :done), status}
+    end
+  end
+
+  defp do_port_byte(port, acc, fun) do
+    receive do
+      {^port, {:data, data}} ->
+        do_port_byte(port, fun.(acc, {:cont, data}), fun)
+
+      {^port, {:exit_status, status}} ->
+        {acc, status}
+    end
+  end
+
+  defp do_port_line(port, acc, fun, buffer) do
+    receive do
+      {^port, {:data, {:noeol, data}}} ->
+        do_port_line(port, acc, fun, [data | buffer])
+
+      {^port, {:data, {:eol, data}}} ->
+        data = [data | buffer] |> Enum.reverse() |> IO.iodata_to_binary()
+        do_port_line(port, fun.(acc, {:cont, data}), fun, [])
+
+      {^port, {:exit_status, status}} ->
+        # Data may arrive after exit status on line mode
+        receive do
+          {^port, {:data, {_, data}}} ->
+            data = [data | buffer] |> Enum.reverse() |> IO.iodata_to_binary()
+            {fun.(acc, {:cont, data}), status}
+        after
+          0 -> {acc, status}
+        end
+    end
+  end
+
+  defp cmd_opts([{:into, any} | t], opts, _into, line, stdio?),
+    do: cmd_opts(t, opts, any, line, stdio?)
+
+  defp cmd_opts([{:cd, bin} | t], opts, into, line, stdio?) when is_binary(bin),
+    do: cmd_opts(t, [{:cd, bin} | opts], into, line, stdio?)
+
+  defp cmd_opts([{:arg0, bin} | t], opts, into, line, stdio?) when is_binary(bin),
+    do: cmd_opts(t, [{:arg0, bin} | opts], into, line, stdio?)
+
+  defp cmd_opts([{:stderr_to_stdout, true} | t], opts, into, line, true),
+    do: cmd_opts(t, [:stderr_to_stdout | opts], into, line, true)
+
+  defp cmd_opts([{:stderr_to_stdout, true} | _], _opts, _into, _line, false),
+    do: raise(ArgumentError, "cannot use \"stderr_to_stdout: true\" and \"use_stdio: false\"")
+
+  defp cmd_opts([{:stderr_to_stdout, false} | t], opts, into, line, stdio?),
+    do: cmd_opts(t, opts, into, line, stdio?)
+
+  defp cmd_opts([{:parallelism, bool} | t], opts, into, line, stdio?) when is_boolean(bool),
+    do: cmd_opts(t, [{:parallelism, bool} | opts], into, line, stdio?)
+
+  defp cmd_opts([{:env, enum} | t], opts, into, line, stdio?),
+    do: cmd_opts(t, [{:env, validate_env(enum)} | opts], into, line, stdio?)
+
+  defp cmd_opts([{:lines, max_line_length} | t], opts, into, _line, stdio?)
+       when is_integer(max_line_length) and max_line_length > 0,
+       do: cmd_opts(t, [{:line, max_line_length} | opts], into, true, stdio?)
+
+  defp cmd_opts([{key, val} | _], _opts, _into, _line, _stdio?),
+    do: raise(ArgumentError, "invalid option #{inspect(key)} with value #{inspect(val)}")
+
+  defp cmd_opts([], opts, into, line, stdio?) do
+    opt = if stdio?, do: :use_stdio, else: :nouse_stdio
+    {into, line, [opt | opts]}
+  end
+
+  defp validate_env(enum) do
+    Enum.map(enum, fn
+      {k, nil} ->
+        {String.to_charlist(k), false}
+
+      {k, v} ->
+        {String.to_charlist(k), String.to_charlist(v)}
+
+      other ->
+        raise ArgumentError, "invalid environment key-value #{inspect(other)}"
+    end)
+  end
+
+  defp assert_no_null_byte!(binary, operation) do
+    case :binary.match(binary, "\0") do
+      {_, _} ->
+        raise ArgumentError,
+              "cannot execute #{operation} for program with null byte, got: #{inspect(binary)}"
+
+      :nomatch ->
+        binary
+    end
   end
 
   def pid, do: :tonic.system_getpid()

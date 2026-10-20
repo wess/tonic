@@ -254,7 +254,8 @@ impl Ctx {
                     if trap {
                         let base = self.roots.len();
                         self.roots.push(r);
-                        let t = self.tuple(&[atom(a::EXIT), pid(from), self.roots[base]]);
+                        let source = crate::port::source_term(self, from);
+                        let t = self.tuple(&[atom(a::EXIT), source, self.roots[base]]);
                         self.roots.truncate(base);
                         self.saveq.push_back(t);
                         continue;
@@ -605,6 +606,10 @@ fn process_exit(ctx: &mut Ctx) {
     let reason = ctx.exit_reason;
     let rf = ctx.to_fragment(reason);
     for l in links {
+        if let Some(port) = crate::port::linked_port(l) {
+            crate::port::linked_exited(port, me, &rf);
+            continue;
+        }
         if let Some(p) = lookup_proc(l) {
             p.st.lock().links.remove(&me);
         }
@@ -617,6 +622,7 @@ fn process_exit(ctx: &mut Ctx) {
             },
         );
     }
+    crate::port::owner_exited(me, &rf);
     for (refid, watcher) in monitors {
         // Claim the monitor and deliver DOWN while holding the index lock,
         // so a concurrent demonitor either wins or finds the message queued.
@@ -783,6 +789,40 @@ pub fn monitor(watcher: u64, target: u64, refid: u64) -> bool {
             st.monitored_by.push((refid, watcher));
             monitor_index().lock().insert(refid, (target, watcher));
             true
+        }
+        None => false,
+    }
+}
+
+/// Monitors whose target is not a process (ports keep their own watcher
+/// lists) share the index, so demonitor and watcher exit work unchanged.
+pub fn monitor_register(refid: u64, target: u64, watcher: u64) {
+    monitor_index().lock().insert(refid, (target, watcher));
+}
+
+/// Takes a monitor for delivering its DOWN; false if it was demonitored.
+pub fn monitor_claim(refid: u64) -> bool {
+    let claimed = monitor_index().lock().remove(&refid).is_some();
+    if claimed {
+        monitor_gone(refid);
+    }
+    claimed
+}
+
+pub fn monitor_active(refid: u64) -> bool {
+    monitor_index().lock().contains_key(&refid)
+}
+
+/// Adds or removes one entry of a process's link set (a port's link entry).
+pub fn link_entry(pid: u64, entry: u64, add: bool) -> bool {
+    match lookup_proc(pid) {
+        Some(p) => {
+            let mut st = p.st.lock();
+            if add {
+                st.links.insert(entry)
+            } else {
+                st.links.remove(&entry)
+            }
         }
         None => false,
     }

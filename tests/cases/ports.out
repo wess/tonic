@@ -1,0 +1,119 @@
+is_port: {true, false, false, false}
+inspect: true
+port_to_list: true
+order: [1, :a, :other, :fun, :p, :q, :me]
+compare: {true, true, false, true}
+map key: 2
+etf: true
+list: true
+echo: "hello\n"
+send command: [p: {:data, "world\n"}]
+info keys: [:name, :links, :id, :connected, :input, :output, :os_pid]
+info: {{:name, ~c"cat"}, true, true}
+counters: {{:input, 12}, {:output, 12}}
+os_pid: true
+misc info: {{:registered_name, []}, {:queue_size, 0}, {:locking, :port_level}}
+bad item: {ArgumentError, "errors were found at the given arguments:\n\n  * 2nd argument: invalid option in list\n"}
+process links: [:p, :q]
+command options: true
+command options data: [p: {:data, "x"}]
+close: true
+after close: [{:EXIT, :p, :normal}]
+info closed: {nil, nil}
+closed command: {ArgumentError, "argument error"}
+closed close: {ArgumentError, "argument error"}
+closed connect: {ArgumentError, "argument error"}
+not a port: {nil, {ArgumentError, "argument error"}}
+closed listed: false
+close message: [{:EXIT, :q, :normal}, {:q, :closed}]
+close message again: []
+exit status: {"a\nbb", 3}
+exit after status: [{:EXIT, :p, :normal}]
+no exit status: [{:p, {:data, "abc"}}, {:EXIT, :p, :normal}]
+list data: [{:p, {:data, ~c"abc"}}, {:EXIT, :p, :normal}]
+killed: [{:p, {:exit_status, 137}}, {:EXIT, :p, :normal}]
+spawn status: [{:p, {:exit_status, 5}}, {:EXIT, :p, :normal}]
+missing command: 127
+stderr_to_stdout: {"out\nerr\n", 0}
+cd and env: {"/\nbar\nunset\n", 0}
+arg0: {"named\n", 0}
+accepted options: {"hidden\n", 0}
+lines: [{:p, {:data, {:eol, "a"}}}, {:p, {:data, {:noeol, "bbb"}}}, {:p, {:data, {:eol, "bbb"}}}, {:p, {:exit_status, 2}}, {:p, {:data, {:noeol, "ccc"}}}, {:EXIT, :p, :normal}]
+lines as lists: [{:p, {:data, {:eol, ~c"one"}}}, {:p, {:data, {:eol, ~c"two"}}}, {:EXIT, :p, :normal}]
+eof: [p: {:data, "abc"}, p: {:exit_status, 0}, p: :eof]
+eof still open: true
+eof closed: [{:EXIT, :p, :normal}]
+packet 1: {"hey", "abc", ""}
+packet 2: {"hey", "abc", ""}
+packet 4: {"hey", "abc", ""}
+packets in: [{:p, {:data, ~c"abc"}}, {:p, {:data, ~c"z"}}, {:p, {:exit_status, 0}}, {:EXIT, :p, :normal}]
+packet too long: true
+packet too long closes: [{:EXIT, :p, :einval}]
+owned elsewhere: true
+owner exited: {nil, false}
+owner killed: nil
+connect: true
+connected: {true, [:me, :other_pid]}
+data to new owner: [other_got: {:p, {:data, "to other\n"}}]
+closed by new owner: [{:EXIT, :p, :normal}, {:other_got, {:p, :closed}}]
+connect errors: {{ArgumentError, "errors were found at the given arguments:\n\n  * 2nd argument: not a pid\n"}, {ArgumentError, "argument error"}}
+connect message: [p: :connected]
+after connect message: [other_got: {:p, {:data, "x"}}]
+exit boom: [{:EXIT, :p, :boom}]
+exit kill: [{:EXIT, :p, :killed}]
+exit normal from other: [{:EXIT, :p, :normal}]
+linked crash: [{:EXIT, :p, :crash}]
+linked normal: {[], true}
+unlinked: false
+unlinked close: []
+badsig: {[{:EXIT, :p, :badsig}], true}
+badsig from other: [{:EXIT, :p, :badsig}]
+link closed: [{:EXIT, :p, :noproc}]
+monitors: {true, true}
+down: [{:EXIT, :p, :normal}, {:DOWN, :ref, :port, :p, :normal}]
+down closed: [{:DOWN, :ref, :port, :p, :noproc}]
+demonitor: true
+demonitored close: [{:EXIT, :p, :normal}]
+untrapped exit: [p: {:data, "done"}]
+enoent: {ErlangError, "Erlang error: :enoent"}
+eacces: {ErlangError, "Erlang error: :eacces"}
+bad option: {ArgumentError, "errors were found at the given arguments:\n\n  * 2nd argument: invalid option in list\n"}
+bad packet: {ArgumentError, "errors were found at the given arguments:\n\n  * 2nd argument: invalid option in list\n"}
+bad name: {ArgumentError, "errors were found at the given arguments:\n\n  * 1st argument: invalid port name\n"}
+bad options: {ArgumentError, "errors were found at the given arguments:\n\n  * 2nd argument: invalid option in list\n"}
+cmd: {"hello world\n", 0}
+cmd absolute: {"abs\n", 0}
+cmd status: {"out\n", 7}
+cmd stderr: {"out\nerr\n", 0}
+cmd env: {"1-\n", 0}
+cmd cd: {"/\n", 0}
+cmd into: {"a\nb\nc", 0}
+cmd lines: {["a", "bb", "ccc"], 0}
+cmd arg0: {"zzz\n", 0}
+cmd parallelism: {"p\n", 0}
+streamed
+cmd stream: 0
+direct
+cmd nouse_stdio: {"", 0}
+cmd missing: {ErlangError, "Erlang error: :enoent"}
+cmd missing path: {ErlangError, "Erlang error: :enoent"}
+cmd bad option: {ArgumentError, "invalid option :foo with value 1"}
+cmd bad args: {ArgumentError, "all arguments for System.cmd/3 must be binaries"}
+cmd bad env: {ArgumentError, "invalid environment key-value :x"}
+cmd null byte: {ArgumentError, "cannot execute System.cmd/3 for program with null byte, got: <<101, 99, 0, 104, 111>>"}
+cmd stdio conflict: {ArgumentError, "cannot use \"stderr_to_stdout: true\" and \"use_stdio: false\""}
+shell: {"a\nb\n", 0}
+shell status: {"", 4}
+shell empty: {"", 0}
+shell comment: {"c\n", 0}
+shell stdin: {"", 0}
+cmd port exits: [{:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}, {:EXIT, :other, :normal}]
+os.cmd: ~c"hi\nerr\n"
+os.cmd status: []
+os.cmd unicode: [233]
+os.cmd atom: ~c"atom\n"
+os.cmd deep: ~c"deep\n"
+os.cmd max_size: ~c"1234"
+os.cmd background: ~c"quick\n"
+os.cmd binary: {ArgumentError, "errors were found at the given arguments:\n\n  * 1st argument: not a list of characters\n"}
+os.cmd stray messages: []

@@ -198,7 +198,7 @@ typetest!(tn_is_list, is_list);
 typetest!(tn_is_map, is_map);
 typetest!(tn_is_number, is_number);
 typetest!(tn_is_pid, is_pid);
-typetest!(tn_is_port, |_| false);
+typetest!(tn_is_port, is_port);
 typetest!(tn_is_reference, is_ref);
 typetest!(tn_is_tuple, is_tuple);
 typetest!(tn_is_nil, |a| a == NIL);
@@ -1185,6 +1185,7 @@ pub extern "C" fn tn_impl_for(_c: *mut Ctx, t: Term) -> Term {
         T_TUPLE => atom(a::E_TUPLE),
         T_CLOSURE => atom(a::E_FUNCTION),
         T_REF => atom(a::E_REFERENCE),
+        T_PORT => atom(a::E_PORT),
         T_MAP => match map::find(t, atom(a::STRUCT)) {
             Some(s) if is_atom(s) => s,
             _ => atom(a::E_MAP),

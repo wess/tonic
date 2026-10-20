@@ -84,7 +84,7 @@ Known differences are listed in docs/compatibility.md. In priority order:
 These are outside the current release. They need explicit design work and
 dedicated interoperability tests before any compatibility claims.
 
-- [ ] Define a ports and external-process interface.
+- [x] Ports to external programs (`spawn`, `spawn_executable`), with `System.cmd/3` and `:os.cmd/1` over them. Port drivers, `{:fd, _, _}` and `:erlang.port_control/3` remain unsupported.
 - [ ] Extend the `erl_nif` subset (maps, monitors, select, dirty schedulers) and
   release resources when no term references them. The same release would
   free unclosed `:zlib` streams and `:atomics` arrays.

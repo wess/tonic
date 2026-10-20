@@ -161,6 +161,7 @@ int enif_is_map(ErlNifEnv* env, ERL_NIF_TERM term);
 int enif_is_number(ErlNifEnv* env, ERL_NIF_TERM term);
 int enif_is_pid(ErlNifEnv* env, ERL_NIF_TERM term);
 int enif_is_ref(ErlNifEnv* env, ERL_NIF_TERM term);
+int enif_is_port(ErlNifEnv* env, ERL_NIF_TERM term);
 int enif_is_empty_list(ErlNifEnv* env, ERL_NIF_TERM term);
 int enif_is_identical(ERL_NIF_TERM lhs, ERL_NIF_TERM rhs);
 int enif_compare(ERL_NIF_TERM lhs, ERL_NIF_TERM rhs);
