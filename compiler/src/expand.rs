@@ -921,7 +921,13 @@ impl Expander {
         // dynamic calls the analysis cannot see (names built at run time)
         let mut keep_all = std::env::var("TONIC_KEEP_ALL").map(|v| v == "1").unwrap_or(false);
         // Modules the runtime refers to by fixed atoms (exceptions, etc.).
-        for a in tonic_shared::FIXED_ATOMS {
+        // The builtin type names (Integer ... Port) are only protocol
+        // dispatch keys, never call targets.
+        let type_names = tonic_shared::atom::E_INTEGER as usize..=tonic_shared::atom::E_PORT as usize;
+        for (i, a) in tonic_shared::FIXED_ATOMS.iter().enumerate() {
+            if type_names.contains(&i) {
+                continue;
+            }
             if a.starts_with("Elixir.") && all_mods.contains(a) && seen_mods.insert(a.to_string()) {
                 mod_queue.push(a.to_string());
             }
@@ -1046,7 +1052,11 @@ impl Expander {
                         (k.module.as_str(), k.name.as_str()),
                         ("Elixir.Tonic.Internal", "format_exit") | ("elixir_errors", "parse_error")
                     );
+                    let debug_atom = std::env::var("TONIC_DEBUG_ATOM").ok();
                     for a in atoms {
+                        if debug_atom.as_deref() == Some(a.as_str()) {
+                            eprintln!("atom {} held by {}.{}/{}", a, k.module, k.name, k.arity);
+                        }
                         if let Some(site) = a.strip_prefix(DYN_SITE) {
                             if let Some((n, ar)) = site.rsplit_once('/') {
                                 if dyn_sites.insert((n.to_string(), ar.parse().unwrap_or(0))) {

@@ -27,5 +27,6 @@ pub mod re;
 pub mod ustr;
 pub mod zlib;
 pub mod sched;
+pub mod stackseg;
 pub mod term;
 pub mod udp;

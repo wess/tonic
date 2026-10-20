@@ -86,7 +86,7 @@ These differ from Elixir 1.18 / OTP 27 in this release. Each is either intention
 - Converting a very large integer to a float rounds correctly (IEEE 754); the BEAM can differ in the last digit.
 - `Code.string_to_quoted/1` error locations report line 0 without a column, and a compiled regex's `re_pattern` is not a real PCRE binary.
 - Small maps with atom keys print keys in source order rather than atom-table order.
-- Memory: each blocked process holds at least one page of its stack, so a process costs about 20 KB on Apple Silicon (16 KB pages) and about 7 KB on Linux (4 KB pages), compared to about 3 KB on the BEAM.
+- Memory: each blocked process holds at least one page of its stack, so a process costs about 20 KB on Apple Silicon (16 KB pages) and about 7 KB on Linux (4 KB pages), compared to about 3 KB on the BEAM. Deep non-tail recursion works to any depth memory allows, but a stack frame takes about four times the memory of a BEAM frame (10 million frames of `n + f(n - 1)` use about 2 GB, the BEAM about 0.6 GB).
 - Executables include only the standard library functions the compiler can see a program reach. A call whose function name is built at run time (`apply(Mod, String.to_atom(name), args)`) into a standard library function the program does not otherwise use fails with `UndefinedFunctionError`; compile with `TONIC_KEEP_ALL=1` to keep every function.
 - `mix test` with `compilers: [:tonic]` cannot start the application, since no BEAM files are produced; run tests with the default compilers.
 

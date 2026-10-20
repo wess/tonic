@@ -119,3 +119,49 @@ fn invalid_control_flow_is_rejected() {
     }
     assert!(run_case("receive", "IO.inspect(receive do\nafter 0 -> :t\nend)\n").status.success());
 }
+
+#[test]
+fn deep_recursion_grows_the_stack() {
+    let source = r#"
+defmodule Deep do
+  def sum(0), do: 0
+  def sum(n), do: n + sum(n - 1)
+  def wait(0, parent), do: (send(parent, :deep); receive do: (:go -> 0))
+  def wait(n, parent), do: 1 + wait(n - 1, parent)
+end
+n = String.to_integer(System.get_env("DEPTH"))
+IO.inspect Deep.sum(n)
+IO.inspect Task.await(Task.async(fn -> Enum.map(1..n, &(&1 * 2)) |> Enum.sum() end), :infinity)
+IO.inspect Task.await(Task.async(fn -> Enum.reduce(1..3, 0, fn _, a -> a + Deep.sum(div(n, 2)) end) end), :infinity)
+parent = self()
+pid = spawn(fn -> send(parent, {:done, Deep.wait(n, parent)}) end)
+receive do: (:deep -> send(pid, :go))
+receive do: ({:done, n} -> IO.inspect n)
+victim = spawn(fn -> Deep.wait(n, parent) end)
+ref = Process.monitor(victim)
+receive do: (:deep -> Process.exit(victim, :kill))
+receive do: ({:DOWN, ^ref, _, _, reason} -> IO.inspect reason)
+"#;
+    let dir = std::env::temp_dir().join(format!("tonicdeep{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("deep.exs");
+    std::fs::write(&path, source).unwrap();
+    // 1 MB first stacks: both depths continue on new segments
+    for (stress, depth) in [("0", 200_000u64), ("1", 20_000)] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_tonic"));
+        command
+            .arg("run")
+            .arg(&path)
+            .env("TONIC_PROC_STACK_MB", "1")
+            .env("TONIC_MAIN_STACK_MB", "1")
+            .env("TONIC_GC_STRESS", stress)
+            .env("DEPTH", depth.to_string());
+        let output = execute(command);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "stress={stress}: {}", String::from_utf8_lossy(&output.stderr));
+        let (sum, half) = (depth * (depth + 1) / 2, depth / 2 * (depth / 2 + 1) / 2);
+        let expected = format!("{}\n{}\n{}\n{}\n:killed\n", sum, 2 * sum, 3 * half, depth);
+        assert_eq!(stdout, expected, "stress={stress}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

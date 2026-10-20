@@ -425,6 +425,7 @@ pub fn spawn(entry: Entry, opts: SpawnOpts) -> u64 {
             st
         }
     };
+    let slim = crate::stackseg::limit_of(&stack) as usize;
     let co: Co = Coroutine::with_stack(
         stack,
         move |yielder: &Yielder<(), YieldReason>, ()| {
@@ -434,6 +435,7 @@ pub fn spawn(entry: Entry, opts: SpawnOpts) -> u64 {
             });
             ctx.shared = Arc::as_ptr(&sh2);
             ctx.yielder = yielder as *const _ as *const c_void;
+            ctx.slim = slim as *mut u8;
             let cp: *mut Ctx = &mut *ctx;
             let r = match &entry {
                 Entry::Main(f) => f(cp),
@@ -1065,6 +1067,10 @@ pub unsafe extern "C" fn tonic_start(
 
 /// Back the (large, deep-recursion) main stack with transparent huge pages so
 /// first-touch page faults don't dominate deep body recursion.
+pub fn proc_stack_bytes() -> usize {
+    g().proc_stack
+}
+
 fn advise_huge(st: &DefaultStack) {
     #[cfg(target_os = "linux")]
     {

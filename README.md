@@ -258,8 +258,8 @@ Native programs read these environment variables at startup:
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `TONIC_SCHEDULERS` | CPU count | Scheduler threads running processes |
-| `TONIC_PROC_STACK_MB` | 256 | Stack reserved for each spawned process |
-| `TONIC_MAIN_STACK_MB` | 1024 | Stack reserved for the main process |
+| `TONIC_PROC_STACK_MB` | 256 | First stack of each spawned process, and the size of each further stack segment |
+| `TONIC_MAIN_STACK_MB` | 1024 | First stack of the main process |
 | `TONIC_MIN_HEAP` | 233 | Initial heap of each process, in words |
 | `TONIC_GC_STRESS` | off | Collect on every allocation, alternating minor and major collections (testing only) |
 | `TONIC_GC_VERIFY` | off | Check the generational invariant after every minor collection (testing only) |
@@ -269,9 +269,11 @@ function in the executable, for programs that call functions whose names they
 build at run time (for example `apply(String, String.to_atom(name), args)`).
 
 Process stacks are reserved address space; memory is only committed as a
-process uses it. Unlike the BEAM, a process stack does not grow without
-bound: very deep non-tail recursion (a few hundred thousand frames in a spawned
-process at `-O0`) ends the program with a message naming these settings.
+process uses it. Stacks grow like the BEAM's: a function entered near the end
+of its stack continues on a new segment, so deep non-tail recursion (such as
+`Enum.map/2` over millions of elements) is bounded by memory rather than by
+the first stack. Frames never move. A segment's memory is released when the
+process exits; a process keeps up to two spare segments for reuse.
 Output to a pipe or file is batched and flushed within a few milliseconds, and
 `SIGTERM`, `SIGINT` and `SIGHUP` flush pending output before the program exits.
 `tonic run` passes termination signals on to the program it runs (and, on

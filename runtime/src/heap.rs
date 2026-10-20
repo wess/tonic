@@ -42,7 +42,12 @@ pub struct Ctx {
     /// or the heap start under GC stress so every allocation reaches the
     /// runtime (and collects).
     pub hlim: *mut u64, // 32
+    /// Lowest stack address compiled code may enter with (see stackseg);
+    /// null where the stack cannot grow.
+    pub slim: *mut u8, // 40
     // ---- runtime private ----
+    /// Stack segments kept for reuse after deep recursion returns.
+    pub segs: Vec<corosensei::stack::DefaultStack>,
     pub heap_start: *mut u64,
     pub heap_words: usize,
     pub heap_buf: Vec<u64>,
@@ -116,6 +121,8 @@ impl Ctx {
             hp: start,
             hend: unsafe { start.add(min_heap) },
             hlim: if gc_stress() { start } else { unsafe { start.add(min_heap) } },
+            slim: std::ptr::null_mut(),
+            segs: Vec::new(),
             reds: REDUCTIONS,
             heap_start: start,
             heap_words: min_heap,

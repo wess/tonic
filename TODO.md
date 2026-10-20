@@ -16,8 +16,10 @@ compatibility.
 
 Known differences are listed in docs/compatibility.md. In priority order:
 
-- [ ] Grow process stacks on demand (or catch overflow per process) instead of
-  ending the program; the BEAM handles ten million frames.
+- [x] Grow process stacks on demand: functions continue on a new stack segment
+  near the end of the current one.
+- [ ] Smaller stack frames: a frame of `n + f(n - 1)` takes ~210 bytes, about
+  four times the BEAM's.
 - [x] Generational collection: long-lived data is no longer copied on every
   collection, and heap growth copies once.
 - [ ] Per-process baseline: a blocked process holds a stack page (16 KB on

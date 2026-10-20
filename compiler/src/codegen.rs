@@ -736,6 +736,9 @@ struct FnGen<'a> {
     guard_fail: Option<String>,
     terminated: bool,
     header: String,
+    /// (closure?, arity) of a function that moves to a new stack segment when
+    /// entered near the end of its stack (runtime/src/stackseg.rs)
+    grow: Option<(bool, usize)>,
     param_slots: Vec<u32>,
     /// Number of pattern bindings of each variable in this function.
     bind_counts: HashMap<VarId, u32>,
@@ -766,6 +769,7 @@ impl<'a> FnGen<'a> {
             guard_fail: None,
             terminated: false,
             header: String::new(),
+            grow: None,
             param_slots: Vec::new(),
             bind_counts: HashMap::new(),
             finfo: String::new(),
@@ -895,6 +899,31 @@ impl<'a> FnGen<'a> {
         s.push_str(&self.header);
         let _ = writeln!(s, "entry:");
         let _ = writeln!(s, "  %fr = alloca i64, i64 {}, align 16", n + 4);
+        if let Some((closure, arity)) = self.grow {
+            // %fr is in this frame: below the limit, rerun on a new segment.
+            let _ = writeln!(s, "  %ga = alloca i64, i64 {}", arity.max(1));
+            s.push_str("  %slp = getelementptr i8, ptr %ctx, i64 40
+  %sl = load ptr, ptr %slp
+");
+            s.push_str("  %deep = icmp ult ptr %fr, %sl
+  %deepx = call i1 @llvm.expect.i1(i1 %deep, i1 false)
+");
+            s.push_str("  br i1 %deepx, label %grow, label %go
+grow:
+");
+            for i in 0..arity {
+                let _ = writeln!(s, "  %ga{} = getelementptr i64, ptr %ga, i64 {}
+  store i64 %a{}, ptr %ga{}", i, i, i, i);
+            }
+            if closure {
+                let _ = writeln!(s, "  %gr = call i64 @tn_grow_closure(ptr %ctx, i64 %env, i64 {}, ptr %ga)", arity);
+            } else {
+                let _ = writeln!(s, "  %gr = call i64 @tn_grow_fnptr(ptr %ctx, ptr @{}, i64 {}, ptr %ga)", q(&self.sym), arity);
+            }
+            s.push_str("  ret i64 %gr
+go:
+");
+        }
         let _ = writeln!(s, "  %prev = load ptr, ptr %ctx");
         let _ = writeln!(s, "  store ptr %prev, ptr %fr");
         let _ = writeln!(s, "  %fr.n = getelementptr i64, ptr %fr, i64 1");
@@ -938,6 +967,9 @@ impl<'a> FnGen<'a> {
             params.push(format!("i64 %a{}", i));
         }
         self.header = format!("define tailcc i64 @{}({}) {{\n", q(&self.sym), params.join(", "));
+        if d.params.len() <= MAX_TRAMPOLINE_ARITY {
+            self.grow = Some((false, d.params.len()));
+        }
         // params in contiguous slots
         let base = self.slots(d.params.len());
         for (i, p) in d.params.iter().enumerate() {
@@ -965,6 +997,9 @@ impl<'a> FnGen<'a> {
             params.push(format!("i64 %a{}", i));
         }
         self.header = format!("define private tailcc i64 @{}({}) {{\n", q(&self.sym), params.join(", "));
+        if l.arity <= MAX_TRAMPOLINE_ARITY {
+            self.grow = Some((true, l.arity));
+        }
         let base = self.slots(l.arity);
         for (i, p) in l.params.iter().enumerate() {
             self.vars.insert(*p, base + i as u32);
@@ -2455,6 +2490,9 @@ declare {i64, i1} @llvm.smul.with.overflow.i64(i64, i64)
 declare i32 @tonic_start(i32, ptr, ptr, i64, ptr, ptr, i64, ptr)
 declare ptr @tn_alloc(ptr, i64)
 declare i64 @tn_yield(ptr)
+declare i1 @llvm.expect.i1(i1, i1)
+declare i64 @tn_grow_fnptr(ptr, ptr, i64, ptr)
+declare i64 @tn_grow_closure(ptr, i64, i64, ptr)
 declare ptr @tn_lookup_mfa(ptr, i64, i64, i64)
 declare void @tn_undef_args(ptr, ptr, i64)
 declare ptr @tn_lookup_mfa_q(ptr, i64, i64, i64)
