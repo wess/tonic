@@ -28,7 +28,6 @@ Known differences are listed in docs/compatibility.md. In priority order:
   ending the program; the BEAM handles ten million frames.
 - [ ] Reduce heap growth peaks (copying into three times live data while the old
   space is still mapped) and the per-process baseline.
-- [ ] Match OTP's `:erlang.phash2/1,2`.
 - [ ] Expand Kernel macros in `Macro.expand/2`; read `@moduledoc`/`@doc` in
   function bodies; port `:calendar` RFC 3339 functions.
 - [ ] Match `URI.new/1` / `:uri_string.parse/1` validation.

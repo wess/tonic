@@ -64,7 +64,7 @@ Distributed BEAM nodes, BEAM bytecode loading and full compatibility with undocu
 These differ from Elixir 1.18 / OTP 27 in this release. Each is either intentional or tracked in TODO.md.
 
 - Redefining a module (a second `defmodule` with the same name) is a compile error; Elixir replaces the module at run time.
-- `:erlang.phash2/1,2` uses a different hash function. Values are stable within Tonic but differ from the BEAM, so do not persist or share them between the two.
+- `:erlang.phash/2` and `:erlang.phash2/1,2` match OTP 27 for every term except pids, references and anonymous or local funs. Pids and references hash their printed numbers, which differ from the BEAM's; anonymous funs cannot reproduce OTP's per-module code checksum. External funs (`&Mod.fun/arity`) match.
 - `Macro.expand/2` and `Macro.expand_once/2` expand aliases and remote user macros (`M.macro(...)`), but not Kernel macros such as `if` and `|>`, imported macros called without their module, or `defguard` guards.
 - `URI.new/1` and `:uri_string.parse/1` accept some malformed URIs the BEAM rejects (for example a space in the host) and reject some it accepts.
 - `@moduledoc` and `@doc` read inside a function body return `nil`.

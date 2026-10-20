@@ -96,6 +96,7 @@ const TABLE: &[(&str, &str, usize, &str, &str)] = &[
     ("erlang", "binary_to_float", 1, "tn_binary_to_float", ""),
     ("erlang", "phash2", 1, "tn_phash2_1", ""),
     ("erlang", "phash2", 2, "tn_phash2", ""),
+    ("erlang", "phash", 2, "tn_phash", ""),
     ("erlang", "++", 2, "tn_append", ""),
     ("erlang", "--", 2, "tn_subtract", ""),
     ("erlang", "throw", 1, "tn_throw", ""),

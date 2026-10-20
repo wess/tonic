@@ -78,10 +78,6 @@ pub extern "C" fn tn_error3(c: *mut Ctx, reason: Term, args: Term, opts: Term) -
     NONE
 }
 #[no_mangle]
-pub extern "C" fn tn_phash2_1(c: *mut Ctx, t: Term) -> Term {
-    tn_phash2(c, t, NIL)
-}
-#[no_mangle]
 pub extern "C" fn tn_whereis_erl(c: *mut Ctx, n: Term) -> Term {
     let r = crate::bif_proc::tn_whereis(c, n);
     if r == NIL {

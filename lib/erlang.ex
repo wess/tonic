@@ -925,7 +925,6 @@ defmodule :erlang do
   def adler32(data), do: :tonic.adler32(1, :erlang.iolist_to_binary(data))
   def adler32(a, data), do: :tonic.adler32(a, :erlang.iolist_to_binary(data))
   def md5(data), do: :tonic.md5(:erlang.iolist_to_binary(data))
-  def phash(term, range), do: :erlang.phash2(term, range) + 1
 
   def term_to_binary(term), do: :tonic.term_to_binary(term)
   def term_to_binary(term, _opts), do: :tonic.term_to_binary(term)

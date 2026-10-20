@@ -1160,17 +1160,6 @@ pub extern "C" fn tn_make_ref(c: *mut Ctx) -> Term {
     cx(c).make_ref()
 }
 
-#[no_mangle]
-pub extern "C" fn tn_phash2(c: *mut Ctx, t: Term, range: Term) -> Term {
-    let h = cmp::hash(t);
-    if is_small(range) && small_val(range) > 0 {
-        small((h % small_val(range) as u64) as i64)
-    } else {
-        let _ = c;
-        small((h & ((1 << 27) - 1)) as i64)
-    }
-}
-
 /// Protocol dispatch key: struct module atom, or the builtin type's module atom.
 #[no_mangle]
 pub extern "C" fn tn_impl_for(_c: *mut Ctx, t: Term) -> Term {

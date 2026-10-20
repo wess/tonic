@@ -391,7 +391,7 @@
       "upstreamsha256": {
         "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/rand.erl": "7f956b3658f5b2054fe5809b7db1221e76109339a27ca728184d5a90fc679b0d"
       },
-      "sha256": "ab9bb440542448d1c140bc505b2a45b43c1f390cb77834621f0562c5ff247043"
+      "sha256": "f0ceb8ad595558f2146a8546a10c48e7dab7d0df986227c703334deef3cd19a1"
     },
     {
       "file": "lib/erlang_ds.ex",
@@ -418,7 +418,7 @@
         "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gb_sets.erl": "803f15e52aa38e6e6216ab3fc7c596d32a80b79ec6230c9d75545a614048ee9b",
         "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/gb_trees.erl": "13bac44e25a70cfd2791a8113ebac559f50aa428a899d0f4598d5a5647d6bd88"
       },
-      "sha256": "630682d12c724525857b4cb20355e4ceb0083168121c6c87cc8b2ea18c31a8ed"
+      "sha256": "4d711cbe94fb036bc06993b239027550f81df711a8deb1c315d31b51201c9b15"
     },
     {
       "file": "lib/erlang_io.ex",
