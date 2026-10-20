@@ -33,13 +33,26 @@ impl Expander {
     // scopes
     // ------------------------------------------------------------------
 
-    fn lookup(&self, cx: &Cx, name: &str) -> Option<VarId> {
+    fn lookup(&mut self, cx: &Cx, name: &str) -> Option<VarId> {
         for s in cx.scopes.iter().rev() {
             if let Some(v) = s.get(name) {
+                self.used_vars.insert(*v);
                 return Some(*v);
             }
         }
         None
+    }
+
+    /// Bindings written by the user, outside macro expansions and dependencies
+    /// (whose warnings Elixir shows only when compiling them).
+    fn track_binding(&mut self, cx: &Cx, v: VarId, name: &str, line: u32) {
+        let user = self.mods.get(cx.module()).map(|md| !md.is_prelude).unwrap_or(true);
+        let plain = name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '?' || c == '!');
+        let file = cx.file();
+        if user && plain && line > 0 && cx.macro_depth == 0 && !name.starts_with('_') && !name.starts_with("tonic_") && !file.contains("/deps/") && file != "<prelude>" {
+            let shadows = cx.scopes.iter().any(|s| s.contains_key(name));
+            self.var_sites.push((v, name.to_string(), file.to_string(), line, shadows));
+        }
     }
 
     fn commit(&self, cx: &mut Cx, b: Bound) {
@@ -95,7 +108,7 @@ impl Expander {
             )
             && matches!(
                 ce,
-                CE::Call(..) | CE::DynCall(..) | CE::Apply(..) | CE::Bif(..)
+                CE::Call(..) | CE::DynCall(..) | CE::Apply(..) | CE::Bif(..) | CE::Match(..) | CE::Case(..)
             )
         {
             if let CE::Bif(n, _) = &ce {
@@ -323,6 +336,29 @@ impl Expander {
                     let pair = CE::Tuple(vec![CE::atom(&format!("Elixir.{}", short)), CE::atom(&full)]);
                     aliases = CE::Cons(Box::new(pair), Box::new(aliases));
                 }
+                let list = |items: Vec<CE>| items.into_iter().rev().fold(CE::Lit(Lit::Nil), |acc, x| CE::Cons(Box::new(x), Box::new(acc)));
+                let mut req: Vec<&String> = cx.env.requires.iter().collect();
+                req.sort();
+                let requires = list(req.into_iter().map(|m| CE::atom(m)).collect());
+                // imported macros, so Macro.expand/2 with __ENV__ can expand them
+                let mut imported: Vec<CE> = Vec::new();
+                for imp in &cx.env.imports {
+                    let mut ms: Vec<(String, usize)> = self
+                        .macros
+                        .iter()
+                        .filter(|((m, _, _), d)| m == &imp.module && d.public)
+                        .map(|((_, n, a), _)| (n.clone(), *a))
+                        .filter(|fa| imp.only.as_ref().map_or(true, |o| o.contains(fa)) && !imp.except.contains(fa))
+                        .collect();
+                    if ms.is_empty() {
+                        continue;
+                    }
+                    ms.sort();
+                    ms.dedup();
+                    let pairs = list(ms.into_iter().map(|(n, a)| CE::Tuple(vec![CE::atom(&n), CE::int(a as i64)])).collect());
+                    imported.push(CE::Tuple(vec![CE::atom(&imp.module), pairs]));
+                }
+                let macros = list(imported);
                 return Ok(CE::Struct(
                     "Elixir.Macro.Env".into(),
                     vec![
@@ -332,9 +368,9 @@ impl Expander {
                         (CE::atom("function"), function),
                         (CE::atom("context"), CE::nil()),
                         (CE::atom("aliases"), aliases),
-                        (CE::atom("requires"), empty()),
+                        (CE::atom("requires"), requires),
                         (CE::atom("functions"), empty()),
-                        (CE::atom("macros"), empty()),
+                        (CE::atom("macros"), macros),
                         (CE::atom("context_modules"), empty()),
                     ],
                 ));
@@ -647,6 +683,7 @@ impl Expander {
                 for s in &cx.scopes {
                     for (k, v) in s {
                         if let Some(base) = k.strip_suffix(&suffix) {
+                            self.used_vars.insert(*v);
                             names.retain(|(n, _)| n != base);
                             names.push((base.to_string(), *v));
                         }
@@ -683,6 +720,7 @@ impl Expander {
                         {
                             continue;
                         }
+                        self.used_vars.insert(*v);
                         names.retain(|(n, _)| n != k);
                         names.push((k.clone(), *v));
                     }
@@ -860,6 +898,7 @@ impl Expander {
                 if self
                     .macros
                     .contains_key(&(m.clone(), name.to_string(), args.len()))
+                    && self.required(&m, cx)
                 {
                     return self.expand_macro(&m, name, args, line, cx);
                 }
@@ -970,6 +1009,18 @@ impl Expander {
             ));
         }
         Ok(CE::DynCall(Box::new(CE::atom(m)), name.to_string(), a))
+    }
+
+    /// Whether `M.macro(...)` may expand here. As in Elixir, user code must
+    /// `require` (or `import`, or `use`) a module first; otherwise the call is
+    /// an ordinary remote call, which fails at run time. The bundled library
+    /// and code produced by macros are not checked.
+    fn required(&self, m: &str, cx: &Cx) -> bool {
+        let user = self.mods.get(cx.module()).map(|md| !md.is_prelude).unwrap_or(true);
+        !user
+            || cx.macro_depth > 0
+            || matches!(m, "Elixir.Kernel" | "Elixir.Kernel.SpecialForms")
+            || cx.env.requires.contains(m)
     }
 
     fn macro_target(&self, cx: &Cx, name: &str, arity: usize) -> Option<String> {
@@ -1679,7 +1730,9 @@ impl Expander {
             if let K::Var(v) = &e.k {
                 if let Some(b) = bound {
                     if let Some(id) = b.get(v) {
-                        return Ok(CE::Var(*id));
+                        let id = *id;
+                        self.used_vars.insert(id);
+                        return Ok(CE::Var(id));
                     }
                 }
                 if let Some(id) = self.lookup(cx, v) {
@@ -2105,6 +2158,18 @@ impl Expander {
         if cx.guard {
             return err(cx, line, "if/unless are not allowed in guards");
         }
+        let keys: Vec<String> = args
+            .get(1)
+            .and_then(|kw| kw.as_keyword())
+            .map(|kw| kw.iter().map(|(k, _)| k.to_string()).collect())
+            .unwrap_or_default();
+        let valid = keys.iter().all(|k| k == "do" || k == "else")
+            && keys.iter().filter(|k| *k == "do").count() == 1
+            && keys.iter().filter(|k| *k == "else").count() <= 1;
+        if !keys.is_empty() && !valid {
+            let what = if negate { "unless" } else { "if" };
+            return err(cx, line, &format!("invalid or duplicate keys for {}, only \"do\" and an optional \"else\" are permitted", what));
+        }
         let c = self.expr(&args[0], cx)?;
         let then_e = Self::kw_section(args, "do")
             .cloned()
@@ -2122,8 +2187,10 @@ impl Expander {
     fn clauses_of<'a>(&self, e: &'a E, cx: &Cx, what: &str) -> R<Vec<crate::ast::Clause>> {
         match &e.k {
             K::Clauses(cs) => Ok(cs.clone()),
-            K::Block(b) if b.is_empty() => Ok(vec![]),
-            _ => err(cx, e.line, &format!("expected -> clauses for {}", what)),
+            // `receive do after ... end` has no message clauses; an empty
+            // cond or case is an error, as in Elixir
+            K::Block(b) if b.is_empty() && what == "receive" => Ok(vec![]),
+            _ => err(cx, e.line, &format!("expected -> clauses for :do in \"{}\"", what)),
         }
     }
 
@@ -2131,7 +2198,9 @@ impl Expander {
         let body = Self::kw_section(args, "do")
             .ok_or_else(|| format!("{}:{}: missing do in cond", cx.file(), line))?;
         let cs = self.clauses_of(body, cx, "cond")?;
-        let mut acc = CE::bif("tn_raise_cond_clause", vec![]);
+        // Elixir reports a failed cond at its last clause
+        let last = cs.last().map_or(line, |c| c.line);
+        let mut acc = CE::Bif("__at".into(), vec![CE::int(last as i64), CE::bif("tn_raise_cond_clause", vec![])]);
         for c in cs.iter().rev() {
             if c.args.len() != 1 {
                 return err(cx, c.line, "cond clauses expect exactly one condition");
@@ -2640,10 +2709,15 @@ impl Expander {
                     return Ok(Pat::Lit(Lit::Atom(cx.module().to_string())));
                 }
                 if let Some(v) = b.get(name) {
-                    return Ok(Pat::Eq(*v));
+                    let v = *v;
+                    self.used_vars.insert(v);
+                    return Ok(Pat::Eq(v));
                 }
                 let v = self.new_var();
                 b.insert(name.clone(), v);
+                if !e.gen {
+                    self.track_binding(cx, v, name, line);
+                }
                 Ok(Pat::Bind(v))
             }
             K::Un { op, e: x } if op == "^" => match &x.k {

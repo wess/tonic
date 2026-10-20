@@ -279,11 +279,15 @@ defmodule Tonic.Internal do
   end
 
   def format_exit({kind, stack, main?}, reason) do
+    # Elixir shows the require_file frame only when the script's own code
+    # raised, not code it called
     stack =
-      if main? do
-        stack ++ [{Code, :require_file, 2, [file: ~c"lib/code.ex", line: 1525]}]
-      else
-        stack
+      case stack do
+        [{_, :__FILE__, _, _} | _] when main? ->
+          stack ++ [{Code, :require_file, 2, [file: ~c"lib/code.ex", line: 1525]}]
+
+        _ ->
+          stack
       end
 
     {reason, stack} =

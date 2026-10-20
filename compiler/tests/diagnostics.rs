@@ -90,3 +90,32 @@ IO.inspect(AttributeConsumer.values())
     assert_eq!(stderr.matches("attribute 10").count(), 1, "{stderr}");
     assert_eq!(stderr.matches("attribute 20").count(), 1, "{stderr}");
 }
+
+#[test]
+fn unused_variables_warn_like_elixir() {
+    let output = run_case(
+        "unused",
+        "defmodule U do\n  def a(x, y), do: x\n  def b({p, p}, _skip), do: binding()\n  def c(w) do\n    w = w * 2\n    :ok\n  end\nend\nIO.inspect U.a(1, 2)\n",
+    );
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let unused: Vec<&str> = stderr.lines().filter(|l| l.contains("is unused")).collect();
+    assert_eq!(unused.len(), 2, "{stderr}");
+    assert!(unused[0].contains("unused.exs:2: warning: variable \"y\" is unused (if the variable"), "{stderr}");
+    assert!(unused[1].contains("unused.exs:5: warning: variable \"w\" is unused (there is a variable with the same name"), "{stderr}");
+}
+
+#[test]
+fn invalid_control_flow_is_rejected() {
+    for (name, source, diagnostic) in [
+        ("cond", "cond do end\n", "expected -> clauses for :do in \"cond\""),
+        ("case", "case 1 do end\n", "expected -> clauses for :do in \"case\""),
+        ("ifkeys", "if true, do: 1, foo: 2\n", "invalid or duplicate keys for if"),
+    ] {
+        let output = run_case(name, source);
+        assert!(!output.status.success(), "{name} succeeded");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(diagnostic), "{name}: {stderr}");
+    }
+    assert!(run_case("receive", "IO.inspect(receive do\nafter 0 -> :t\nend)\n").status.success());
+}

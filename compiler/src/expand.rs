@@ -21,6 +21,10 @@ pub struct Expander {
     pub next_lambda: usize,
     pub out: Vec<FunDef>,
     pub warnings: Vec<String>,
+    /// variables the user's own code binds: (id, name, file, line, shadows
+    /// a variable already in scope)
+    pub var_sites: Vec<(VarId, String, String, u32, bool)>,
+    pub used_vars: HashSet<VarId>,
 }
 
 pub struct Cx {
@@ -76,9 +80,32 @@ impl Expander {
             next_lambda: 0,
             out: Vec::new(),
             warnings: c.warnings,
+            var_sites: Vec::new(),
+            used_vars: HashSet::new(),
         };
         e.index_functions();
         e
+    }
+
+    /// Elixir's unused variable warnings, in source order. A clause compiled
+    /// more than once warns only if no copy used the variable.
+    pub fn unused_var_warnings(&mut self) {
+        let mut sites: BTreeMap<(String, u32, String), (bool, bool)> = BTreeMap::new();
+        for (id, name, file, line, shadows) in &self.var_sites {
+            let site = sites.entry((file.clone(), *line, name.clone())).or_insert((false, *shadows));
+            site.0 |= self.used_vars.contains(id);
+        }
+        for ((file, line, name), (used, shadows)) in sites {
+            if used {
+                continue;
+            }
+            let hint = if shadows {
+                "there is a variable with the same name in the context, use the pin operator (^) to match on it or prefix this variable with underscore if it is not meant to be used"
+            } else {
+                "if the variable is not meant to be used, prefix it with an underscore"
+            };
+            self.warnings.push(format!("{}:{}: warning: variable \"{}\" is unused ({})", file, line, name, hint));
+        }
     }
 
     pub fn new_var(&mut self) -> VarId {
@@ -201,6 +228,7 @@ impl Expander {
             aliases: HashMap::new(),
             imports: vec![],
             file: m.file.clone(),
+            requires: HashSet::new(),
         });
         // Group clauses by name/arity preserving order.
         let mut order: Vec<(String, usize)> = Vec::new();
@@ -296,9 +324,11 @@ impl Expander {
             let clauses = groups.remove(&k).unwrap();
             let n_out = self.out.len();
             let saved_warnings = self.warnings.len();
+            let saved_sites = self.var_sites.len();
             if self.expand_function(&m.name, &k.0, k.1, clauses).is_err() {
                 self.out.truncate(n_out);
                 self.warnings.truncate(saved_warnings);
+                self.var_sites.truncate(saved_sites);
             }
         }
     }
@@ -805,6 +835,7 @@ impl Expander {
                 aliases: HashMap::new(),
                 imports: vec![],
                 file: "<script>".into(),
+                requires: HashSet::new(),
             });
         let mut cx = Cx::new(env0, "__script__/0");
         let mut body = Vec::new();

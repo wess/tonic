@@ -65,12 +65,11 @@ These differ from Elixir 1.18 / OTP 27 in this release. Each is either intention
 
 - Redefining a module (a second `defmodule` with the same name) is a compile error; Elixir replaces the module at run time.
 - `:erlang.phash2/1,2` uses a different hash function. Values are stable within Tonic but differ from the BEAM, so do not persist or share them between the two.
-- `Macro.expand/2` and `Macro.expand_once/2` expand aliases and remote user macros (`M.macro(...)`), but not Kernel macros such as `if` and `|>`, imported macros called without their module, or `defguard` guards.
+- `Macro.expand/2` and `Macro.expand_once/2` expand aliases, user macros (remote, and imported ones when given `__ENV__`) and the Kernel macros `if`, `unless`, `&&`, `||`, `!`, `|>`, `is_nil`, `then`, `tap`, `to_string`, `to_charlist` and `match?`. Other Kernel macros and `defguard` guards are returned unexpanded.
 - `URI.new/1` and `:uri_string.parse/1` accept some malformed URIs the BEAM rejects (for example a space in the host) and reject some it accepts.
-- `@moduledoc` and `@doc` read inside a function body return `nil`.
 - `:calendar.system_time_to_rfc3339/1,2` and `:calendar.rfc3339_to_system_time/1,2` are not implemented.
-- Compiler warnings for unused variables, ungrouped clauses and duplicate map keys are not emitted, and some invalid programs Elixir rejects (a macro called without `require`, `cond do end`) are accepted.
-- Runtime stack traces can omit or misreport line numbers inside functions.
+- Unused variable warnings are emitted for code you write, but not for variables inside code a dependency's macro generates (for example the body of a `Plug.Router` route). Warnings for ungrouped clauses and duplicate map keys are not emitted, and some invalid programs Elixir rejects are still accepted.
+- Stack trace frames for anonymous functions inside `with ... else` and other inlined code are named after the enclosing function, where the BEAM names a generated function such as `-w/1-fun-0-`.
 - A `quote` of a sigil omits the `delimiter:` metadata.
 - `:atomics` and `:counters` arrays are never freed.
 - `:zlib` is not available.

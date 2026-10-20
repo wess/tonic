@@ -59,3 +59,17 @@ true
 {[cb: 1], Regressions.Second}
 ArgumentError
 [ArgumentError, [{1, 1}], ArgumentError]
+{{"module docs", "f docs"}, nil}
+[
+  {"case a do\n  x when Kernel.in(x, [false, nil]) -> b\n  _ -> nil\nend",
+   "if a do\n  nil\nelse\n  b\nend"},
+  {"g(x |> f(), 1)", "g(x |> f(), 1)"},
+  {"case a do\n  x when Kernel.in(x, [false, nil]) -> b\n  x -> x\nend",
+   "case a do\n  x when Kernel.in(x, [false, nil]) -> b\n  x -> x\nend"},
+  {"case a do\n  x when Kernel.in(x, [false, nil]) -> true\n  _ -> false\nend",
+   "case a do\n  x when Kernel.in(x, [false, nil]) -> true\n  _ -> false\nend"},
+  {"String.upcase(\"x\")", "String.upcase(\"x\")"}
+]
+"Y"
+{MatchError, [{Regressions.Third, :line, 1, 257}]}
+{ArgumentError, [{:erlang, :abs, 1, nil}]}

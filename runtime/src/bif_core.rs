@@ -34,7 +34,8 @@ macro_rules! arith2 {
 arith2!(tn_add, num::add, "+");
 arith2!(tn_sub, num::sub, "-");
 arith2!(tn_mul, num::mul, "*");
-arith2!(tn_fdiv, num::fdiv, "/");
+// `/` is compiled inline on the BEAM and fails without an :erlang frame
+arith2!(tn_fdiv, num::fdiv, "");
 arith2!(tn_div, num::idiv, "div");
 arith2!(tn_rem, num::irem, "rem");
 arith2!(tn_floor_div, num::floor_div, "");
@@ -57,7 +58,8 @@ pub extern "C" fn tn_pos(c: *mut Ctx, a: Term) -> Term {
 #[no_mangle]
 pub extern "C" fn tn_abs(c: *mut Ctx, a: Term) -> Term {
     let ctx = cx(c);
-    num::abs(ctx, a).unwrap_or_else(|_| ctx.badarith())
+    // abs/1 is a BIF: a non-number is a badarg, not badarith
+    num::abs(ctx, a).unwrap_or_else(|_| ctx.badarg_args(&[(1, "not a number")]))
 }
 
 macro_rules! bitop {

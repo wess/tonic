@@ -1340,6 +1340,7 @@ impl<'a> FnGen<'a> {
                 self.pattern(p, &o, &fail);
                 self.br(&ok);
                 self.block(&fail);
+                self.store_line_for_raise();
                 let v = self.load(&o);
                 let r = self.t();
                 self.emit(&format!("{} = call i64 @tn_raise_match(ptr %ctx, i64 {})", r, v));
@@ -1381,6 +1382,15 @@ impl<'a> FnGen<'a> {
             }
             CE::Receive(clauses, after) => self.receive(clauses, after, tail),
             CE::Try(t) => self.try_expr(t, tail),
+        }
+    }
+
+    /// The line of a failing match or case, written on the raising branch
+    /// only: that branch leaves through the exception path, so the line
+    /// recorded for the code that continues is unchanged.
+    fn store_line_for_raise(&mut self) {
+        if let Some(&l) = self.line_stack.last() {
+            self.emit(&format!("store i64 {}, ptr %fr.l", l));
         }
     }
 
@@ -1846,6 +1856,7 @@ impl<'a> FnGen<'a> {
                     Fail::WithClause => "tn_raise_with_clause",
                     _ => "tn_raise_try_clause",
                 };
+                self.store_line_for_raise();
                 let v = self.load(&sops[0]);
                 self.emit(&format!("{} = call i64 @{}(ptr %ctx, i64 {})", r, f, v));
             }

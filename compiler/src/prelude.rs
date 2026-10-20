@@ -82,6 +82,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("ex/json.ex", include_str!("../../lib/ex/json.ex")),
     ("erl/elixir_json.erl", include_str!("../../lib/erl/elixir_json.erl")),
     ("macro.ex", include_str!("../../lib/macro.ex")),
+    ("kernelmacros.ex", include_str!("../../lib/kernelmacros.ex")),
     ("ex/macro.ex", include_str!("../../lib/ex/macro.ex")),
     ("ex/code_normalizer.ex", include_str!("../../lib/ex/code_normalizer.ex")),
     ("ex/code_formatter.ex", include_str!("../../lib/ex/code_formatter.ex")),

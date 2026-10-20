@@ -499,7 +499,7 @@ fn expand_context(
         eprintln!("EXPANDED {}", src);
     }
     let padded = format!("{}{}", "\n".repeat(line.saturating_sub(1) as usize), src);
-    let es = crate::parser::parse_source(&padded, file)
+    let es = parse_generated(&padded, file)
         .map_err(|e| format!("{} (in the expansion of {}.{}: {})", e, module, name, src))?;
     // Like quoted code in Elixir, the expansion takes the caller's line; the
     // macro host records what the expansion defines under that line too.
@@ -519,6 +519,18 @@ fn relined(e: &E, line: u32) -> E {
         }
     });
     out.line = line;
+    out.gen = true;
+    out
+}
+
+/// The host's expansions, marked as generated code.
+fn parse_generated(source: &str, file: &str) -> Result<Vec<E>, String> {
+    Ok(crate::parser::parse_source(source, file)?.iter().map(generated).collect())
+}
+
+fn generated(e: &E) -> E {
+    let mut out = crate::collect::map_expr(e, &mut |node| if std::ptr::eq(node, e) { None } else { Some(generated(node)) });
+    out.gen = true;
     out
 }
 
@@ -546,7 +558,7 @@ pub fn derive(implementation: &str, module: &str, options: &E, file: &str, line:
     text.push_str(&format!(", {}}}", line));
     let source = request("DERIVE", &text)
         .map_err(|error| format!("{}:{}: deriving {} failed:\n{}", file, line, implementation, error))?;
-    let es = crate::parser::parse_source(&source, file)?;
+    let es = parse_generated(&source, file)?;
     let es: Vec<E> = es.iter().map(|e| relined(e, line)).collect();
     Ok(E::new(K::Block(es), line))
 }
@@ -571,7 +583,7 @@ fn definitions_request(module: &str, file: &str, first: u32, last: u32, allow_em
     text.push_str(&format!(", {}, {}, {}}}", first, last, allow_empty));
     let source = request("DEFINITIONS", &text)
         .map_err(|error| format!("{}:{}: generated definitions failed: {}", file, first, error))?;
-    Ok(E::new(K::Block(crate::parser::parse_source(&source, file)?), first))
+    Ok(E::new(K::Block(parse_generated(&source, file)?), first))
 }
 
 /// Captures the value of an attribute at its original declaration, without
@@ -597,7 +609,7 @@ pub fn attribute_value(module: &str, name: &str, file: &str, line: u32, occurren
     if std::env::var("TONIC_DBG").is_ok() {
         eprintln!("ATTRIBUTE {} {}:{} @{} #{} => {}", module, file, line, name, occurrence, source);
     }
-    let mut values = crate::parser::parse_source(&source, file)?;
+    let mut values = parse_generated(&source, file)?;
     if values.len() != 1 {
         return Err(format!(
             "{}:{}: invalid compile-time attribute value",
@@ -621,7 +633,7 @@ pub fn evaluate(expression: &E, file: &str, line: u32) -> R<E> {
             file, line, error
         )
     })?;
-    let mut expressions = crate::parser::parse_source(&source, file)?;
+    let mut expressions = parse_generated(&source, file)?;
     if expressions.len() != 1 {
         return Err(format!("{}:{}: invalid compile-time value", file, line));
     }
@@ -654,7 +666,7 @@ pub fn callback_attributes(module: &str, file: &str, line: u32) -> R<E> {
             file, line, module, e
         )
     })?;
-    let mut es = crate::parser::parse_source(&src, file)?;
+    let mut es = parse_generated(&src, file)?;
     if es.len() != 1 {
         return Err(format!(
             "{}:{}: invalid attributes from macro host",
@@ -674,7 +686,7 @@ pub fn callback_expansions(module: &str, file: &str, line: u32) -> R<E> {
             file, line, module, e
         )
     })?;
-    let es = crate::parser::parse_source(&src, file)?;
+    let es = parse_generated(&src, file)?;
     Ok(E::new(K::Block(es), line))
 }
 

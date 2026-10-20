@@ -232,3 +232,36 @@ private = :ets.new(:private, [:private])
 :ets.insert(protected, {1, 1})
 other = fn f -> spawn(fn -> send(owner, {:r, (try do f.() rescue e -> e.__struct__ end)}) end); receive do {:r, r} -> r end end
 IO.inspect([other.(fn -> :ets.insert(protected, {2}) end), other.(fn -> :ets.lookup(protected, 1) end), other.(fn -> :ets.lookup(private, 1) end)])
+
+defmodule Regressions.Docs do
+  @moduledoc "module docs"
+  @doc "f docs"
+  def f, do: {@moduledoc, @doc}
+  def g, do: @doc
+end
+
+defmodule Regressions.Expand do
+  defmacro up(x), do: quote(do: String.upcase(unquote(x)))
+end
+
+defmodule Regressions.Third do
+  import Regressions.Expand
+  def expansions do
+    env = __ENV__
+    for q <- [quote(do: unless(a, do: b)), quote(do: x |> f() |> g(1)), quote(do: a || b), quote(do: !a), quote(do: up("x"))] do
+      {Macro.to_string(Macro.expand(q, env)), Macro.to_string(Macro.expand_once(q, env))}
+    end
+  end
+  def unrequired, do: Regressions.Expand.up("y")
+  def line(x) do
+    {a, b} = x
+    a + b
+  end
+end
+
+trace = fn f -> try do f.() rescue e -> {e.__struct__, Enum.map(Enum.take(__STACKTRACE__, 1), fn {m, f, a, l} -> {m, f, if(is_list(a), do: length(a), else: a), l[:line]} end)} end end
+IO.inspect({Regressions.Docs.f(), Regressions.Docs.g()})
+IO.inspect(Regressions.Third.expansions())
+IO.inspect(trace.(fn -> Regressions.Third.unrequired() end))
+IO.inspect(trace.(fn -> Regressions.Third.line({1, 2, 3}) end))
+IO.inspect(trace.(fn -> abs(:a) end))

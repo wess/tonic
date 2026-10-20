@@ -27,11 +27,11 @@ Known differences are listed in docs/compatibility.md. In priority order:
   linked (hello world is ~4.5 MB); make regex and exception formatting
   reachable only when used.
 - [ ] Match OTP's `:erlang.phash2/1,2`.
-- [ ] Expand Kernel macros in `Macro.expand/2`; read `@moduledoc`/`@doc` in
-  function bodies; port `:calendar` RFC 3339 functions.
+- [ ] Port `:calendar` RFC 3339 functions.
 - [ ] Match `URI.new/1` / `:uri_string.parse/1` validation.
-- [ ] Emit Elixir's compile warnings (unused variables, ungrouped clauses) and
-  reject the invalid programs still accepted; fix runtime stack trace lines.
+- [ ] Emit the remaining compile warnings (ungrouped clauses, duplicate map
+  keys, unused variables in dependency macro output) and reject the invalid
+  programs still accepted.
 
 ## Source compatibility
 

@@ -21,6 +21,8 @@ pub struct ModEnv {
     pub aliases: HashMap<String, String>,
     pub imports: Vec<Import>,
     pub file: String,
+    /// Modules whose macros may be called remotely (`require`, `import`, `use`).
+    pub requires: HashSet<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -167,6 +169,7 @@ impl Collector {
             aliases: HashMap::new(),
             imports: Vec::new(),
             file: file.to_string(),
+            requires: HashSet::new(),
         };
         let mut attrs: HashMap<String, E> = HashMap::new();
         for e in es {
@@ -396,9 +399,15 @@ impl Collector {
                     }
                 }
                 env.imports.retain(|i| i.module != imp.module);
+                env.requires.insert(imp.module.clone());
                 env.imports.push(imp);
             }
             "require" => {
+                if let K::Alias(a) = &args[0].k {
+                    env.requires.insert(resolve_alias(env, a));
+                } else if let K::Atom(m) = &args[0].k {
+                    env.requires.insert(m.clone());
+                }
                 if let Some(opts) = args.get(1) {
                     if let (K::Alias(a), Some(E { k: K::Alias(n), .. })) =
                         (&args[0].k, opts.kw_get("as"))
@@ -520,6 +529,7 @@ impl Collector {
                     aliases: outer.aliases.clone(),
                     imports: outer.imports.clone(),
                     file: file.clone(),
+                    requires: outer.requires.clone(),
                 };
                 let mut mattrs = attrs.clone();
                 mattrs.retain(|_, _| false);
@@ -544,6 +554,7 @@ impl Collector {
                     aliases: outer.aliases.clone(),
                     imports: outer.imports.clone(),
                     file: file.clone(),
+                    requires: outer.requires.clone(),
                 };
                 let pattrs: HashMap<String, E> = HashMap::new();
                 for s in stmts {
@@ -619,6 +630,7 @@ impl Collector {
                         aliases: outer.aliases.clone(),
                         imports: outer.imports.clone(),
                         file: file.clone(),
+                        requires: outer.requires.clone(),
                     };
                     let mut mattrs: HashMap<String, E> = HashMap::new();
                     mattrs.insert("for".into(), E::atom(&f, e.line));
@@ -1162,6 +1174,8 @@ impl Collector {
                         return Err(format!("{}:{}: invalid def", env.file, line));
                     }
                     self.add_def(module, name, args, env, attrs, line)?;
+                    // @doc belongs to the definition that follows it
+                    attrs.remove("doc");
                     if !self.prelude && attrs.contains_key("\u{0}on_definition") {
                         let snapshot =
                             crate::macrohost::callback_attributes(module, &env.file, line)?;
@@ -1349,6 +1363,7 @@ impl Collector {
                         _ => return Err(format!("{}:{}: invalid use", env.file, line)),
                     };
                     let opts = args.get(1).cloned();
+                    env.requires.insert(target.clone());
                     self.do_use(module, &target, opts, env, attrs, line)?;
                 }
                 "Module" => {}
@@ -1475,6 +1490,14 @@ impl Collector {
                         0
                     };
                     match name.as_str() {
+                        // documentation text is readable as @doc / @moduledoc; a
+                        // keyword list (`since: ...`) is metadata and keeps the text
+                        "doc" | "moduledoc" | "typedoc"
+                            if args.len() == 1
+                                && matches!(&args[0].k, K::Str(_) | K::Sigil { .. } | K::Atom(_)) =>
+                        {
+                            attrs.insert(name.clone(), args[0].clone());
+                        }
                         "doc" | "moduledoc" | "spec" | "impl" | "type" | "typep" | "opaque"
                         | "typedoc" | "since" | "deprecated" | "behaviour" | "dialyzer"
                         | "optional_callbacks" | "external_resource" | "vsn" => {}
@@ -2247,7 +2270,7 @@ pub fn map_expr(e: &E, f: &mut dyn FnMut(&E) -> Option<E>) -> E {
         }
         other => other.clone(),
     };
-    E { k, line }
+    E { k, line, gen: e.gen }
 }
 
 fn map_parts(ps: &[IPart], f: &mut dyn FnMut(&E) -> Option<E>) -> Vec<IPart> {

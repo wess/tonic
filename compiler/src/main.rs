@@ -247,6 +247,7 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
     let mut ex = expand::Expander::new(c);
     ex.consolidated = !o.inputs.iter().any(|f| f.ends_with(".exs"));
     let r = ex.run(script);
+    ex.unused_var_warnings();
     for w in &ex.warnings {
         if !w.contains("<prelude>") || o.verbose {
             eprintln!("{}", w);

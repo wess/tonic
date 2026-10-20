@@ -344,6 +344,8 @@ pub fn erl_origin(sym: &str) -> Option<(&'static str, &'static str)> {
                 && !m.starts_with("Elixir.")
                 && *m != "tonic"
                 && !matches!(*n, "error" | "exit" | "throw" | "raise" | "nif_error" | "halt" | "apply")
+                // compiled inline on the BEAM: fails without a frame of its own
+                && *n != "/"
         })
         .map(|(m, n, _, _, _)| (*m, *n))
 }

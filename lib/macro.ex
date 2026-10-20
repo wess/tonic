@@ -69,7 +69,16 @@ defmodule Macro.Env do
 
     case Enum.find(candidates, &Tonic.Eval.Modules.macro?(&1, name, arity, &1 == env.module)) do
       nil ->
-        if function_exported?(Kernel, name, arity), do: {:function, Kernel, name}, else: {:error, :not_found}
+        cond do
+          Tonic.KernelMacros.macro?(name, arity) ->
+            {:macro, Kernel, fn _meta, args -> Tonic.KernelMacros.expand(name, args) end}
+
+          function_exported?(Kernel, name, arity) ->
+            {:function, Kernel, name}
+
+          true ->
+            {:error, :not_found}
+        end
 
       mod ->
         {:macro, mod, fn _meta, args -> Tonic.Eval.Modules.call_macro(mod, name, args, env) end}
@@ -77,6 +86,14 @@ defmodule Macro.Env do
   end
 
   def expand_require(env, _meta, module, name, arity, _opts \\ []) do
+    if module == Kernel and Tonic.KernelMacros.macro?(name, arity) do
+      {:macro, Kernel, fn _meta, args -> Tonic.KernelMacros.expand(name, args) end}
+    else
+      expand_registered_require(env, module, name, arity)
+    end
+  end
+
+  defp expand_registered_require(env, module, name, arity) do
     if Tonic.Eval.Modules.macro?(module, name, arity) do
       {:macro, module, fn _meta, args -> Tonic.Eval.Modules.call_macro(module, name, args, env) end}
     else

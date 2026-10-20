@@ -4,6 +4,8 @@
 pub struct E {
     pub k: K,
     pub line: u32,
+    /// produced by a macro expansion rather than written by the user
+    pub gen: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -88,7 +90,7 @@ pub enum K {
 
 impl E {
     pub fn new(k: K, line: u32) -> E {
-        E { k, line }
+        E { k, line, gen: false }
     }
     pub fn atom(s: &str, line: u32) -> E {
         E::new(K::Atom(s.to_string()), line)
