@@ -30,9 +30,9 @@ Known differences are listed in docs/compatibility.md. In priority order:
   reachable only when used.
 - [ ] Make `:calendar.local_time_to_universal_time/1` use the offset in effect
   at that local time, as the BEAM does.
-- [ ] Emit the remaining compile warnings (ungrouped clauses, duplicate map
-  keys, unused variables in dependency macro output) and reject the invalid
-  programs still accepted.
+- [ ] Emit Elixir's remaining compile warnings (unused functions, aliases and
+  imports, deprecations, type checking) and reject the invalid programs still
+  accepted.
 
 ## Source compatibility
 

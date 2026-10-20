@@ -43,6 +43,28 @@ impl Expander {
         None
     }
 
+    /// Elixir's warning for a literal key given twice in one map expression.
+    fn warn_duplicate_keys(&mut self, pairs: &[(E, E)], line: u32, cx: &Cx) {
+        let user = self.mods.get(cx.module()).map(|md| !md.is_prelude).unwrap_or(true);
+        if !user || line == 0 || cx.macro_depth > 0 {
+            return;
+        }
+        let mut seen: Vec<String> = Vec::new();
+        let mut warned: Vec<String> = Vec::new();
+        for (k, _) in pairs {
+            if k.gen {
+                return;
+            }
+            if let Some(key) = literal_key(k) {
+                if seen.contains(&key) && !warned.contains(&key) {
+                    self.warnings.push(format!("{}:{}: warning: key {} will be overridden in map", cx.file(), line, key));
+                    warned.push(key.clone());
+                }
+                seen.push(key);
+            }
+        }
+    }
+
     /// Bindings written by the user, outside macro expansions and dependencies
     /// (whose warnings Elixir shows only when compiling them).
     fn track_binding(&mut self, cx: &Cx, v: VarId, name: &str, line: u32) {
@@ -189,6 +211,7 @@ impl Expander {
                 Ok(acc)
             }
             K::Map(pairs) => {
+                self.warn_duplicate_keys(pairs, line, cx);
                 let flat: Vec<E> = pairs
                     .iter()
                     .flat_map(|(k, v)| [k.clone(), v.clone()])
@@ -201,6 +224,7 @@ impl Expander {
                 Ok(CE::Map(ps))
             }
             K::MapUpd(base, pairs) => {
+                self.warn_duplicate_keys(pairs, line, cx);
                 let b = self.expr(base, cx)?;
                 let mut ps = Vec::new();
                 for (k, v) in pairs {
@@ -3802,5 +3826,18 @@ fn size_only(seg: &E) -> E {
         ),
         _ if literal(seg) => wild(seg.line),
         _ => seg.clone(),
+    }
+}
+
+/// A map key that is a literal in quoted form, printed as `inspect` would.
+fn literal_key(e: &E) -> Option<String> {
+    match &e.k {
+        K::Int(n) => n.replace('_', "").parse::<i128>().ok().map(|v| v.to_string()),
+        K::Float(f) => Some(format!("{:?}", f)),
+        K::Atom(a) if a.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '?' || c == '!') => Some(format!(":{}", a)),
+        K::Str(b) => std::str::from_utf8(b).ok().filter(|t| !t.contains(['"', '\\', '#'])).map(|t| format!("\"{}\"", t)),
+        K::List(items, None) => items.iter().map(literal_key).collect::<Option<Vec<_>>>().map(|v| format!("[{}]", v.join(", "))),
+        K::Tuple(items) if items.len() == 2 => items.iter().map(literal_key).collect::<Option<Vec<_>>>().map(|v| format!("{{{}}}", v.join(", "))),
+        _ => None,
     }
 }

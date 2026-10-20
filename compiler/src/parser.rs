@@ -951,7 +951,10 @@ impl Parser {
                     if self.at_op(",") {
                         self.next();
                     }
-                    self.expect_op("]")?;
+                    if !self.at_op("]") {
+                        return self.err("unexpected expression after keyword list. Keyword lists must always come last in lists and maps");
+                    }
+                    self.next();
                     break;
                 }
                 let mut e = self.parse_expr(41, false)?;
@@ -1025,6 +1028,7 @@ impl Parser {
                 }
             }
         }
+        let mut keywords = false;
         loop {
             if self.at_op("}") {
                 self.next();
@@ -1034,7 +1038,11 @@ impl Parser {
                 let t = self.next();
                 let v = self.parse_expr(0, false)?;
                 pairs.push((E::atom(&k, t.line), v));
+                keywords = true;
             } else {
+                if keywords {
+                    return self.err("unexpected expression after keyword list. Keyword lists must always come last in lists and maps");
+                }
                 let k = self.parse_expr(51, false)?;
                 let v = if matches!(&k.k, K::Call { name, args, .. } if name == "unquote_splicing" && args.len() == 1)
                     && !self.at_op("=>")

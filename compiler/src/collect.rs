@@ -864,6 +864,21 @@ impl Collector {
             is_macro,
             super_target,
         };
+        let m = self.mods.get_mut(module).unwrap();
+        // Elixir's warning for a name/arity whose clauses are split by another
+        // definition; generated code (macro output) is exempt.
+        if !m.is_prelude && !args[0].gen {
+            let split = m.defs.last().map_or(false, |last| last.name != d.name || last.arity != d.arity);
+            if let Some(first) = m.defs.iter().find(|o| o.name == d.name && o.arity == d.arity) {
+                if split {
+                    let warning = format!(
+                        "{}:{}: warning: clauses with the same name and arity (number of arguments) should be grouped together, \"{} {}/{}\" was previously defined ({}:{})",
+                        env.file, line, kind, d.name, d.arity, env.file, first.line
+                    );
+                    self.warnings.push(warning);
+                }
+            }
+        }
         self.mods.get_mut(module).unwrap().defs.push(d);
         Ok(())
     }

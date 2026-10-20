@@ -248,7 +248,18 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
     ex.consolidated = !o.inputs.iter().any(|f| f.ends_with(".exs"));
     let r = ex.run(script);
     ex.unused_var_warnings();
-    for w in &ex.warnings {
+    // source order, whichever phase found them
+    let position = |w: &String| -> (String, u32) {
+        let mut parts = w.splitn(3, ':');
+        match (parts.next(), parts.next().and_then(|l| l.parse().ok())) {
+            (Some(file), Some(line)) => (file.to_string(), line),
+            _ => (String::new(), 0),
+        }
+    };
+    let mut warnings = ex.warnings.clone();
+    warnings.sort_by_key(position);
+    let mut shown = std::collections::HashSet::new();
+    for w in warnings.iter().filter(|w| shown.insert(w.as_str())) {
         if !w.contains("<prelude>") || o.verbose {
             eprintln!("{}", w);
         }

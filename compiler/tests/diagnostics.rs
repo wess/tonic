@@ -165,3 +165,23 @@ receive do: ({:DOWN, ^ref, _, _, reason} -> IO.inspect reason)
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn ungrouped_clauses_and_duplicate_keys_warn_like_elixir() {
+    let output = run_case(
+        "grouping",
+        "defmodule G do\n  def f(1), do: 1\n  def g, do: %{a: 1, a: 2}\n  def f(2), do: %{\"x\" => 1, \"x\" => 2, {:t} => 1, {:t} => 2}\nend\nIO.inspect G.f(1)\n",
+    );
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let warnings: Vec<&str> = stderr.lines().filter(|l| l.contains("warning:")).collect();
+    assert_eq!(warnings.len(), 3, "{stderr}");
+    assert!(warnings[0].contains("grouping.exs:3: warning: key :a will be overridden in map"), "{stderr}");
+    assert!(warnings[1].contains("grouping.exs:4: warning: clauses with the same name and arity (number of arguments) should be grouped together, \"def f/1\" was previously defined ("), "{stderr}");
+    assert!(warnings[2].contains("grouping.exs:4: warning: key \"x\" will be overridden in map"), "{stderr}");
+    for (name, source) in [("kwmap", "x = 1\nIO.inspect %{b: 2, x => 1}\n"), ("kwlist", "IO.inspect [a: 1, :b]\n")] {
+        let output = run_case(name, source);
+        assert!(!output.status.success(), "{name} succeeded");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Keyword lists must always come last"), "{name}");
+    }
+}
