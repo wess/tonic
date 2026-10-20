@@ -549,6 +549,13 @@ fn finish_process(ctx: &mut Ctx, r: Term, is_main: bool) {
                 let msg = crate::bif_misc::format_exit_message_x(ctx, kind, rs, true);
                 crate::io::stdout_flush();
                 eprintln!("{}", msg);
+            } else {
+                // killed by an exit signal: formatting runs Elixir code, which
+                // must not unwind as the dying process
+                let reason = std::mem::replace(&mut ctx.kill_reason, 0);
+                let msg = crate::bif_misc::format_signal_exit(ctx, reason);
+                crate::io::stdout_flush();
+                eprintln!("{}\n", msg);
             }
             crate::io::stdout_flush();
             std::process::exit(1);

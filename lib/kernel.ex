@@ -278,6 +278,9 @@ defmodule Tonic.Internal do
     {:__block__, [], assignments ++ [body]}
   end
 
+  # the main process killed by an exit signal
+  def format_exit({:signal, pid}, reason), do: "** (EXIT from #{inspect(pid)}) " <> Exception.format_exit(reason)
+
   def format_exit({kind, stack, main?}, reason) do
     # Elixir shows the require_file frame only when the script's own code
     # raised, not code it called

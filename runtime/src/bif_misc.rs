@@ -305,6 +305,29 @@ pub fn format_exit_message_x(ctx: &mut Ctx, kind: Term, reason: Term, main: bool
     }
 }
 
+/// The banner Elixir prints when the main process dies from an exit signal:
+/// `** (EXIT from #PID<...>) reason`.
+pub fn format_signal_exit(ctx: &mut Ctx, reason: Term) -> String {
+    let fallback = |ctx: &Ctx, reason: Term| format!("** (EXIT from #PID<0.{}.0>) {}", ctx.pid(), debug_term(reason));
+    let Some(fp) = crate::sched::lookup_fun(atom(a::TONIC_INTERNAL), atom(a::FORMAT_EXIT), 2) else {
+        return fallback(ctx, reason);
+    };
+    let base = ctx.roots.len();
+    ctx.roots.push(reason);
+    let signal = atoms::intern("signal");
+    let me = pid(ctx.pid());
+    let k = ctx.tuple(&[atom(signal), me]);
+    let args = [k, ctx.roots[base]];
+    let r = unsafe { crate::sched::tonic_call_fnptr(ctx, fp as *const std::ffi::c_void, 2, args.as_ptr()) };
+    let reason = ctx.roots[base];
+    ctx.roots.truncate(base);
+    if r != NONE && is_binary(r) {
+        String::from_utf8_lossy(bin_bytes(r)).into_owned()
+    } else {
+        fallback(ctx, reason)
+    }
+}
+
 /// Minimal term printer for diagnostics.
 pub fn debug_term(t: Term) -> String {
     if is_small(t) {

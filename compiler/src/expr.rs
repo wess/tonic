@@ -233,6 +233,7 @@ impl Expander {
                 Ok(CE::MapUpdate(Box::new(b), ps, true))
             }
             K::Struct { name, base, pairs } => {
+                self.warn_duplicate_keys(pairs, line, cx);
                 self.struct_expr(name, base.as_deref(), pairs, line, cx)
             }
             K::Bits(segs) => {
@@ -2297,7 +2298,14 @@ impl Expander {
     fn try_expr(&mut self, args: &[E], line: u32, cx: &mut Cx) -> R<CE> {
         let kw = &args[0];
         if !["rescue", "catch", "after"].iter().any(|k| kw.kw_get(k).is_some()) {
-            return err(cx, line, "missing :catch/:rescue/:after option in \"try\"");
+            if kw.kw_get("else").is_none() {
+                return err(cx, line, "missing :catch/:rescue/:after option in \"try\"");
+            }
+            self.warnings.push(format!(
+                "{}:{}: warning: \"else\" shouldn't be used as the only clause in \"try\", use \"case\" instead",
+                cx.file(),
+                line
+            ));
         }
         let body_e = kw.kw_get("do").cloned().unwrap_or(E::nil(line));
         let body = self.body(&body_e, cx)?;
@@ -2376,6 +2384,9 @@ impl Expander {
             if let Some(v) = var {
                 if v != "_" {
                     let id = s.new_var();
+                    if !c.args[0].gen {
+                        s.track_binding(cx, id, &v, c.args[0].line);
+                    }
                     cx.scopes.last_mut().unwrap().insert(v, id);
                     body_parts.push(CE::Match(
                         Pat::Bind(id),
@@ -2932,6 +2943,15 @@ impl Expander {
                 Ok(Pat::Map(ps))
             }
             K::Map(pairs) => {
+                let mut seen: Vec<String> = Vec::new();
+                for (k, _) in pairs {
+                    if let Some(key) = literal_key(k) {
+                        if seen.contains(&key) {
+                            return err(cx, line, &format!("key {} will be overridden in map", key));
+                        }
+                        seen.push(key);
+                    }
+                }
                 let mut ps = Vec::new();
                 for (k, v) in pairs {
                     let kc = self.pat_key(k, cx)?;
@@ -3837,7 +3857,13 @@ fn literal_key(e: &E) -> Option<String> {
     match &e.k {
         K::Int(n) => n.replace('_', "").parse::<i128>().ok().map(|v| v.to_string()),
         K::Float(f) => Some(format!("{:?}", f)),
+        K::Atom(a) if matches!(a.as_str(), "nil" | "true" | "false") => Some(a.clone()),
         K::Atom(a) if a.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '?' || c == '!') => Some(format!(":{}", a)),
+        K::Sigil { ch: 's' | 'S', parts, mods } if mods.is_empty() => match parts.as_slice() {
+            [crate::ast::IPart::Lit(b)] => literal_key(&E::new(K::Str(b.clone()), e.line)),
+            [] => Some("\"\"".into()),
+            _ => None,
+        },
         K::Str(b) => std::str::from_utf8(b).ok().filter(|t| !t.contains(['"', '\\', '#'])).map(|t| format!("\"{}\"", t)),
         K::List(items, None) => items.iter().map(literal_key).collect::<Option<Vec<_>>>().map(|v| format!("[{}]", v.join(", "))),
         K::Tuple(items) if items.len() == 2 => items.iter().map(literal_key).collect::<Option<Vec<_>>>().map(|v| format!("{{{}}}", v.join(", "))),

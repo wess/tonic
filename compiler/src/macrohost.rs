@@ -528,7 +528,7 @@ fn parse_generated(source: &str, file: &str) -> Result<Vec<E>, String> {
     Ok(crate::parser::parse_source(source, file)?.iter().map(generated).collect())
 }
 
-fn generated(e: &E) -> E {
+pub(crate) fn generated(e: &E) -> E {
     let mut out = crate::collect::map_expr(e, &mut |node| if std::ptr::eq(node, e) { None } else { Some(generated(node)) });
     out.gen = true;
     out

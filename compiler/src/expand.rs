@@ -247,7 +247,9 @@ impl Expander {
         for k in &order {
             let clauses = groups.remove(k).unwrap();
             let first = clauses[0].clone();
+            let sites = self.var_sites.len();
             if let Err(e) = self.expand_function(name, &k.0, k.1, clauses) {
+                self.var_sites.truncate(sites);
                 if m.hoisted {
                     // Elixir compiles such modules when the enclosing code
                     // runs; surface the error then instead of failing the build.
@@ -399,7 +401,17 @@ impl Expander {
         // Wrappers for default arguments.
         let ndef = defaults.iter().filter(|d| d.is_some()).count();
         let required = arity - ndef;
+        let user = self.mods.get(module).map_or(false, |m| !m.is_prelude);
         for k in required..arity {
+            if user {
+                if let Some(other) = self.mods[module].defs.iter().find(|d| d.name == name && d.arity == k && !d.is_macro) {
+                    let kind = if other.public { "def" } else { "defp" };
+                    return Err(format!(
+                        "{}:{}: {} {}/{} conflicts with defaults from {}/{}",
+                        env0.file, other.line, kind, name, k, name, arity
+                    ));
+                }
+            }
             let provided = k - required;
             let mut cx = Cx::new(env0.clone(), &format!("{}/{}", name, k));
             let wkey = FunKey::new(module, name, k);

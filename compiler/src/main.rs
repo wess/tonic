@@ -247,7 +247,10 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
     let mut ex = expand::Expander::new(c);
     ex.consolidated = !o.inputs.iter().any(|f| f.ends_with(".exs"));
     let r = ex.run(script);
-    ex.unused_var_warnings();
+    // a failed compile leaves bodies half expanded: their uses are unknown
+    if r.is_ok() {
+        ex.unused_var_warnings();
+    }
     // source order, whichever phase found them
     let position = |w: &String| -> (String, u32) {
         let mut parts = w.splitn(3, ':');

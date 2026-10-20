@@ -902,7 +902,9 @@ impl Collector {
         // definition; generated code (macro output) is exempt.
         if !m.is_prelude && !args[0].gen {
             let split = m.defs.last().map_or(false, |last| last.name != d.name || last.arity != d.arity);
-            if let Some(first) = m.defs.iter().find(|o| o.name == d.name && o.arity == d.arity) {
+            let generated = |o: &DefC| o.body.as_ref().map_or(false, |b| b.gen) || o.args.iter().any(|a| a.gen);
+            let same: Vec<&DefC> = m.defs.iter().filter(|o| o.name == d.name && o.arity == d.arity).collect();
+            if let Some(first) = same.first().filter(|_| !same.iter().any(|o| generated(o))) {
                 if split {
                     let warning = format!(
                         "{}:{}: warning: clauses with the same name and arity (number of arguments) should be grouped together, \"{} {}/{}\" was previously defined ({}:{})",
@@ -1127,7 +1129,8 @@ impl Collector {
                             for (k, v) in &env_vars {
                                 attrs.insert(format!("\u{0}var:{}", k), v.clone());
                             }
-                            let stmt = crate::ctime::subst_unquote(&stmt, &env_vars, attrs);
+                            // unquote fragments: generated code, as in Elixir
+                            let stmt = crate::macrohost::generated(&crate::ctime::subst_unquote(&stmt, &env_vars, attrs));
                             let r = self.module_stmt_inner(module, stmt, env, attrs);
                             for (k, old) in saved {
                                 match old {

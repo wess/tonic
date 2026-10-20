@@ -640,14 +640,13 @@ impl<'a> Lexer<'a> {
 
     /// Body of a quoted string after the opening delimiter.
     fn string_body(&mut self, close: u8, interp: bool, raw: bool) -> LexResult<Vec<Part>> {
-        self.delimited(close, 0, interp, raw, false)
+        self.delimited(close, interp, raw, false)
     }
 
-    /// Generic delimited content reader. `open` is the nesting opener (0 if none).
-    fn delimited(&mut self, close: u8, open: u8, interp: bool, raw: bool, keep_escapes: bool) -> LexResult<Vec<Part>> {
+    /// Generic delimited content reader (delimiters never nest).
+    fn delimited(&mut self, close: u8, interp: bool, raw: bool, keep_escapes: bool) -> LexResult<Vec<Part>> {
         let mut parts = Vec::new();
         let mut cur: Vec<u8> = Vec::new();
-        let mut depth = 0;
         let start = self.line;
         loop {
             if self.pos >= self.src.len() {
@@ -657,20 +656,15 @@ impl<'a> Lexer<'a> {
                 return self.missing(start, &(close as char).to_string(), "string");
             }
             let c = self.peek();
-            if c == close && depth == 0 {
+            if c == close {
                 self.pos += 1;
                 break;
-            }
-            if open != 0 && c == open {
-                depth += 1;
-            } else if open != 0 && c == close {
-                depth -= 1;
             }
             if c == b'\\' {
                 if raw || keep_escapes {
                     // only the delimiter can be escaped
                     let n = self.peek_at(1);
-                    if n == close || (open != 0 && n == open) {
+                    if n == close {
                         if keep_escapes && close != b'/' {
                             cur.push(b'\\');
                         }
@@ -776,7 +770,7 @@ impl<'a> Lexer<'a> {
         let content = String::from_utf8_lossy(&content).into_owned();
         let mut sub = Lexer::new(&content, &self.file, start_line);
         sub.src = content.as_bytes();
-        let parts = sub.delimited(0xff, 0, interp, raw, keep_escapes)?;
+        let parts = sub.delimited(0xff, interp, raw, keep_escapes)?;
         Ok(parts)
     }
 
@@ -797,19 +791,20 @@ impl<'a> Lexer<'a> {
         let parts = if (d == b'"' || d == b'\'') && self.peek_at(1) == d && self.peek_at(2) == d {
             self.heredoc_x(d, lower, !lower, ch == 'r')?
         } else {
-            let (open, close) = match d {
-                b'(' => (b'(', b')'),
-                b'[' => (b'[', b']'),
-                b'{' => (b'{', b'}'),
-                b'<' => (b'<', b'>'),
-                b'"' | b'\'' | b'|' | b'/' => (0, d),
+            // sigil delimiters do not nest: `~s[a[b]` is "a[b"
+            let close = match d {
+                b'(' => b')',
+                b'[' => b']',
+                b'{' => b'}',
+                b'<' => b'>',
+                b'"' | b'\'' | b'|' | b'/' => d,
                 _ => return self.err("invalid sigil delimiter"),
             };
             self.pos += 1;
             if ch == 'r' {
-                self.delimited(close, open, true, false, true)?
+                self.delimited(close, true, false, true)?
             } else {
-                self.delimited(close, open, lower, !lower, false)?
+                self.delimited(close, lower, !lower, false)?
             }
         };
         let ms = self.pos;
