@@ -7,7 +7,7 @@
 defmodule Tonic.ErlangDS do
   @moduledoc false
   # Shared helpers: ports of the :lists functions used by the modules below
-  # (with Erlang semantics, e.g. `==` for usort), and erlang:phash/2.
+  # (with Erlang semantics, e.g. `==` for usort).
 
   # lists:split/2
   def lsplit(n, l), do: lsplit(n, l, [])
@@ -86,159 +86,6 @@ defmodule Tonic.ErlangDS do
   defp concat([]), do: []
 
   # ---------------------------------------------------------------------
-  # erlang:phash/2 -- a port of make_hash() from erl_term_hashing.c (OTP 27)
-
-  @f1 268_440_163
-  @f2 268_439_161
-  @f3 268_435_459
-  @f4 268_436_141
-  @f6 268_437_017
-  @f8 268_437_511
-  @f9 268_439_627
-  @f12 268_440_581
-  @f13 268_440_593
-  @f14 268_440_611
-  @m32 0xFFFFFFFF
-  @max_small 576_460_752_303_423_487
-  @min_small -576_460_752_303_423_488
-
-  def phash(term, range) when is_integer(range) and range > 0 and range <= @m32 do
-    rem(make_hash(term), range) + 1
-  end
-
-  def phash(term, range) when range === 0 or range === 4_294_967_296 do
-    make_hash(term) + 1
-  end
-
-  def phash(term, range), do: :erlang.error(:badarg, [term, range])
-
-  def make_hash(term), do: m32(mh(term, 0))
-
-  defp m32(x), do: :erlang.band(x, @m32)
-
-  defp mh([], h), do: m32(h * @f3 + 1)
-  defp mh(t, h) when is_atom(t), do: m32(h * @f1 + atom_hval(t))
-
-  defp mh(t, h) when is_integer(t) and t >= @min_small and t <= @max_small do
-    y2 = abs(t)
-    h = step(h, m32(y2), @f2)
-    h = if :erlang.bsr(y2, 32) != 0, do: step(h, :erlang.bsr(y2, 32), @f2), else: h
-    m32(h * if(t < 0, do: @f4, else: @f3))
-  end
-
-  defp mh(t, h) when is_integer(t) do
-    h = mh_big(abs(t), h)
-    m32(h * if(t < 0, do: @f4, else: @f3))
-  end
-
-  defp mh(t, h) when is_float(t) do
-    x =
-      if t == 0.0 do
-        0
-      else
-        <<w::64>> = <<t::float>>
-        :erlang.bxor(:erlang.bsr(w, 32), m32(w))
-      end
-
-    m32(h * @f6 + x)
-  end
-
-  defp mh(t, h) when is_bitstring(t) do
-    n = bit_size(t)
-    nb = div(n, 8)
-    tb = rem(n, 8)
-    <<bytes::binary-size(nb), rest::bitstring>> = t
-    h = hash_bytes(:erlang.binary_to_list(bytes), h)
-
-    h =
-      if tb > 0 do
-        <<b::size(tb)>> = rest
-        m32(m32(h * @f1 + b) * @f12 + tb)
-      else
-        h
-      end
-
-    m32(h * @f4 + nb)
-  end
-
-  defp mh([_ | _] = l, h), do: mh_list(l, h)
-
-  defp mh(t, h) when is_tuple(t) do
-    h = mh_tuple(t, 0, tuple_size(t), h)
-    m32(h * @f9 + tuple_size(t))
-  end
-
-  # Maps use make_hash2 on the BEAM; pids/refs/funs depend on VM internals.
-  # These are not reproduced exactly.
-  defp mh(t, h) when is_map(t), do: m32(h * @f13 + @f14 + :erlang.phash2(t))
-  defp mh(t, h), do: m32(h * @f1 + :erlang.phash2(t))
-
-  defp mh_tuple(_t, i, n, h) when i >= n, do: h
-  defp mh_tuple(t, i, n, h), do: mh_tuple(t, i + 1, n, mh(elem(t, i), h))
-
-  defp mh_list([e | rest], h) do
-    h =
-      if is_integer(e) and e >= 0 and e <= 255 do
-        m32(h * @f2 + e)
-      else
-        mh(e, h)
-      end
-
-    case rest do
-      [_ | _] -> mh_list(rest, h)
-      _ -> m32(mh(rest, h) * @f8)
-    end
-  end
-
-  defp step(h, x, p) do
-    h = m32(h * p + :erlang.band(x, 0xFF))
-    h = m32(h * p + :erlang.band(:erlang.bsr(x, 8), 0xFF))
-    h = m32(h * p + :erlang.band(:erlang.bsr(x, 16), 0xFF))
-    m32(h * p + :erlang.bsr(x, 24))
-  end
-
-  # Bignum digits are 64 bits, hashed bytewise from the least significant;
-  # the top digit contributes only 4 bytes when its upper half is zero.
-  defp mh_big(v, h) when v > 0xFFFFFFFFFFFFFFFF do
-    h = bytes_step(v, 8, h)
-    mh_big(:erlang.bsr(v, 64), h)
-  end
-
-  defp mh_big(d, h) do
-    if :erlang.bsr(d, 32) == 0, do: bytes_step(d, 4, h), else: bytes_step(d, 8, h)
-  end
-
-  defp bytes_step(_d, 0, h), do: h
-  defp bytes_step(d, k, h), do: bytes_step(:erlang.bsr(d, 8), k - 1, m32(h * @f2 + :erlang.band(d, 0xFF)))
-
-  defp hash_bytes([b | bs], h), do: hash_bytes(bs, m32(h * @f1 + b))
-  defp hash_bytes([], h), do: h
-
-  # atom_hash() from erl_atom_table: hashpjw over the name bytes with the
-  # "latin1 clutch" for 2-byte UTF-8 sequences.
-  defp atom_hval(a), do: pjw(:erlang.binary_to_list(Atom.to_string(a)), 0)
-
-  defp pjw([v, n | rest], h)
-       when :erlang.band(v, 0xFE) == 0xC2 and :erlang.band(n, 0xC0) == 0x80 do
-    v2 = :erlang.band(:erlang.bor(:erlang.bsl(v, 6), :erlang.band(n, 0x3F)), 0xFF)
-    pjw(rest, pjw_step(h, v2))
-  end
-
-  defp pjw([v | rest], h), do: pjw(rest, pjw_step(h, v))
-  defp pjw([], h), do: h
-
-  defp pjw_step(h, v) do
-    h = :erlang.bsl(h, 4) + v
-    g = :erlang.band(h, 0xF0000000)
-
-    if g != 0 do
-      :erlang.bxor(:erlang.bxor(h, :erlang.bsr(g, 24)), g)
-    else
-      h
-    end
-  end
-
-  # ---------------------------------------------------------------------
   # Linear hash table machinery shared by sets (v1) and dict. Both records
   # have the same field layout:
   #   {Tag, size, n, maxn, bso, exp_size, con_size, empty, segs}
@@ -250,7 +97,7 @@ defmodule Tonic.ErlangDS do
   def mk_seg, do: :erlang.make_tuple(@seg_size, [])
 
   def get_slot(t, key) do
-    h = phash(key, elem(t, 3))
+    h = :erlang.phash(key, elem(t, 3))
     if h > elem(t, 2), do: h - elem(t, 4), else: h
   end
 
@@ -319,7 +166,7 @@ defmodule Tonic.ErlangDS do
   defp rehash(tag, [e | t], slot1, slot2, maxn) do
     {l1, l2} = rehash(tag, t, slot1, slot2, maxn)
     key = if tag === :dict, do: hd(e), else: e
-    h = phash(key, maxn)
+    h = :erlang.phash(key, maxn)
 
     cond do
       h === slot1 -> {[e | l1], l2}

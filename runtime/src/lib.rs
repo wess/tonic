@@ -21,6 +21,7 @@ pub mod map;
 pub mod net;
 pub mod nif;
 pub mod num;
+pub mod phash;
 pub mod re;
 pub mod ustr;
 pub mod sched;

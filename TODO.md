@@ -26,7 +26,6 @@ Known differences are listed in docs/compatibility.md. In priority order:
 - [ ] Executable size: PCRE2 and the inspect/exception machinery are always
   linked (hello world is ~4.5 MB); make regex and exception formatting
   reachable only when used.
-- [ ] Match OTP's `:erlang.phash2/1,2`.
 - [ ] Port `:calendar` RFC 3339 functions.
 - [ ] Match `URI.new/1` / `:uri_string.parse/1` validation.
 - [ ] Emit the remaining compile warnings (ungrouped clauses, duplicate map
