@@ -1,0 +1,41 @@
+sockname: {{127, 0, 0, 1}, true, true}
+peername: {:error, :enotconn}
+opts a: {:ok, [active: false, mode: :binary]}
+opts b: {:ok, [active: false, mode: :list]}
+send/4: :ok
+recv list: {{127, 0, 0, 1}, true, ~c"hello"}
+recv binary: {{127, 0, 0, 1}, true, "world"}
+by name: "by name"
+timeout: {:error, :timeout}
+big: 8000
+too big: {:error, :emsgsize}
+order: [~c"p1", ~c"p2", ~c"p3"]
+recv while active: {:error, :einval}
+once: {{127, 0, 0, 1}, "one"}
+once delivered one
+after once: {:ok, [active: false, mode: :binary]}
+left for recv: "two"
+active true: ["t1", "t2", "t3"]
+active n: [{:udp, "n1"}, {:udp, "n2"}, :udp_passive]
+after n: "n3"
+count to zero: true
+waiter blocked: true
+waiter: "wake"
+controlling_process: :ok
+not owner: {:error, :not_owner}
+old owner mailbox: []
+new owner: [true: "queued", true: "fresh"]
+handed back: :ok
+back home: "back"
+owner exited: :einval
+in use: {:error, :eaddrinuse}
+reuseaddr: {:ok, [reuseaddr: true, mode: :binary]}
+close: :ok
+close again: :ok
+recv closed: {:error, :closed}
+send closed: {:error, :closed}
+sockname closed: {:error, :einval}
+setopts closed: {:error, :einval}
+close during recv: {:error, :closed}
+bad option: {:exit, :badarg}
+bad port: {:exit, :badarg}

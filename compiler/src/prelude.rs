@@ -111,6 +111,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("ex/ex_unit_capture_log.ex", include_str!("../../lib/ex/ex_unit_capture_log.ex")),
     ("logger.ex", include_str!("../../lib/logger.ex")),
     ("net.ex", include_str!("../../lib/net.ex")),
+    ("udp.ex", include_str!("../../lib/udp.ex")),
     ("packet.ex", include_str!("../../lib/packet.ex")),
     ("ex/eexengine.ex", include_str!("../../lib/ex/eexengine.ex")),
     ("ex/eexsmartengine.ex", include_str!("../../lib/ex/eexsmartengine.ex")),

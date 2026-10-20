@@ -17,7 +17,7 @@ use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 
 #[derive(Clone, Copy, PartialEq)]
-enum Active {
+pub(crate) enum Active {
     Passive,
     Once,
     On,
@@ -77,12 +77,18 @@ fn lookup(t: Term) -> Option<Socket> {
     SOCKETS.lock().as_ref().and_then(|m| m.get(&word(t, 1)).cloned())
 }
 
-fn a(name: &str) -> Term {
+pub(crate) fn a(name: &str) -> Term {
     atom(crate::atoms::intern(name))
 }
 
-fn posix(e: &std::io::Error) -> &'static str {
+pub(crate) fn posix(e: &std::io::Error) -> &'static str {
     use std::io::ErrorKind::*;
+    match e.raw_os_error() {
+        Some(libc::EMSGSIZE) => return "emsgsize",
+        Some(libc::ENETUNREACH) => return "enetunreach",
+        Some(libc::EHOSTUNREACH) => return "ehostunreach",
+        _ => {}
+    }
     match e.kind() {
         AddrInUse => "eaddrinuse",
         AddrNotAvailable => "eaddrnotavail",
@@ -102,7 +108,7 @@ fn posix(e: &std::io::Error) -> &'static str {
 // Messages built outside any process heap
 // ---------------------------------------------------------------------------
 
-fn socket_term(env: &mut Env, id: u64) -> Term {
+pub(crate) fn socket_term(env: &mut Env, id: u64) -> Term {
     let p = env.alloc(2);
     unsafe {
         *p = header(T_REF, 1);
@@ -111,7 +117,7 @@ fn socket_term(env: &mut Env, id: u64) -> Term {
     p as Term
 }
 
-fn deliver(pid: u64, build: impl FnOnce(&mut Env) -> Term) {
+pub(crate) fn deliver(pid: u64, build: impl FnOnce(&mut Env) -> Term) {
     let mut env = Env::new(std::ptr::null_mut(), std::ptr::null_mut());
     let message = build(&mut env);
     crate::sched::send_fragment(pid, env.export(message));
@@ -126,16 +132,16 @@ fn reply(pid: u64, op: u64, result: impl FnOnce(&mut Env) -> Term) {
     })
 }
 
-fn ok_with(env: &mut Env, value: Term) -> Term {
+pub(crate) fn ok_with(env: &mut Env, value: Term) -> Term {
     env.tuple(&[atom(a::OK), value])
 }
 
-fn error_with(env: &mut Env, reason: &str) -> Term {
+pub(crate) fn error_with(env: &mut Env, reason: &str) -> Term {
     env.tuple(&[atom(a::ERROR), a(reason)])
 }
 
-fn address_term(env: &mut Env, addr: SocketAddr) -> Term {
-    let ip = match addr.ip() {
+pub(crate) fn ip_term(env: &mut Env, ip: IpAddr) -> Term {
+    match ip {
         IpAddr::V4(v4) => {
             let o = v4.octets();
             env.tuple(&[small(o[0] as i64), small(o[1] as i64), small(o[2] as i64), small(o[3] as i64)])
@@ -144,7 +150,11 @@ fn address_term(env: &mut Env, addr: SocketAddr) -> Term {
             let s: Vec<Term> = v6.segments().iter().map(|x| small(*x as i64)).collect();
             env.tuple(&s)
         }
-    };
+    }
+}
+
+fn address_term(env: &mut Env, addr: SocketAddr) -> Term {
+    let ip = ip_term(env, addr.ip());
     env.tuple(&[ip, small(addr.port() as i64)])
 }
 
@@ -152,7 +162,7 @@ fn address_term(env: &mut Env, addr: SocketAddr) -> Term {
 // Option parsing (terms of the calling process)
 // ---------------------------------------------------------------------------
 
-fn list_items(mut l: Term) -> Vec<Term> {
+pub(crate) fn list_items(mut l: Term) -> Vec<Term> {
     let mut items = Vec::new();
     while is_cons(l) {
         items.push(head(l));
@@ -161,7 +171,7 @@ fn list_items(mut l: Term) -> Vec<Term> {
     items
 }
 
-fn option(t: Term) -> Option<(&'static str, Term)> {
+pub(crate) fn option(t: Term) -> Option<(&'static str, Term)> {
     if is_atom(t) {
         return Some((crate::atoms::name(atom_idx(t)), TRUE));
     }
@@ -171,7 +181,7 @@ fn option(t: Term) -> Option<(&'static str, Term)> {
     None
 }
 
-fn active_of(v: Term) -> Option<Active> {
+pub(crate) fn active_of(v: Term) -> Option<Active> {
     if v == TRUE {
         Some(Active::On)
     } else if v == FALSE {
@@ -185,7 +195,7 @@ fn active_of(v: Term) -> Option<Active> {
     }
 }
 
-fn ip_of(v: Term) -> Option<IpAddr> {
+pub(crate) fn ip_of(v: Term) -> Option<IpAddr> {
     if !is_tuple(v) {
         return None;
     }
@@ -200,7 +210,7 @@ fn ip_of(v: Term) -> Option<IpAddr> {
     }
 }
 
-fn timeout_of(t: Term) -> Option<Duration> {
+pub(crate) fn timeout_of(t: Term) -> Option<Duration> {
     if is_small(t) && small_val(t) >= 0 {
         Some(Duration::from_millis(small_val(t) as u64))
     } else {
@@ -208,7 +218,7 @@ fn timeout_of(t: Term) -> Option<Duration> {
     }
 }
 
-fn ctx_result(ctx: &mut Ctx, ok: Option<Term>, error: Option<&str>) -> Term {
+pub(crate) fn ctx_result(ctx: &mut Ctx, ok: Option<Term>, error: Option<&str>) -> Term {
     match (ok, error) {
         (_, Some(reason)) => {
             let r = a(reason);
@@ -292,12 +302,12 @@ fn adopt(io: TcpStream, owner: u64, options: &Options) -> u64 {
 
 /// Starts an operation: returns its reference to the caller, who waits for
 /// the reply message.
-fn operation(ctx: &mut Ctx) -> (Term, u64, u64) {
+pub(crate) fn operation(ctx: &mut Ctx) -> (Term, u64, u64) {
     let op = crate::sched::next_ref_id();
     (crate::sched::mk_ref_term(ctx, op), op, ctx.pid())
 }
 
-async fn with_timeout<T>(timeout: Option<Duration>, f: impl std::future::Future<Output = T>) -> Option<T> {
+pub(crate) async fn with_timeout<T>(timeout: Option<Duration>, f: impl std::future::Future<Output = T>) -> Option<T> {
     match timeout {
         Some(d) => tokio::time::timeout(d, f).await.ok(),
         None => Some(f.await),
@@ -307,15 +317,17 @@ async fn with_timeout<T>(timeout: Option<Duration>, f: impl std::future::Future<
 #[no_mangle]
 pub extern "C" fn tn_tcp_accept(c: *mut Ctx, socket: Term, timeout: Term) -> Term {
     let ctx = cx(c);
+    // Arguments are read before the reference is allocated, which can move them.
+    let listener = lookup(socket);
+    let timeout = timeout_of(timeout);
     let (r, op, pid) = operation(ctx);
-    let listener = match lookup(socket) {
+    let listener = match listener {
         Some(Socket::Listener(l)) => l,
         _ => {
             reply(pid, op, |env| error_with(env, "closed"));
             return r;
         }
     };
-    let timeout = timeout_of(timeout);
     crate::sched::runtime().spawn(async move {
         let accepted = tokio::select! {
             r = with_timeout(timeout, listener.io.accept()) => r,
@@ -340,11 +352,9 @@ pub extern "C" fn tn_tcp_accept(c: *mut Ctx, socket: Term, timeout: Term) -> Ter
     r
 }
 
-#[no_mangle]
-pub extern "C" fn tn_tcp_connect(c: *mut Ctx, address: Term, port: Term, opts: Term, timeout: Term) -> Term {
-    let ctx = cx(c);
-    let (r, op, pid) = operation(ctx);
-    let host = if is_tuple(address) {
+/// An address tuple, or a host name as an atom, charlist or binary.
+pub(crate) fn host_of(address: Term) -> Option<String> {
+    if is_tuple(address) {
         ip_of(address).map(|ip| ip.to_string())
     } else if is_atom(address) {
         Some(crate::atoms::name(atom_idx(address)).to_string())
@@ -354,13 +364,15 @@ pub extern "C" fn tn_tcp_connect(c: *mut Ctx, address: Term, port: Term, opts: T
         Some(String::from_utf8_lossy(bin_bytes(address)).into_owned())
     } else {
         None
-    };
-    let (host, port) = match (host, is_small(port)) {
-        (Some(h), true) => (h, small_val(port) as u16),
-        _ => {
-            reply(pid, op, |env| error_with(env, "einval"));
-            return r;
-        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tn_tcp_connect(c: *mut Ctx, address: Term, port: Term, opts: Term, timeout: Term) -> Term {
+    let ctx = cx(c);
+    let target = match (host_of(address), is_small(port)) {
+        (Some(h), true) => Some((h, small_val(port) as u16)),
+        _ => None,
     };
     let mut options = Options { active: Active::On, nodelay: false };
     for item in list_items(opts) {
@@ -371,6 +383,11 @@ pub extern "C" fn tn_tcp_connect(c: *mut Ctx, address: Term, port: Term, opts: T
         }
     }
     let timeout = timeout_of(timeout);
+    let (r, op, pid) = operation(ctx);
+    let Some((host, port)) = target else {
+        reply(pid, op, |env| error_with(env, "einval"));
+        return r;
+    };
     crate::sched::runtime().spawn(async move {
         match with_timeout(timeout, TcpStream::connect((host.as_str(), port))).await {
             Some(Ok(io)) => {
@@ -445,20 +462,21 @@ async fn read(stream: &Stream, length: usize) -> Read {
 #[no_mangle]
 pub extern "C" fn tn_tcp_recv(c: *mut Ctx, socket: Term, length: Term, timeout: Term) -> Term {
     let ctx = cx(c);
+    let stream = lookup(socket);
+    let length = (is_small(length) && small_val(length) >= 0).then(|| small_val(length) as usize);
+    let timeout = timeout_of(timeout);
     let (r, op, pid) = operation(ctx);
-    let stream = match lookup(socket) {
+    let stream = match stream {
         Some(Socket::Stream(s)) => s,
         _ => {
             reply(pid, op, |env| error_with(env, "closed"));
             return r;
         }
     };
-    if !is_small(length) || small_val(length) < 0 {
+    let Some(length) = length else {
         reply(pid, op, |env| error_with(env, "einval"));
         return r;
-    }
-    let length = small_val(length) as usize;
-    let timeout = timeout_of(timeout);
+    };
     crate::sched::runtime().spawn(async move {
         match with_timeout(timeout, read(&stream, length)).await {
             Some(Read::Data(data)) => reply(pid, op, |env| {
@@ -631,7 +649,7 @@ pub extern "C" fn tn_tcp_send(c: *mut Ctx, socket: Term, data: Term) -> Term {
 
 #[no_mangle]
 pub extern "C" fn tn_tcp_close(_c: *mut Ctx, socket: Term) -> Term {
-    if !is_ref(socket) {
+    if !is_ref(socket) || crate::udp::remove(socket) {
         return atom(a::OK);
     }
     let removed = SOCKETS.lock().as_mut().and_then(|m| m.remove(&word(socket, 1)));
@@ -721,6 +739,9 @@ pub extern "C" fn tn_tcp_controlling_process(c: *mut Ctx, socket: Term, owner: T
 #[no_mangle]
 pub extern "C" fn tn_inet_setopts(c: *mut Ctx, socket: Term, opts: Term) -> Term {
     let ctx = cx(c);
+    if let Some(udp) = crate::udp::lookup(socket) {
+        return crate::udp::setopts(ctx, udp, socket, opts);
+    }
     let socket_value = lookup(socket);
     let Some(socket_value) = socket_value else {
         return ctx_result(ctx, None, Some("einval"));
@@ -761,6 +782,9 @@ pub extern "C" fn tn_inet_setopts(c: *mut Ctx, socket: Term, opts: Term) -> Term
 #[no_mangle]
 pub extern "C" fn tn_inet_getopts(c: *mut Ctx, socket: Term, opts: Term) -> Term {
     let ctx = cx(c);
+    if let Some(udp) = crate::udp::lookup(socket) {
+        return crate::udp::getopts(ctx, udp, opts);
+    }
     let Some(socket_value) = lookup(socket) else {
         return ctx_result(ctx, None, Some("einval"));
     };
@@ -805,6 +829,9 @@ pub extern "C" fn tn_inet_getopts(c: *mut Ctx, socket: Term, opts: Term) -> Term
 
 fn endpoint(c: *mut Ctx, socket: Term, peer: bool) -> Term {
     let ctx = cx(c);
+    if let Some(udp) = crate::udp::lookup(socket) {
+        return crate::udp::endpoint(ctx, udp, peer);
+    }
     let addr = match lookup(socket) {
         Some(Socket::Stream(s)) => if peer { s.io.peer_addr() } else { s.io.local_addr() },
         Some(Socket::Listener(l)) if !peer => l.io.local_addr(),
@@ -835,7 +862,9 @@ pub extern "C" fn tn_inet_peername(c: *mut Ctx, socket: Term) -> Term {
 #[no_mangle]
 pub extern "C" fn tn_inet_getstat(c: *mut Ctx, socket: Term) -> Term {
     let ctx = cx(c);
+    let udp = crate::udp::lookup(socket);
     let stats = match lookup(socket) {
+        _ if udp.is_some() => udp.map(|u| crate::udp::stats(&u)).unwrap_or_default(),
         Some(Socket::Stream(s)) => {
             let st = s.state.lock();
             [st.recv_oct, st.recv_cnt, st.send_oct, st.send_cnt]
