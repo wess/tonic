@@ -2,7 +2,10 @@
 
 **0.1.0-beta.3 · beta.** Start with scripts and small native applications.
 Visit the [Tonic website](https://wess.io/tonic/).
-See the [release guide](docs/release.md) for installation and the
+Install with `brew install wess/packages/tonic` or
+`curl -fsSL https://wess.io/tonic/install.sh | sh`; the
+[release guide](docs/release.md) covers the Debian package, bundles and Mix
+tasks. See the
 [compatibility report](docs/compatibility.md) for tested packages and limitations.
 Remaining work is tracked in [TODO.md](TODO.md).
 

@@ -1,0 +1,105 @@
+name: packages
+
+# Package managers for a published release: a Debian package built from the
+# Linux bundle, the Homebrew formula in wess/homebrew-packages, and an install
+# check of each channel. Runs after every release; dispatch it to repackage an
+# existing tag.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: release tag, such as v0.1.0-beta.3
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  deb:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the Linux bundle
+        run: |
+          mkdir dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.linuxx64.tar.*' --dir dist
+          cd dist && sha256sum --check ./*.tar.sha256
+      - name: Build the Debian package
+        run: bash tools/deb.sh dist/*.linuxx64.tar.gz dist
+      - name: Install and compile
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./dist/*.deb
+          tonic --version
+          tonic build /usr/share/doc/tonic/hello.exs -o "$RUNNER_TEMP/hello"
+          test "$("$RUNNER_TEMP/hello")" = 'Hello, world!'
+      - name: Upload to the release
+        run: gh release upload "$TAG" dist/*.deb dist/*.deb.sha256 --repo "$GITHUB_REPOSITORY" --clobber
+
+  homebrew:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render the formula
+        run: |
+          mkdir sums
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.tar.sha256' --dir sums
+          python3 tools/formula.py "$TAG" sums > tonic.rb
+      - uses: actions/checkout@v4
+        with:
+          repository: wess/homebrew-packages
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Push the formula
+        run: |
+          cp tonic.rb tap/Formula/tonic.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/tonic.rb
+          if git diff --cached --quiet; then
+            echo 'Formula unchanged'
+          else
+            git commit -m "Update tonic to $TAG"
+            git push
+          fi
+
+  verify:
+    needs: [deb, homebrew]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Homebrew
+        run: |
+          eval "$("$(command -v brew || echo /home/linuxbrew/.linuxbrew/bin/brew)" shellenv)"
+          brew tap wess/packages
+          brew install wess/packages/tonic
+          test "$(tonic --version)" = "tonic ${TAG#v}"
+          brew test wess/packages/tonic
+      - name: Install script
+        run: |
+          TONIC_VERSION="$TAG" TONIC_PREFIX="$RUNNER_TEMP/tonic" TONIC_NO_MIX=1 sh site/install.sh
+          "$RUNNER_TEMP/tonic/bin/tonic" build examples/hello.exs -o "$RUNNER_TEMP/hello"
+          test "$("$RUNNER_TEMP/hello")" = 'Hello, world!'

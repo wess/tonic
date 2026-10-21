@@ -86,15 +86,53 @@ Remaining differences are listed in [compatibility.md](compatibility.md#known-di
 
 ## Install
 
+Release bundles exist for Apple Silicon macOS (built on macOS 14) and Linux
+x86-64 (built on Ubuntu 24.04; glibc 2.39 or newer). There is no Windows build.
+
+Compilation needs clang: the Xcode Command Line Tools on macOS, or clang 18 or
+newer on Linux (`TONIC_CC` selects another compiler). Mix project loading and
+the Mix tasks additionally require Elixir 1.18 / OTP 27; native programs run
+without Elixir/OTP. PCRE2 is included in the static runtime library.
+
+### Homebrew (macOS and Linux)
+
+```sh
+brew install wess/packages/tonic
+mix archive.install "$(brew --prefix tonic)/libexec/share/tonic/tonic.ez" --force
+```
+
+The second line adds the Mix tasks. On Linux the formula depends on Homebrew's
+LLVM and compiles with its clang. `brew upgrade tonic` installs new releases.
+
+### Install script (macOS and Linux)
+
+```sh
+curl -fsSL https://wess.io/tonic/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+The script downloads the latest bundle for your machine, checks its SHA-256,
+and installs it into `~/.local` along with the Mix tasks when Mix is present.
+`TONIC_VERSION=0.1.0-beta.3` pins a release, `TONIC_PREFIX` picks another
+prefix, and `TONIC_NO_MIX=1` skips the Mix tasks. Run it again to upgrade.
+
+### Debian and Ubuntu (x86-64)
+
+```sh
+curl -fLO https://github.com/wess/tonic/releases/download/v0.1.0-beta.3/tonic0.1.0-beta.3.linuxx64.deb
+sudo apt install ./tonic0.1.0-beta.3.linuxx64.deb
+mix archive.install /usr/lib/tonic/share/tonic/tonic.ez --force
+```
+
+The package installs into `/usr/lib/tonic`, links `/usr/bin/tonic`, and pulls in
+the distribution's clang. Ubuntu 24.04 or newer (or Debian with glibc 2.39+).
+
+### Release bundle
+
 Download the bundle matching your machine from the release assets:
 
-* `tonic0.1.0-beta.3.linuxx64.tar.gz`: Linux x86-64, built on Ubuntu 24.04; glibc 2.39
-  or newer is the supported baseline.
-* `tonic0.1.0-beta.3.macosarm64.tar.gz`: Apple Silicon macOS, built on macOS 14.
-
-Compilation requires clang/LLVM 18 or newer. Mix project loading and archive
-tasks additionally require Elixir 1.18 / OTP 27; native programs run without
-Elixir/OTP. PCRE2 is included in the static runtime library.
+* `tonic0.1.0-beta.3.linuxx64.tar.gz`: Linux x86-64.
+* `tonic0.1.0-beta.3.macosarm64.tar.gz`: Apple Silicon macOS.
 
 Verify the matching `.tar.sha256` file before extracting (Linux: `sha256sum -c`;
 macOS: `shasum -a 256 -c`). Then:
@@ -107,10 +145,8 @@ export PATH="$HOME/.local/bin:$PATH"
 tonic run hello.exs
 ```
 
-Use the Linux filename on Linux. Install clang 18 with your distribution's
-package manager, or LLVM 18 on macOS. Set `TONIC_CC` to its clang executable if
-the default `clang` is older. When Mix is installed, `install.sh` also installs
-the Mix archive, so `mix tonic build|run|check` work right away; set
+Use the Linux filename on Linux. When Mix is installed, `install.sh` also
+installs the Mix archive, so `mix tonic build|run|check` work right away; set
 `TONIC_NO_MIX=1` to skip it, or install it later with
 `mix archive.install "$HOME/.local/share/tonic/tonic.ez" --force`. A
 user-specified prefix also works; keep `bin/` and `lib/` together. Install
@@ -147,3 +183,10 @@ The GitHub release workflow first requires the full Linux/macOS CI suite,
 builds and verifies both installation bundles, then publishes a prerelease on
 a `v0.1.0-beta.3` tag. A manual workflow run verifies and uploads build artifacts
 without publishing a release. Tag and manifest versions must match.
+
+After publishing, the `packages` workflow builds the Debian package from the
+Linux bundle (`tools/deb.sh`) and uploads it to the release, pushes the
+Homebrew formula (`tools/formula.py`) to `wess/homebrew-packages`, and installs
+through Homebrew and the install script on both platforms. Dispatch it with a
+tag to repackage an existing release. The site, including `install.sh`, is
+published from `site/` to the `gh-pages` branch when `main` changes.

@@ -81,3 +81,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: gh release create "$RELEASE_TAG" dist/* --verify-tag --prerelease --title "Tonic $RELEASE_TAG" --notes-file docs/release.md
+  packages:
+    needs: publish
+    permissions:
+      contents: write
+    uses: ./.github/workflows/packages.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

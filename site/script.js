@@ -27,13 +27,22 @@ tabs.forEach((tab, index) => {
     next.focus();
   });
 });
-document.querySelectorAll('[data-platform]').forEach(button => {
+const version = '0.1.0-beta.3';
+const release = `https://github.com/wess/tonic/releases/download/v${version}`;
+const methods = {
+  brew: ['macOS on Apple Silicon, or Linux x86-64.', 'brew install wess/packages/tonic\ntonic --version'],
+  script: ['Downloads and checks the bundle for your machine, then installs it into ~/.local.', 'curl -fsSL https://wess.io/tonic/install.sh | sh\nexport PATH="$HOME/.local/bin:$PATH"\ntonic --version'],
+  deb: ['Ubuntu 24.04 or newer, x86-64.', `curl -fLO ${release}/tonic${version}.linuxx64.deb\nsudo apt install ./tonic${version}.linuxx64.deb\ntonic --version`],
+  bundle: ['After downloading and verifying the bundle (use linuxx64 on Linux):', `tar -xzf tonic${version}.macosarm64.tar.gz\ncd tonic${version}\nbash install.sh "$HOME/.local"\nexport PATH="$HOME/.local/bin:$PATH"\ntonic run hello.exs`]
+};
+document.querySelectorAll('[data-method]').forEach(button => {
   button.addEventListener('click', () => {
-    document.querySelectorAll('[data-platform]').forEach(item => {
+    document.querySelectorAll('[data-method]').forEach(item => {
       item.setAttribute('aria-pressed', String(item === button));
     });
-    const platform = button.dataset.platform === 'linux' ? 'linuxx64' : 'macosarm64';
-    document.getElementById('install-code').textContent = `tar -xzf tonic0.1.0-beta.3.${platform}.tar.gz\ncd tonic0.1.0-beta.3\nbash install.sh "$HOME/.local"\nexport PATH="$HOME/.local/bin:$PATH"\ntonic run hello.exs`;
+    const [note, code] = methods[button.dataset.method];
+    document.getElementById('install-note').textContent = note;
+    document.getElementById('install-code').textContent = code;
   });
 });
 document.querySelectorAll('[data-copy]').forEach(button => {

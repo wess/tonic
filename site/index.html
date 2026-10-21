@@ -110,20 +110,19 @@ IO.puts(Greeter.greet(<span class="string">"world"</span>))</code></pre></div>
       </section>
 
       <section id="start" class="start" aria-labelledby="start-title">
-        <div class="start-description"><p class="small-label">Equip Tonic</p><h2 id="start-title">Ready to cast?</h2><p>Start with a script or a small application. Get the compiler, native runtime, and optional Mix archive in one bundle.</p><a class="button primary" href="https://github.com/wess/tonic/releases/tag/v0.1.0-beta.3">Get 0.1.0-beta.3 <span aria-hidden="true">↗</span></a><p class="download-note">Download the bundle for your platform from the GitHub release.</p><a class="text-link" href="https://github.com/wess/tonic/blob/main/docs/release.md">Full installation guide <span aria-hidden="true">↗</span></a></div>
+        <div class="start-description"><p class="small-label">Equip Tonic</p><h2 id="start-title">Ready to cast?</h2><p>Start with a script or a small application. Install with Homebrew, a one-line script, or a Debian package. Each gets you the compiler, native runtime, and Mix tasks.</p><a class="button primary" href="https://github.com/wess/tonic/releases/tag/v0.1.0-beta.3">Get 0.1.0-beta.3 <span aria-hidden="true">↗</span></a><p class="download-note">Bundles for macOS arm64 and Linux x86-64 are on the GitHub release.</p><a class="text-link" href="https://github.com/wess/tonic/blob/main/docs/release.md">Full installation guide <span aria-hidden="true">↗</span></a></div>
         <div class="install window">
           <div class="install-heading"><h3>Installation</h3><button type="button" class="copy" data-copy="install">Copy <span aria-hidden="true">▣</span></button></div>
-          <div class="platforms" aria-label="Choose platform">
-            <button type="button" aria-pressed="true" data-platform="macos">macOS ARM64</button>
-            <button type="button" aria-pressed="false" data-platform="linux">Linux x64</button>
+          <div class="platforms" aria-label="Choose an installation method">
+            <button type="button" aria-pressed="true" data-method="brew">Homebrew</button>
+            <button type="button" aria-pressed="false" data-method="script">Script</button>
+            <button type="button" aria-pressed="false" data-method="deb">Debian</button>
+            <button type="button" aria-pressed="false" data-method="bundle">Bundle</button>
           </div>
-          <p class="install-note">After downloading and verifying the bundle:</p>
-          <pre><code id="install-code">tar -xzf tonic0.1.0-beta.3.macosarm64.tar.gz
-cd tonic0.1.0-beta.3
-bash install.sh "$HOME/.local"
-export PATH="$HOME/.local/bin:$PATH"
-tonic run hello.exs</code></pre>
-          <p class="requirements">Compile with clang/LLVM 18+. Mix projects also require Elixir 1.18 / OTP 27. Linux builds require glibc 2.39+.</p>
+          <p class="install-note" id="install-note">macOS on Apple Silicon, or Linux x86-64.</p>
+          <pre><code id="install-code">brew install wess/packages/tonic
+tonic --version</code></pre>
+          <p class="requirements">Compile with clang: the Xcode Command Line Tools on macOS, clang 18+ on Linux. Mix projects also require Elixir 1.18 / OTP 27. Linux builds require glibc 2.39+.</p>
         </div>
       </section>
 
