@@ -383,6 +383,28 @@ The release workflow requires those checks, verifies installed bundles with a
 fresh cache, and publishes a GitHub prerelease for a matching
 version tag. Manual release workflow runs produce artifacts without publishing.
 
+## Documentation context
+
+[llms.txt](llms.txt) indexes the Elixir and Tonic references;
+[llm.txt](llm.txt) provides the same index for singular-name lookups.
+The [Elixir and compiler guide](docs/semantics.md) covers language semantics,
+BEAM/OTP behavior, compiler internals, and closing compatibility gaps.
+[llmsfull.txt](llmsfull.txt) combines the guide, this reference, the compatibility
+report, and roadmap into one context file. These files provide documentation
+at retrieval time; they do not train a model or establish compatibility.
+
+The website publishes the index at [wess.io/tonic/llms.txt](https://wess.io/tonic/llms.txt),
+with the full context and Markdown documents alongside it. After changing these
+source documents or `llms.txt`, regenerate the published copies:
+
+```sh
+python3 tools/context.py
+python3 tools/context.py --check
+```
+
+CI rejects stale generated context. Edit the repository source documents rather
+than their generated copies in `site/`, `llm.txt`, or `llmsfull.txt`.
+
 ## Website
 
 The GitHub Pages website is in `site/`. Preview it with:

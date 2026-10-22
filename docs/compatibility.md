@@ -13,7 +13,7 @@ The package integration tests fetch exact Hex versions into an isolated project,
 | NimbleOptions | 1.1.1 | Required options, defaults, type validation and rejection |
 | DeepMerge | 1.0.0 | Recursive map merge and replacement precedence |
 
-The web example in `examples/helloweb` was built natively and exercised over HTTP (create, list, fetch, validation errors, 404s), matching the same project on the BEAM. It covers Plug 1.20.3, Bandit 1.12.5, ThousandIsland 1.5.0, Ecto 3.14.2, Ecto SQL 3.14.0, ecto_sqlite3 0.25.0, exqlite 0.42.0, DBConnection 2.10.2, Jason 1.4.5 and Telemetry 1.4.2. This is a manual verification, not yet an automated test.
+The web example in `examples/helloweb` was built natively and exercised over HTTP (create, list, fetch, validation errors, 404s), matching the same project on the BEAM. It covers Plug 1.20.3, Bandit 1.12.5, ThousandIsland 1.5.0, Ecto 3.14.2, Ecto SQL 3.14.0, ecto_sqlite3 0.25.0, exqlite 0.42.0, DBConnection 2.10.2, Jason 1.4.5 and Telemetry 1.4.2. `compiler/tests/helloweb.rs` now builds and exercises the native HTTP service automatically in Linux/macOS CI; the BEAM comparison was verified manually.
 
 Mint 1.11.0 builds natively and fetches over HTTPS (HTTP/2). Req does not compile yet: it stores function captures of modules that only exist at compile time in a module attribute.
 

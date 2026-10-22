@@ -1,0 +1,51 @@
+# Tonic
+
+> Tonic compiles Elixir and supported Erlang source through LLVM into standalone
+> native executables. Its goal is 100% Elixir compatibility across BEAM and LLVM.
+
+Tonic is currently a beta. Full compatibility is a goal, not a statement about
+the current release. Read the compatibility report before recommending an API,
+package, or deployment workflow. A successful package test covers the tested
+scenario, not every API in that package.
+
+The reference baseline is Elixir 1.18.3 / Erlang OTP 27; CI pins OTP 27.2.4.
+Upstream documentation and source should match that baseline. Newer Elixir or
+OTP behavior requires separate verification. Native compilation preserves the
+language's semantics while using a different runtime and compilation artifact.
+BEAM bytecode loading, distributed nodes, hot code replacement, and arbitrary
+NIF compatibility are not provided by the current release.
+
+For application code, prefer ordinary Elixir and existing Mix/Hex workflows.
+For compiler work, reproduce a difference on both engines and add a regression
+before changing semantics. Never treat an implementation gap as a new language
+rule or change a reference fixture to accept incorrect native behavior.
+
+## Start here
+
+- [Elixir and compiler guide](https://wess.io/tonic/docs/semantics.md): Language semantics, OTP processes, macros, implementation map, and differential testing.
+- [Tonic reference](https://wess.io/tonic/index.md): Installation, CLI, Mix integration, runtime design, configuration, and test commands.
+- [Compatibility report](https://wess.io/tonic/docs/compatibility.md): Tested packages, supported APIs, known differences, and current limitations.
+- [Complete Tonic context](https://wess.io/tonic/llmsfull.txt): This index, the guide, reference, compatibility report, and roadmap in one generated file. Upstream references remain links.
+
+## Elixir and BEAM references
+
+- [Elixir 1.18.3 documentation](https://hexdocs.pm/elixir/1.18.3/): Language guides and standard library reference for the baseline.
+- [Elixir 1.18.3 source](https://github.com/elixir-lang/elixir/tree/v1.18.3): Exact compiler, macro, standard library, and test implementations.
+- [Erlang/OTP 27 documentation](https://www.erlang.org/docs/27/): Erlang language, BIFs, applications, runtime behavior, and OTP design principles.
+- [Erlang/OTP 27.2.4 source](https://github.com/erlang/otp/tree/OTP-27.2.4): Exact reference implementation for the CI runtime version.
+
+## Source and evidence
+
+- [Compiler](https://github.com/wess/tonic/tree/main/compiler/src): Elixir/Erlang front ends, expansion, macro host, Mix project loading, and LLVM generation.
+- [Runtime](https://github.com/wess/tonic/tree/main/runtime/src): Tagged values, moving GC, scheduler, BIFs, networking, ports, and NIF subset.
+- [Bundled library](https://github.com/wess/tonic/tree/main/lib): Elixir library, Erlang sources, and native macro evaluator.
+- [Language fixtures](https://github.com/wess/tonic/tree/main/tests/cases): Elixir programs and checked-in reference output.
+- [Compiler integration tests](https://github.com/wess/tonic/tree/main/compiler/tests): Diagnostics, CLI, macros, packages, HTTP example, and supervision soak.
+- [CI workflow](https://github.com/wess/tonic/blob/main/.github/workflows/ci.yml): Version pins and Linux/macOS validation gates.
+
+## Optional
+
+- [Roadmap](https://wess.io/tonic/roadmap.md): Compatibility work and runtime decisions still ahead.
+- [Installation and release guide](https://wess.io/tonic/docs/release.md): Homebrew, Debian, script installers, bundles, and release validation.
+- [Native web example](https://github.com/wess/tonic/tree/main/examples/helloweb): Plug, Bandit, Ecto, and SQLite compiled into a native service.
+- [Mix and Hex example](https://github.com/wess/tonic/tree/main/examples/packages): Locked package project and native build workflow.
