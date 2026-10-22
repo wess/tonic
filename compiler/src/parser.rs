@@ -219,7 +219,7 @@ impl Parser {
     fn parse_prefix(&mut self, nd: bool) -> PResult<E> {
         let t = self.next();
         let line = t.line;
-        let e = match t.t {
+        let mut e = match t.t {
             T::Int(s) => E::new(K::Int(s), line),
             T::Float(f) => E::new(K::Float(f), line),
             T::Atom(a) => E::new(K::Atom(a), line),
@@ -361,10 +361,12 @@ impl Parser {
                 ));
             }
         };
+        e.column = t.column;
         self.postfix(e, nd)
     }
 
     fn postfix(&mut self, mut e: E, nd: bool) -> PResult<E> {
+        let column = e.column;
         loop {
             let t = self.peek_raw().clone();
             match &t.t {
@@ -485,6 +487,7 @@ impl Parser {
                 _ => break,
             }
         }
+        e.column = column;
         Ok(e)
     }
 
@@ -994,6 +997,9 @@ impl Parser {
     }
 
     fn parse_tuple(&mut self, line: u32) -> PResult<E> {
+        if matches!(self.peek().t, T::KwKey(_)) {
+            return self.err("unexpected keyword list inside tuple");
+        }
         let items = self.items_until("}")?;
         Ok(E::new(K::Tuple(items), line))
     }

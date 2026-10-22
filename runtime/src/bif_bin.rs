@@ -1374,6 +1374,21 @@ pub extern "C" fn tn_fun_info(c: *mut Ctx, f: Term) -> Term {
     ctx.tuple(&[m, n, small(closure_arity(f) as i64)])
 }
 
+#[no_mangle]
+pub extern "C" fn tn_fun_env(c: *mut Ctx, f: Term) -> Term {
+  let ctx = cx(c);
+  if !is_closure(f) {
+    return ctx.badarg("argument error");
+  }
+  let info = word(f, 3) as *const FunInfo;
+  if !info.is_null() && unsafe { (*info).kind } == 1 {
+    return NIL_LIST;
+  }
+  let size = size_of_hdr(hdr(f)) as usize;
+  let mut values: Vec<Term> = (4..=size).map(|i| word(f, i)).collect();
+  ctx.list_from_vec(&mut values)
+}
+
 /// Build a charlist-to-binary for List.to_string etc. (chardata)
 #[no_mangle]
 pub extern "C" fn tn_list_to_binary(c: *mut Ctx, l: Term) -> Term {

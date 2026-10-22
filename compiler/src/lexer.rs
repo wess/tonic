@@ -41,6 +41,7 @@ pub enum T {
 pub struct Tok {
     pub t: T,
     pub line: u32,
+    pub column: u32,
     /// whitespace (or newline) immediately before this token
     pub sp: bool,
     /// whitespace immediately after this token
@@ -51,6 +52,8 @@ pub struct Lexer<'a> {
     src: &'a [u8],
     pos: usize,
     line: u32,
+    column: u32,
+    column_pos: usize,
     pub toks: Vec<Tok>,
     file: String,
 }
@@ -77,6 +80,8 @@ impl<'a> Lexer<'a> {
             src: src.as_bytes(),
             pos: 0,
             line,
+            column: 1,
+            column_pos: 0,
             toks: Vec::new(),
             file: file.to_string(),
         }
@@ -122,6 +127,7 @@ impl<'a> Lexer<'a> {
         self.toks.push(Tok {
             t,
             line,
+            column: self.column,
             sp,
             sp_after: false,
         });
@@ -166,6 +172,12 @@ impl<'a> Lexer<'a> {
                 break;
             }
             let line = self.line;
+            let consumed = &self.src[self.column_pos..self.pos];
+            self.column = match consumed.iter().rposition(|b| *b == b'\n') {
+                Some(i) => std::str::from_utf8(&consumed[i + 1..]).unwrap().chars().count() as u32 + 1,
+                None => self.column + std::str::from_utf8(consumed).unwrap().chars().count() as u32,
+            };
+            self.column_pos = self.pos;
             self.token(line, sp)?;
             sp = false;
         }

@@ -230,6 +230,7 @@ impl Expander {
             file: m.file.clone(),
             requires: HashSet::new(),
         });
+        self.validate_module_guards(&m, &env)?;
         // Group clauses by name/arity preserving order.
         let mut order: Vec<(String, usize)> = Vec::new();
         let mut groups: HashMap<(String, usize), Vec<DefC>> = HashMap::new();
@@ -275,7 +276,7 @@ impl Expander {
                 }
             }
         }
-        if !m.is_prelude || m.name == "Elixir.Record" || m.name == "Elixir.EEx" {
+        if !m.is_prelude || m.name == "Elixir.Record" || m.name == "Elixir.EEx" || !m.guards.is_empty() {
             self.gen_runtime_macros(&m);
         }
         if let Some(fields) = &m.struct_fields {
@@ -296,8 +297,81 @@ impl Expander {
     /// Macros whose bodies only make sense at compile time are skipped.
     fn gen_runtime_macros(&mut self, m: &crate::collect::Module) {
         let mut order: Vec<(String, usize)> = Vec::new();
-        let mut groups: HashMap<(String, usize), Vec<DefC>> = HashMap::new();
-        for d in &m.defs {
+        let mut groups: HashMap<(String, usize), Vec<(DefC, Option<usize>)>> = HashMap::new();
+        let mut definitions: Vec<(usize, bool, DefC, Option<usize>)> = m.defs.iter().cloned().enumerate().map(|(i, d)| (i, false, d, None)).collect();
+        for ((name, arity), (params, body)) in &m.guards {
+            let key = (name.clone(), *arity);
+            if m.private_guards.contains(&key) { continue; }
+            let line = body.line;
+            let template = E::call("quote", vec![E::list(vec![E::tuple(vec![E::atom("do", line), body.clone()], line)], line)], line);
+            let expansion = if m.guard_generated.contains(&key) {
+                let args = match &body.k { K::Call { args, .. } => args.clone(), _ => unreachable!() };
+                E::new(K::Remote {
+                    recv: Box::new(E::atom(&m.name, line)), name: format!("MACRO-{}", name),
+                    args: std::iter::once(E::var("__CALLER__", line)).chain(args).collect(), parens: true,
+                }, line)
+            } else {
+                E::remote("Tonic.Eval", "guard_expansion", vec![
+                E::list(params.iter().map(|name| E::atom(name, line)).collect(), line),
+                template,
+                E::list(params.iter().map(|name| E::var(name, line)).collect(), line),
+                E::var("__CALLER__", line),
+                E::atom(&m.name, line),
+            ], line)
+            };
+            let definition = DefC {
+                name: name.clone(), arity: *arity, public: true,
+                args: params.iter().map(|name| E::var(name, line)).collect(),
+                guard: None, body: Some(expansion),
+                env: m.guard_envs.get(&key).cloned().or_else(|| m.env.clone()).unwrap_or_else(|| Rc::new(ModEnv {
+                    module: m.name.clone(), aliases: HashMap::new(), imports: vec![],
+                    file: m.file.clone(), requires: HashSet::new(),
+                })),
+                line, is_macro: true, super_target: None,
+            };
+            let target = if m.guard_generated.contains(&key) {
+                match &body.k { K::Call { args, .. } => Some(args.len()), _ => unreachable!() }
+            } else { None };
+            definitions.push((m.guard_order.get(&key).copied().unwrap_or(m.defs.len()), true, definition, target));
+        }
+        definitions.sort_by_key(|(order, guard, _, _)| (*order, !*guard));
+        let mut ordered = Vec::new();
+        for (_, _, mut definition, target) in definitions {
+            let original = definition.args.clone();
+            let count = original.iter().filter(|arg| matches!(&arg.k, K::Bin { op, .. } if op == "\\\\")).count();
+            definition.args = original.iter().map(|arg| match &arg.k {
+                K::Bin { op, l, .. } if op == "\\\\" => (**l).clone(),
+                _ => arg.clone(),
+            }).collect();
+            ordered.push((definition.clone(), target));
+            if !definition.is_macro { continue; }
+            for missing in 1..=count {
+                let mut keep = count - missing;
+                let mut params = Vec::new();
+                let mut arguments = vec![E::var("__CALLER__", definition.line)];
+                for arg in &original {
+                    if let K::Bin { op, r, .. } = &arg.k {
+                        if op == "\\\\" {
+                            if keep == 0 { arguments.push((**r).clone()); continue; }
+                            keep -= 1;
+                        }
+                    }
+                    let param = E::var(&format!("tonic_default_{}", params.len()), definition.line);
+                    arguments.push(param.clone());
+                    params.push(param);
+                }
+                let mut wrapper = definition.clone();
+                wrapper.arity = params.len();
+                wrapper.args = params;
+                wrapper.guard = None;
+                wrapper.body = Some(E::new(K::Remote {
+                    recv: Box::new(E::atom(&m.name, definition.line)),
+                    name: format!("MACRO-{}", definition.name), args: arguments, parens: true,
+                }, definition.line));
+                ordered.push((wrapper, Some(definition.arity)));
+            }
+        }
+        for (d, target) in &ordered {
             if !d.is_macro || !d.public {
                 continue;
             }
@@ -320,10 +394,17 @@ impl Expander {
             if !groups.contains_key(&k) {
                 order.push(k.clone());
             }
-            groups.entry(k).or_default().push(d);
+            groups.entry(k).or_default().push((d, target.map(|arity| arity + 1)));
         }
+        // A default wrapper is usable only if its full-arity target compiled.
+        // Keep explicit shorter clauses even when a compile-time-only body failed.
+        order.sort_by_key(|(_, arity)| std::cmp::Reverse(*arity));
+        let mut compiled = HashSet::new();
         for k in order {
-            let clauses = groups.remove(&k).unwrap();
+            let clauses = groups.remove(&k).unwrap().into_iter()
+                .filter(|(_, target)| target.map_or(true, |arity| compiled.contains(&(k.0.clone(), arity))))
+                .map(|(definition, _)| definition).collect::<Vec<_>>();
+            if clauses.is_empty() { continue; }
             let n_out = self.out.len();
             let saved_warnings = self.warnings.len();
             let saved_sites = self.var_sites.len();
@@ -331,6 +412,8 @@ impl Expander {
                 self.out.truncate(n_out);
                 self.warnings.truncate(saved_warnings);
                 self.var_sites.truncate(saved_sites);
+            } else {
+                compiled.insert(k);
             }
         }
     }
@@ -484,6 +567,7 @@ impl Expander {
             .filter(|((mm, _, _), d)| mm == &m.name && d.public)
             .map(|((_, n, a), _)| (n.clone(), *a))
             .collect();
+        ms.extend(m.guards.keys().filter(|key| !m.private_guards.contains(*key)).cloned());
         if m.name == "Elixir.Kernel" {
             for (n, arities) in crate::quote::kernel_exports() {
                 for a in arities {
@@ -969,6 +1053,13 @@ impl Expander {
             let mut certain: HashSet<FunKey> = HashSet::new();
             let mut work: Vec<FunKey> = stack.clone();
             while let Some(k) = work.pop() {
+                if k.dynamic_module || k.dynamic_name {
+                    if !certain.insert(k.clone()) {
+                        continue;
+                    }
+                    work.extend(self.out.iter().filter(|f| dynamic_match(&k, f)).map(|f| f.key.clone()));
+                    continue;
+                }
                 if k.arity == ANY_ARITY {
                     work.extend(arities.get(&(k.module.as_str(), k.name.as_str())).into_iter().flatten().map(|x| (*x).clone()));
                     continue;
@@ -997,6 +1088,13 @@ impl Expander {
         let mut progressed_names = false;
         loop {
             while let Some(k) = stack.pop() {
+                if k.dynamic_module || k.dynamic_name {
+                    if !seen.insert(k.clone()) {
+                        continue;
+                    }
+                    stack.extend(self.out.iter().filter(|f| dynamic_match(&k, f)).map(|f| f.key.clone()));
+                    continue;
+                }
                 if k.arity == ANY_ARITY {
                     for key in arities.get(&(k.module.as_str(), k.name.as_str())).map(|v| v.as_slice()).unwrap_or(&[]) {
                         if !seen.contains(*key) {
@@ -1256,6 +1354,25 @@ const DYN_SITE: &str = "\u{0}dyn:";
 /// Marks atoms from quoted AST data.
 const AST_ATOMS: &str = "\u{0}ast:";
 
+fn dynamic_match(target: &FunKey, function: &FunDef) -> bool {
+    function.public
+        && (target.dynamic_module || target.module == function.key.module)
+        && (target.dynamic_name || target.name == function.key.name)
+        && (target.arity == ANY_ARITY || target.arity == function.key.arity)
+}
+
+fn dynamic_mfa(module: &CE, name: &CE, arguments: &CE, refs: &mut Vec<FunKey>) {
+    let module = match module { CE::Lit(Lit::Atom(value)) => Some(value.as_str()), _ => None };
+    let name = match name { CE::Lit(Lit::Atom(value)) => Some(value.as_str()), _ => None };
+    if module.is_none() || name.is_none() {
+        let arity = match arguments {
+            CE::Lit(Lit::Int(arity)) if *arity >= 0 => Some(*arity as usize),
+            _ => fixed_length(arguments),
+        };
+        refs.push(FunKey::dynamic(module, name, arity.unwrap_or(ANY_ARITY)));
+    }
+}
+
 fn collect_refs(e: &CE, refs: &mut Vec<FunKey>, atoms: &mut Vec<String>) {
     match e {
         CE::Lit(Lit::Atom(a)) => atoms.push(a.clone()),
@@ -1290,8 +1407,13 @@ fn collect_refs(e: &CE, refs: &mut Vec<FunKey>, atoms: &mut Vec<String>) {
                 collect_refs(x, refs, atoms);
             }
         }
-        CE::Bif(_, v) => {
-            mfa_args(v, refs, atoms);
+        CE::Bif(symbol, v) => {
+            if matches!(symbol.as_str(), "tn_apply_mfa" | "tn_make_ext_fun" | "tn_spawn_mfa") && v.len() >= 3 {
+                dynamic_mfa(&v[0], &v[1], &v[2], refs);
+            }
+            if symbol != "tn_function_exported" {
+                mfa_args(v, refs, atoms);
+            }
             for x in v {
                 collect_refs(x, refs, atoms)
             }
@@ -1349,6 +1471,9 @@ fn collect_refs(e: &CE, refs: &mut Vec<FunKey>, atoms: &mut Vec<String>) {
             }
         }
         CE::Call(k, args) => {
+            if matches!(k.module.as_str(), "erlang" | "Elixir.Kernel") && k.name == "apply" && args.len() == 3 {
+                dynamic_mfa(&args[0], &args[1], &args[2], refs);
+            }
             refs.push(k.clone());
             mfa_args(args, refs, atoms);
             for x in args {
@@ -1356,6 +1481,11 @@ fn collect_refs(e: &CE, refs: &mut Vec<FunKey>, atoms: &mut Vec<String>) {
             }
         }
         CE::DynCall(m, name, args) => {
+            let key = match m.as_ref() {
+                CE::Lit(Lit::Atom(module)) => FunKey::new(module, name, args.len()),
+                _ => FunKey::dynamic(None, Some(name), args.len()),
+            };
+            refs.push(key);
             atoms.push(name.clone());
             atoms.push(format!("{}{}/{}", DYN_SITE, name, args.len()));
             collect_refs(m, refs, atoms);

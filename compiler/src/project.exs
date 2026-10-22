@@ -1,11 +1,15 @@
+Code.require_file("testing.exs", __DIR__)
+
 defmodule Tonic.ProjectBridge do
-  def export(root, output) do
+  def export(root, output, mode, test_args) do
+    Process.put(:tonic_project_output, output)
+
     Mix.Project.in_project(:tonic_metadata, root, fn _ ->
       config = Mix.Project.config()
+      Process.put(:tonic_project_generators, get_in(config, [:tonic, :generators]) || [])
+      test_options = if mode == "test", do: Tonic.TestBridge.options(test_args), else: nil
 
-      if Mix.Project.umbrella?(),
-        do:
-          Mix.raise("Tonic requires an application project; build each umbrella child separately")
+      umbrella = Mix.Project.umbrella?()
 
       compile_config = read_config(config[:config_path] || "config/config.exs")
       Application.put_all_env(compile_config, persistent: true)
@@ -48,8 +52,27 @@ defmodule Tonic.ProjectBridge do
           end)
         end)
 
-      app = Keyword.fetch!(config, :app)
-      current = application(app, Enum.filter(deps, & &1.top_level))
+      app =
+        config[:app] ||
+          root |> Path.basename() |> String.replace(~r/[^a-zA-Z0-9_]/, "_") |> String.to_atom()
+
+      current =
+        if umbrella do
+          %{
+            app: app,
+            version: config[:version] || "0.0.0",
+            root: root,
+            sources: [],
+            native: [],
+            spec: [
+              vsn: String.to_charlist(config[:version] || "0.0.0"),
+              applications: Enum.map(Enum.filter(deps, & &1.top_level), & &1.app)
+            ]
+          }
+        else
+          application(app, Enum.filter(deps, & &1.top_level))
+        end
+
       configuration = Path.join(output, "configuration.exs")
       entry = Path.join(output, "entry.exs")
 
@@ -64,7 +87,15 @@ defmodule Tonic.ProjectBridge do
 
       specs =
         Enum.map(applications ++ [current], fn metadata ->
-          ":application.load({:application, #{literal(metadata.app)}, #{literal(metadata.spec)}})\n"
+          spec =
+            if System.get_env("TONIC_RELEASE_BUILD") == "1" do
+              "Keyword.put(#{literal(metadata.spec)}, :tonic_priv_dir, " <>
+                "String.to_charlist(Path.join([System.fetch_env!(\"TONIC_RELEASE_ROOT\"), \"priv\", #{literal(Atom.to_string(metadata.app))}])))"
+            else
+              literal(metadata.spec)
+            end
+
+          ":application.load({:application, #{literal(metadata.app)}, #{spec}})\n"
         end)
 
       # Mix.Project.config/0 at compile time: each project by its root, the
@@ -77,6 +108,15 @@ defmodule Tonic.ProjectBridge do
       prefix = prefix <> ":application.set_env(:tonic_config, :projects, #{literal(projects)})\n"
 
       File.write!(configuration, [prefix, specs, settings])
+      host_configuration = Path.join(output, "compileconfiguration.exs")
+
+      host_specs =
+        Enum.map(applications ++ [current], fn metadata ->
+          ":application.load({:application, #{literal(metadata.app)}, #{literal(metadata.spec)}})\n"
+        end)
+
+      File.write!(host_configuration, [prefix, host_specs, settings])
+
       runtime = config[:runtime_config_path] || "config/runtime.exs"
       runtime_inputs = if File.regular?(runtime), do: [Path.expand(runtime)], else: []
       main = get_in(config, [:escript, :main_module])
@@ -85,21 +125,60 @@ defmodule Tonic.ProjectBridge do
       invoke =
         cond do
           main -> "#{inspect(main)}.main(System.argv())\n"
-          Keyword.has_key?(current.spec, :mod) -> "Process.sleep(:infinity)\n"
+          umbrella or Keyword.has_key?(current.spec, :mod) -> "Process.sleep(:infinity)\n"
           true -> ""
         end
 
-      File.write!(entry, [start, invoke])
       sources = Enum.flat_map(applications ++ [current], & &1.sources) |> Enum.uniq()
+
+      {before_tests, test_inputs} =
+        if mode == "test" do
+          child_roots =
+            if umbrella,
+              do: Enum.map(Map.values(Mix.Project.apps_paths()), &Path.expand(&1, root)),
+              else: []
+
+          roots =
+            if umbrella, do: Enum.filter(applications, &(&1.root in child_roots)), else: [current]
+
+          tests =
+            Enum.flat_map(roots, fn metadata ->
+              if metadata.app == current.app do
+                Tonic.TestBridge.files(config, test_options.selectors, root)
+              else
+                Mix.Project.in_project(metadata.app, metadata.root, fn _ ->
+                  Tonic.TestBridge.files(Mix.Project.config(), test_options.selectors, root)
+                end)
+              end
+            end)
+            |> Enum.uniq()
+
+          if tests == [], do: Mix.raise("Tonic found no test files")
+          prepare = Path.join(output, "testprepare.exs")
+
+          File.write!(prepare, [
+            if(test_options.start, do: start, else: ""),
+            "ExUnit.start(#{literal(test_options.config)})\n"
+          ])
+
+          File.write!(entry, Tonic.TestBridge.runner(test_options))
+
+          {[prepare], tests}
+        else
+          File.write!(entry, [start, invoke])
+          {[], []}
+        end
 
       metadata = [
         app: Atom.to_string(app),
         native_sources: Enum.flat_map(applications ++ [current], & &1.native),
-        inputs: [configuration] ++ sources ++ runtime_inputs ++ [entry],
+        inputs:
+          [configuration] ++ sources ++ runtime_inputs ++ before_tests ++ test_inputs ++ [entry],
         # each mix.exs too: code may call its project module at compile time
         # (Req's `Req.MixProject.legacy_headers_as_lists?()`)
-        macro_inputs: Enum.flat_map(applications ++ [current], &mix_file/1) ++ sources,
-        config_inputs: [configuration]
+        macro_inputs:
+          Enum.flat_map(applications ++ [current], &mix_file/1) ++ sources ++ test_inputs,
+        config_inputs: [host_configuration]
       ]
 
       File.write!(Path.join(output, "manifest.exs"), literal(metadata))
@@ -138,13 +217,22 @@ defmodule Tonic.ProjectBridge do
   defp application(app, children) do
     config = Mix.Project.config()
     compilers = config[:compilers] || Mix.compilers()
-    unsupported = compilers -- [:yecc, :leex, :erlang, :elixir, :app, :tonic, :elixir_make]
+
+    generators =
+      Enum.uniq(
+        (get_in(config, [:tonic, :generators]) || []) ++
+          Enum.filter(Process.get(:tonic_project_generators, []), &(&1 in compilers))
+      )
+
+    unsupported =
+      (compilers -- [:yecc, :leex, :erlang, :elixir, :app, :tonic, :elixir_make]) -- generators
 
     unless unsupported == [],
       do:
         Mix.raise("Tonic cannot compile #{app}: unsupported Mix compiler #{inspect(unsupported)}")
 
     root = File.cwd!()
+    Enum.each(generators, &run_generator(root, &1))
 
     native =
       Path.wildcard(Path.join(root, "priv/**/*"))
@@ -163,13 +251,12 @@ defmodule Tonic.ProjectBridge do
       Enum.flat_map(erlang_paths, &Path.wildcard(Path.join([root, &1, "**/*"])))
       |> Enum.filter(&(Path.extname(&1) in [".xrl", ".yrl"]))
 
-    unless generated == [],
-      do:
-        Mix.raise(
-          "Tonic cannot compile #{app}: generated lexer/parser sources require an unsupported Mix compiler"
-        )
+    generated_sources = Enum.map(generated, &generate_source(app, &1))
 
-    sources = files(root, elixir_paths, ".ex") ++ files(root, erlang_paths, ".erl")
+    sources =
+      (files(root, elixir_paths, ".ex") ++ files(root, erlang_paths, ".erl") ++ generated_sources)
+      |> Enum.reject(&mix_source?/1)
+
     native = native_sources(app, root, compilers)
     project = Mix.Project.get()
 
@@ -202,8 +289,74 @@ defmodule Tonic.ProjectBridge do
       |> Keyword.put(:vsn, String.to_charlist(config[:version] || "0.0.0"))
       |> Keyword.put(:tonic_priv_dir, String.to_charlist(Path.join(root, "priv")))
 
-    [app: app, version: config[:version] || "0.0.0", spec: spec, sources: sources, native: native, root: root]
+    [
+      app: app,
+      version: config[:version] || "0.0.0",
+      spec: spec,
+      sources: sources,
+      native: native,
+      root: root
+    ]
     |> Map.new()
+  end
+
+  defp run_generator(root, compiler) do
+    task = "compile.#{compiler}"
+
+    unless Mix.Task.get(task) do
+      source =
+        Enum.find(
+          [
+            Path.join(root, "lib/mix/tasks/compile.#{compiler}.ex"),
+            Path.join(root, "lib/mix/tasks/compile/#{compiler}.ex")
+          ],
+          &File.regular?/1
+        )
+
+      if source, do: Code.require_file(source)
+    end
+
+    Mix.Task.reenable(task)
+
+    case Mix.Task.run(task, ["--return-errors"]) do
+      {:error, diagnostics} ->
+        Mix.raise("Tonic source generator #{task} failed: #{inspect(diagnostics)}")
+
+      :error ->
+        Mix.raise("Tonic source generator #{task} failed")
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp generate_source(app, source) do
+    directory = Path.join([Process.get(:tonic_project_output), "generated", Atom.to_string(app)])
+    File.mkdir_p!(directory)
+    target = Path.join(directory, Path.basename(source, Path.extname(source)) <> ".erl")
+
+    result =
+      case Path.extname(source) do
+        ".yrl" ->
+          :yecc.file(String.to_charlist(source), [
+            {:parserfile, String.to_charlist(target)},
+            :return_errors,
+            :return_warnings
+          ])
+
+        ".xrl" ->
+          :leex.file(String.to_charlist(source), [
+            {:scannerfile, String.to_charlist(target)},
+            :return_errors,
+            :return_warnings
+          ])
+      end
+
+    case result do
+      {:ok, _} -> target
+      {:ok, _, _warnings} -> target
+      error -> Mix.raise("Tonic cannot generate #{source}: #{inspect(error)}")
+    end
   end
 
   # NIF libraries built by elixir_make are compiled from their C sources and
@@ -219,7 +372,9 @@ defmodule Tonic.ProjectBridge do
         for source <- sources, do: Enum.join([source | flags], "\t")
 
       :elixir_make in compilers ->
-        Mix.raise("Tonic cannot compile #{app}: elixir_make builds without NIF C sources in c_src/ are unsupported")
+        Mix.raise(
+          "Tonic cannot compile #{app}: elixir_make builds without NIF C sources in c_src/ are unsupported"
+        )
 
       true ->
         []
@@ -228,7 +383,8 @@ defmodule Tonic.ProjectBridge do
 
   # -D options the dependency's Makefile adds to CFLAGS.
   defp makefile_defines(root) do
-    makefile = Enum.find(["Makefile", "GNUmakefile", "makefile"], &File.regular?(Path.join(root, &1)))
+    makefile =
+      Enum.find(["Makefile", "GNUmakefile", "makefile"], &File.regular?(Path.join(root, &1)))
 
     if makefile do
       Regex.scan(~r/^\s*CFLAGS\s*[+:?]?=(.*)$/m, File.read!(Path.join(root, makefile)))
@@ -266,16 +422,34 @@ defmodule Tonic.ProjectBridge do
     required = properties[:applications] || []
 
     deps =
-      for dep <- children, dep.app not in required, Keyword.get(dep.opts, :runtime, true),
+      for dep <- children,
+          dep.app not in required,
+          Keyword.get(dep.opts, :runtime, true),
           do: dep.app
 
     spec =
       properties
-      |> Keyword.take([:description, :vsn, :mod, :env, :registered, :applications, :optional_applications, :included_applications])
+      |> Keyword.take([
+        :description,
+        :vsn,
+        :mod,
+        :env,
+        :registered,
+        :applications,
+        :optional_applications,
+        :included_applications
+      ])
       |> Keyword.put(:applications, required ++ deps)
       |> Keyword.put(:tonic_priv_dir, String.to_charlist(Path.join(root, "priv")))
 
-    [app: app, version: to_string(properties[:vsn]), spec: spec, sources: files(root, ["src"], ".erl"), native: [], root: root]
+    [
+      app: app,
+      version: to_string(properties[:vsn]),
+      spec: spec,
+      sources: files(root, ["src"], ".erl"),
+      native: [],
+      root: root
+    ]
     |> Map.new()
   end
 
@@ -321,5 +495,5 @@ defmodule Tonic.ProjectBridge do
   defp reject_runtime_values(_), do: :ok
 end
 
-[root, output] = System.argv()
-Tonic.ProjectBridge.export(root, output)
+[root, output, mode | test_args] = System.argv()
+Tonic.ProjectBridge.export(root, output, mode, test_args)

@@ -195,12 +195,18 @@ pub fn registered() -> Vec<u64> {
 pub fn register_funs(entries: &[(u64, u64, u64, usize)]) {
     let mut f = g().funs.write();
     for &(m, n, a, p) in entries {
-        f.insert((m, n, a), p);
+        f.entry((m, n, a)).and_modify(|pointer| {
+            if p != 0 { *pointer = p; }
+        }).or_insert(p);
     }
 }
 
 pub fn lookup_fun(m: Term, f: Term, arity: u64) -> Option<usize> {
-    g().funs.read().get(&(m, f, arity)).copied()
+    g().funs.read().get(&(m, f, arity)).copied().filter(|pointer| *pointer != 0)
+}
+
+pub fn function_exported(m: Term, f: Term, arity: u64) -> bool {
+    g().funs.read().contains_key(&(m, f, arity))
 }
 
 pub fn module_exists(m: Term) -> bool {
@@ -688,7 +694,7 @@ pub fn clone_fragment(f: &Fragment) -> Fragment {
     unsafe { buf.set_len(words) };
     let mut free = buf.as_mut_ptr();
     let root = unsafe { crate::heap::copy_term(f.root, lo, hi, &mut free) };
-    Fragment { buf, root }
+    Fragment::new(buf, root, free)
 }
 
 pub fn mk_ref_term(ctx: &mut Ctx, id: u64) -> Term {

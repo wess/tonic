@@ -11,6 +11,7 @@
 //! dead-stripped); the owner-exit hook is installed on first use.
 
 pub mod alert;
+pub mod callback;
 pub mod config;
 pub mod control;
 pub mod info;
@@ -19,11 +20,9 @@ pub mod open;
 pub mod options;
 pub mod packet;
 pub mod roots;
+pub mod tcp;
+pub mod verify;
 
-use tonic_core::heap::Ctx;
-use tonic_core::net::{a, deliver, socket_term};
-use tonic_core::nif::Env;
-use tonic_core::term::*;
 use options::Opts;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -31,6 +30,10 @@ use std::sync::Arc;
 use tokio::io::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsStream;
+use tonic_core::heap::Ctx;
+use tonic_core::net::{a, deliver, socket_term};
+use tonic_core::nif::Env;
+use tonic_core::term::*;
 
 pub type Tls = TlsStream<TcpStream>;
 
@@ -53,9 +56,12 @@ pub struct State {
     pub reading: bool,
     pub eof: bool,
     pub stats: [u64; 4],
+    pub read_buffer: usize,
+    pub packet_size: usize,
 }
 
 pub struct Conn {
+    pub tcp_fd: std::os::fd::RawFd,
     pub reader: tokio::sync::Mutex<ReadHalf<Tls>>,
     pub writer: tokio::sync::Mutex<WriteHalf<Tls>>,
     pub state: parking_lot::Mutex<State>,
@@ -69,13 +75,12 @@ pub struct Listener {
     pub io: tokio::net::TcpListener,
     pub owner: parking_lot::Mutex<u64>,
     pub opts: parking_lot::Mutex<Opts>,
-    /// Built at listen; OTP reports certificate problems at handshake.
-    pub config: Result<Arc<rustls::ServerConfig>, alert::Failure>,
     pub closed: tokio::sync::watch::Sender<bool>,
 }
 
 /// Accepted by `transport_accept`, waiting for `handshake`.
 pub struct Pending {
+    pub closed: tokio::sync::watch::Sender<bool>,
     pub io: parking_lot::Mutex<Option<TcpStream>>,
     pub owner: parking_lot::Mutex<u64>,
     pub opts: Opts,
@@ -94,7 +99,10 @@ static SOCKETS: parking_lot::Mutex<Option<HashMap<u64, Socket>>> = parking_lot::
 pub fn register(id: u64, socket: Socket) {
     static HOOK: std::sync::Once = std::sync::Once::new();
     HOOK.call_once(|| tonic_core::sched::on_exit(owner_exited));
-    SOCKETS.lock().get_or_insert_with(HashMap::new).insert(id, socket);
+    SOCKETS
+        .lock()
+        .get_or_insert_with(HashMap::new)
+        .insert(id, socket);
 }
 
 /// The registry id inside `{:sslsocket, ref, _}`.
@@ -136,14 +144,18 @@ pub fn build(ctx: &mut Ctx, f: impl FnOnce(&mut Env) -> Term) -> Term {
 }
 
 pub fn charlist(env: &mut Env, s: &str) -> Term {
-    s.bytes().rev().fold(NIL_LIST, |tail, b| env.cons(small(b as i64), tail))
+    s.bytes()
+        .rev()
+        .fold(NIL_LIST, |tail, b| env.cons(small(b as i64), tail))
 }
 
 pub fn data_term(env: &mut Env, data: &[u8], binary: bool) -> Term {
     if binary {
         env.bytes(data)
     } else {
-        data.iter().rev().fold(NIL_LIST, |tail, b| env.cons(small(*b as i64), tail))
+        data.iter()
+            .rev()
+            .fold(NIL_LIST, |tail, b| env.cons(small(*b as i64), tail))
     }
 }
 
@@ -151,9 +163,13 @@ pub fn close_socket(socket: Socket) {
     match socket {
         Socket::Conn(c) => io::close(c),
         Socket::Listener(l) => {
-            let _ = l.closed.send(true);
+            let _ = l.closed.send_replace(true);
         }
-        Socket::Pending(p) => drop(p.io.lock().take()),
+        Socket::Pending(p) => {
+            callback::cancel(&p.opts.callback_cancel);
+            let _ = p.closed.send_replace(true);
+            drop(p.io.lock().take());
+        }
     }
 }
 
@@ -170,7 +186,11 @@ fn owner_exited(pid: u64) {
     let owned: Vec<Socket> = {
         let mut sockets = SOCKETS.lock();
         let Some(m) = sockets.as_mut() else { return };
-        let ids: Vec<u64> = m.iter().filter(|(_, s)| owner_of(s) == pid).map(|(id, _)| *id).collect();
+        let ids: Vec<u64> = m
+            .iter()
+            .filter(|(_, s)| owner_of(s) == pid)
+            .map(|(id, _)| *id)
+            .collect();
         ids.into_iter().filter_map(|id| m.remove(&id)).collect()
     };
     owned.into_iter().for_each(close_socket);

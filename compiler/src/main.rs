@@ -16,6 +16,7 @@ mod erl_trans;
 mod expand;
 mod expr;
 mod exunit;
+mod inventory;
 mod lexer;
 mod macrohost;
 mod order;
@@ -44,7 +45,7 @@ struct Opts {
     verbose: bool,
 }
 
-const COMMANDS: [&str; 4] = ["run", "build", "emit-llvm", "check"];
+const COMMANDS: [&str; 5] = ["run", "build", "emit-llvm", "check", "test"];
 
 fn usage() -> ! {
     eprintln!("{}", usage_text());
@@ -67,6 +68,8 @@ usage:
   tonic build|run <project dir>           compile a Mix project (lib/, config/)
   tonic emit-llvm <file.ex>... [-o out.ll] write LLVM IR
   tonic check <file.ex>...                parse and expand only
+  tonic inventory                        list bundled API declarations as JSON
+  tonic test [project dir] [paths]       run ExUnit natively; accepts file:line and filters
 
 options:
   -O0 | -O1 | -O2 | -O3   optimization level (default: -O0 for run, -O2 for build)
@@ -98,6 +101,23 @@ fn parse_args() -> Opts {
     if !COMMANDS.contains(&cmd.as_str()) {
         usage_error(&format!("unknown command {:?}", cmd));
     }
+    if cmd == "test" {
+        let mut input = 0;
+        while input < args.len() {
+            match args[input].as_str() {
+                "-O0" | "-O1" | "-O2" | "-O3" | "--keep" | "-v" => input += 1,
+                "-o" => input += 2,
+                _ => break,
+            }
+        }
+        let has_project = args.get(input).is_some_and(|arg| {
+            let path = Path::new(arg);
+            path.join("mix.exs").is_file() || path.file_name().is_some_and(|name| name == "mix.exs")
+        });
+        if !has_project {
+            args.insert(input.min(args.len()), ".".into());
+        }
+    }
     let mut o = Opts {
         cmd,
         inputs: vec![],
@@ -113,6 +133,10 @@ fn parse_args() -> Opts {
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
+        if o.cmd == "test" && !o.inputs.is_empty() {
+            o.args = args[i..].to_vec();
+            break;
+        }
         match a.as_str() {
             "-o" => {
                 i += 1;
@@ -128,11 +152,11 @@ fn parse_args() -> Opts {
                 o.args = args[i + 1..].to_vec();
                 break;
             }
-            _ if a.starts_with('-') && !(o.cmd == "run" && !o.inputs.is_empty()) => {
+            _ if a.starts_with('-') && !(matches!(o.cmd.as_str(), "run" | "test") && !o.inputs.is_empty()) => {
                 usage_error(&format!("unknown option {:?}", a))
             }
             _ => {
-                if o.cmd == "run" && !o.inputs.is_empty() && !(a.ends_with(".ex") || a.ends_with(".exs") || a.ends_with(".erl")) {
+                if matches!(o.cmd.as_str(), "run" | "test") && !o.inputs.is_empty() && !(a.ends_with(".ex") || a.ends_with(".exs") || a.ends_with(".erl")) {
                     o.args = args[i..].to_vec();
                     break;
                 }
@@ -157,7 +181,7 @@ fn parse_args() -> Opts {
     // Mix projects: a directory with mix.exs (or the mix.exs file).
     let mut inputs = Vec::new();
     for i in std::mem::take(&mut o.inputs) {
-        match project::load(&i) {
+        match project::load_with_options(&i, o.cmd == "test", &o.args) {
             Ok(Some(p)) => {
                 if o.output.is_none() && o.cmd == "build" {
                     o.output = Some(p.app.clone());
@@ -182,7 +206,7 @@ fn parse_args() -> Opts {
     o.inputs = inputs;
     if o.opt.is_empty() {
         // `run` favours fast compiles; `build` favours fast code.
-        o.opt = if o.cmd == "run" { "-O0".into() } else { "-O2".into() };
+        o.opt = if matches!(o.cmd.as_str(), "run" | "test") { "-O0".into() } else { "-O2".into() };
     }
     o
 }
@@ -340,11 +364,14 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
                 Some(("Elixir.Kernel".to_string(), n.to_string(), a.parse().ok()?))
             })
             .collect();
-        keys.extend(ex.macros.keys().cloned());
+        keys.extend(ex.macros.iter().filter(|(_, definition)| definition.public).map(|(key, _)| key.clone()));
         // defguards are macros too (Integer.is_even/1)
-        keys.extend(ex.mods.values().flat_map(|m| m.guards.keys().map(move |(n, a)| (m.name.clone(), n.clone(), *a))));
+        keys.extend(ex.mods.values().flat_map(|m| m.guards.keys()
+            .filter(|key| !m.private_guards.contains(*key))
+            .map(move |(n, a)| (m.name.clone(), n.clone(), *a))));
         keys.sort();
         keys.dedup();
+        let vs: Vec<VarId> = (0..3).map(|_| ex.new_var()).collect();
         let mut clauses: Vec<Clause> = keys
             .into_iter()
             .map(|(m, f, a)| Clause {
@@ -353,8 +380,10 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
                 body: CE::atom("true"),
             })
             .collect();
-        clauses.push(Clause { pats: vec![Pat::Wild, Pat::Wild, Pat::Wild], guard: None, body: CE::atom("false") });
-        let vs: Vec<VarId> = (0..3).map(|_| ex.new_var()).collect();
+        clauses.push(Clause {
+            pats: vec![Pat::Wild, Pat::Wild, Pat::Wild], guard: None,
+            body: CE::Bif("tn_macro_exported".into(), vs.iter().map(|var| CE::Var(*var)).collect()),
+        });
         ex.out.push(FunDef {
             key: FunKey::new("Elixir.Tonic.Internal", "macro_exported?", 3),
             params: vs.clone(),
@@ -421,7 +450,7 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
     if prelude.is_some() {
         table_externs = defs
             .iter()
-            .filter(|f| is_prelude_def(f))
+            .filter(|f| is_prelude_def(f) && f.public)
             .map(|f| (f.key.module.clone(), f.key.name.clone(), f.key.arity, f.key.symbol()))
             .collect();
         defs.retain(|f| !is_prelude_def(f));
@@ -436,6 +465,8 @@ fn compile_to_ir(o: &Opts) -> Result<(String, Option<PathBuf>), String> {
     }
     seed.extend(atoms.iter().cloned());
     let mut g = codegen::Gen::new(&seed, beam_atoms::Assigner::new(&created));
+    g.declared_exports = ex.out.iter().filter(|f| f.public)
+        .map(|f| (f.key.module.clone(), f.key.name.clone(), f.key.arity)).collect();
     if prelude.is_some() {
         g.mode = codegen::Mode::Program;
         g.externs = ex.out.iter().filter(|f| is_prelude_def(f)).map(|f| f.key.symbol()).collect();
@@ -589,6 +620,17 @@ fn main() -> ExitCode {
 }
 
 fn compile_main() -> ExitCode {
+    if std::env::args().nth(1).as_deref() == Some("inventory") {
+        if std::env::args().len() != 2 {
+            usage_error("inventory does not accept arguments");
+        }
+        let result = inventory::run();
+        macrohost::shutdown();
+        return match result {
+            Ok(json) => { print!("{}", json); ExitCode::SUCCESS }
+            Err(error) => { eprintln!("tonic: {}", error); ExitCode::from(1) }
+        };
+    }
     let o = parse_args();
     let t0 = std::time::Instant::now();
     let compiled = compile_to_ir(&o);
@@ -627,7 +669,7 @@ fn compile_main() -> ExitCode {
                 }
             }
         }
-        "run" => {
+        "run" | "test" => {
             let tmp = std::env::temp_dir().join(format!("tonic-run-{}", std::process::id()));
             if let Err(e) = build(&o, &ir, prelude_obj.as_deref(), &tmp) {
                 eprintln!("tonic: {}", e);

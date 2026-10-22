@@ -6,15 +6,19 @@
 //! blocks a scheduler thread. Active mode delivers `{:tcp, socket, data}`,
 //! `{:tcp_closed, socket}` and `{:tcp_error, socket, reason}` to the owner.
 
+mod config;
+pub mod packet;
+
 use crate::bif_core::cx;
 use crate::heap::Ctx;
 use crate::nif::Env;
 use crate::term::*;
+use config::Options;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpSocket, TcpStream};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Active {
@@ -24,15 +28,9 @@ pub enum Active {
     Count(i64),
 }
 
-struct Options {
-    active: Active,
-    nodelay: bool,
-    /// `exit_on_close: false`: a read that finds the peer gone leaves the
-    /// socket open
-    keep_open: bool,
-}
-
 struct State {
+    options: Options,
+    pending: Option<Vec<u8>>,
     owner: u64,
     active: Active,
     buffer: Vec<u8>,
@@ -72,7 +70,10 @@ static SOCKETS: parking_lot::Mutex<Option<HashMap<u64, Socket>>> = parking_lot::
 
 fn register(socket: Socket) -> u64 {
     let id = crate::sched::next_ref_id();
-    SOCKETS.lock().get_or_insert_with(HashMap::new).insert(id, socket);
+    SOCKETS
+        .lock()
+        .get_or_insert_with(HashMap::new)
+        .insert(id, socket);
     id
 }
 
@@ -80,7 +81,10 @@ fn lookup(t: Term) -> Option<Socket> {
     if !is_ref(t) {
         return None;
     }
-    SOCKETS.lock().as_ref().and_then(|m| m.get(&word(t, 1)).cloned())
+    SOCKETS
+        .lock()
+        .as_ref()
+        .and_then(|m| m.get(&word(t, 1)).cloned())
 }
 
 pub fn a(name: &str) -> Term {
@@ -150,7 +154,12 @@ pub fn ip_term(env: &mut Env, ip: IpAddr) -> Term {
     match ip {
         IpAddr::V4(v4) => {
             let o = v4.octets();
-            env.tuple(&[small(o[0] as i64), small(o[1] as i64), small(o[2] as i64), small(o[3] as i64)])
+            env.tuple(&[
+                small(o[0] as i64),
+                small(o[1] as i64),
+                small(o[2] as i64),
+                small(o[3] as i64),
+            ])
         }
         IpAddr::V6(v6) => {
             let s: Vec<Term> = v6.segments().iter().map(|x| small(*x as i64)).collect();
@@ -168,6 +177,13 @@ fn address_term(env: &mut Env, addr: SocketAddr) -> Term {
 // Option parsing (terms of the calling process)
 // ---------------------------------------------------------------------------
 
+pub fn proper_list(mut list: Term) -> bool {
+    while is_cons(list) {
+        list = tail(list);
+    }
+    list == NIL_LIST
+}
+
 pub fn list_items(mut l: Term) -> Vec<Term> {
     let mut items = Vec::new();
     while is_cons(l) {
@@ -182,7 +198,10 @@ pub fn option(t: Term) -> Option<(&'static str, Term)> {
         return Some((crate::atoms::name(atom_idx(t)), TRUE));
     }
     if is_tuple(t) && tuple_size(t) == 2 && is_atom(tuple_get(t, 0)) {
-        return Some((crate::atoms::name(atom_idx(tuple_get(t, 0))), tuple_get(t, 1)));
+        return Some((
+            crate::atoms::name(atom_idx(tuple_get(t, 0))),
+            tuple_get(t, 1),
+        ));
     }
     None
 }
@@ -205,12 +224,23 @@ pub fn ip_of(v: Term) -> Option<IpAddr> {
     if !is_tuple(v) {
         return None;
     }
-    let parts: Vec<i64> = (0..tuple_size(v)).map(|i| tuple_get(v, i)).filter(|x| is_small(*x)).map(small_val).collect();
+    let parts: Vec<i64> = (0..tuple_size(v))
+        .map(|i| tuple_get(v, i))
+        .filter(|x| is_small(*x))
+        .map(small_val)
+        .collect();
     match parts.len() {
-        4 if tuple_size(v) == 4 => Some(IpAddr::V4(Ipv4Addr::new(parts[0] as u8, parts[1] as u8, parts[2] as u8, parts[3] as u8))),
+        4 if tuple_size(v) == 4 => Some(IpAddr::V4(Ipv4Addr::new(
+            parts[0] as u8,
+            parts[1] as u8,
+            parts[2] as u8,
+            parts[3] as u8,
+        ))),
         8 if tuple_size(v) == 8 => {
             let s: Vec<u16> = parts.iter().map(|x| *x as u16).collect();
-            Some(IpAddr::V6(Ipv6Addr::new(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7])))
+            Some(IpAddr::V6(Ipv6Addr::new(
+                s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7],
+            )))
         }
         _ => None,
     }
@@ -245,26 +275,29 @@ pub extern "C" fn tn_tcp_listen(c: *mut Ctx, port: Term, opts: Term) -> Term {
     if !is_small(port) || !(0..=65535).contains(&small_val(port)) {
         return ctx.badarg("argument error");
     }
-    let mut ip = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-    let mut options = Options { active: Active::On, nodelay: false, keep_open: false };
-    for item in list_items(opts) {
-        match option(item) {
-            Some(("ip" | "ifaddr", v)) => match ip_of(v) {
-                Some(addr) => ip = addr,
-                None => return ctx_result(ctx, None, Some("einval")),
-            },
-            Some(("inet6", _)) => ip = IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            Some(("active", v)) => options.active = active_of(v).unwrap_or(Active::On),
-            Some(("nodelay", v)) => options.nodelay = v == TRUE,
-            Some(("exit_on_close", v)) => options.keep_open = v != TRUE,
-            _ => {}
-        }
+    let mut options = Options::default();
+    if config::apply(&mut options, opts).is_none() {
+        return ctx_result(ctx, None, Some("einval"));
     }
-    let bound = std::net::TcpListener::bind(SocketAddr::new(ip, small_val(port) as u16)).and_then(|l| {
-        l.set_nonblocking(true)?;
-        let _guard = crate::sched::runtime().enter();
-        TcpListener::from_std(l)
+    let ip = options.ip.unwrap_or(if options.inet6 {
+        IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+    } else {
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
     });
+    let bound = (|| {
+        let address = SocketAddr::new(ip, small_val(port) as u16);
+        let socket = socket2::Socket::new(
+            socket2::Domain::for_address(address),
+            socket2::Type::STREAM,
+            Some(socket2::Protocol::TCP),
+        )?;
+        config::transport(&socket, &options, address.is_ipv6())?;
+        socket.bind(&address.into())?;
+        socket.listen(options.backlog)?;
+        socket.set_nonblocking(true)?;
+        let _guard = crate::sched::runtime().enter();
+        TcpListener::from_std(socket.into())
+    })();
     match bound {
         Ok(io) => {
             let id = register(Socket::Listener(Arc::new(Listener {
@@ -280,11 +313,15 @@ pub extern "C" fn tn_tcp_listen(c: *mut Ctx, port: Term, opts: Term) -> Term {
     }
 }
 
-fn adopt(io: TcpStream, owner: u64, options: &Options) -> u64 {
-    let _ = io.set_nodelay(options.nodelay);
+fn adopt(io: TcpStream, owner: u64, options: &Options) -> Result<u64, &'static str> {
+    let socket = socket2::SockRef::from(&io);
+    config::transport(&socket, options, io.local_addr().is_ok_and(|a| a.is_ipv6()))
+        .map_err(|e| posix(&e))?;
     let stream = Arc::new(Stream {
         io,
         state: parking_lot::Mutex::new(State {
+            options: options.clone(),
+            pending: None,
             owner,
             active: options.active,
             buffer: Vec::new(),
@@ -306,7 +343,7 @@ fn adopt(io: TcpStream, owner: u64, options: &Options) -> u64 {
     if active != Active::Passive {
         start_reader(id, stream);
     }
-    id
+    Ok(id)
 }
 
 /// Starts an operation: returns its reference to the caller, who waits for
@@ -316,7 +353,10 @@ pub fn operation(ctx: &mut Ctx) -> (Term, u64, u64) {
     (crate::sched::mk_ref_term(ctx, op), op, ctx.pid())
 }
 
-pub async fn with_timeout<T>(timeout: Option<Duration>, f: impl std::future::Future<Output = T>) -> Option<T> {
+pub async fn with_timeout<T>(
+    timeout: Option<Duration>,
+    f: impl std::future::Future<Output = T>,
+) -> Option<T> {
     match timeout {
         Some(d) => tokio::time::timeout(d, f).await.ok(),
         None => Some(f.await),
@@ -346,12 +386,12 @@ pub extern "C" fn tn_tcp_accept(c: *mut Ctx, socket: Term, timeout: Term) -> Ter
             Some(Ok((io, _))) => {
                 let id = {
                     let options = listener.options.lock();
-                    let options = Options { active: options.active, nodelay: options.nodelay, keep_open: options.keep_open };
+                    let options = options.clone();
                     adopt(io, pid, &options)
                 };
-                reply(pid, op, |env| {
-                    let s = socket_term(env, id);
-                    ok_with(env, s)
+                reply(pid, op, |env| match id {
+                    Ok(id) => { let s = socket_term(env, id); ok_with(env, s) }
+                    Err(reason) => error_with(env, reason),
                 })
             }
             Some(Err(e)) => reply(pid, op, |env| error_with(env, posix(&e))),
@@ -368,7 +408,13 @@ pub fn host_of(address: Term) -> Option<String> {
     } else if is_atom(address) {
         Some(crate::atoms::name(atom_idx(address)).to_string())
     } else if is_list(address) {
-        Some(list_items(address).iter().filter(|x| is_small(**x)).map(|x| small_val(*x) as u8 as char).collect())
+        Some(
+            list_items(address)
+                .iter()
+                .filter(|x| is_small(**x))
+                .map(|x| small_val(*x) as u8 as char)
+                .collect(),
+        )
     } else if is_binary(address) {
         Some(String::from_utf8_lossy(bin_bytes(address)).into_owned())
     } else {
@@ -377,37 +423,80 @@ pub fn host_of(address: Term) -> Option<String> {
 }
 
 #[no_mangle]
-pub extern "C" fn tn_tcp_connect(c: *mut Ctx, address: Term, port: Term, opts: Term, timeout: Term) -> Term {
+pub extern "C" fn tn_tcp_connect(
+    c: *mut Ctx,
+    address: Term,
+    port: Term,
+    opts: Term,
+    timeout: Term,
+) -> Term {
     let ctx = cx(c);
     let target = match (host_of(address), is_small(port)) {
         (Some(h), true) => Some((h, small_val(port) as u16)),
         _ => None,
     };
-    let mut options = Options { active: Active::On, nodelay: false, keep_open: false };
-    for item in list_items(opts) {
-        match option(item) {
-            Some(("active", v)) => options.active = active_of(v).unwrap_or(Active::On),
-            Some(("nodelay", v)) => options.nodelay = v == TRUE,
-            Some(("exit_on_close", v)) => options.keep_open = v != TRUE,
-            _ => {}
-        }
-    }
+    let mut options = Options::default();
+    let configured = config::apply(&mut options, opts).is_some();
     let timeout = timeout_of(timeout);
     let (r, op, pid) = operation(ctx);
-    let Some((host, port)) = target else {
+    let Some((host, port)) = target.filter(|_| configured) else {
         reply(pid, op, |env| error_with(env, "einval"));
         return r;
     };
     crate::sched::runtime().spawn(async move {
-        match with_timeout(timeout, TcpStream::connect((host.as_str(), port))).await {
+        let connect = async {
+            let addresses: Vec<SocketAddr> = if let Ok(ip) = host.parse::<IpAddr>() {
+                vec![SocketAddr::new(ip, port)]
+            } else {
+                tokio::net::lookup_host((host.as_str(), port))
+                    .await
+                    .map_err(|_| "nxdomain")?
+                    .filter(|address| address.is_ipv6() == options.inet6)
+                    .collect()
+            };
+            let mut last = "nxdomain";
+            for address in addresses {
+                let socket = if address.is_ipv6() {
+                    TcpSocket::new_v6()
+                } else {
+                    TcpSocket::new_v4()
+                }
+                .map_err(|e| posix(&e))?;
+                config::transport(
+                    &socket2::SockRef::from(&socket),
+                    &options,
+                    address.is_ipv6(),
+                )
+                .map_err(|e| posix(&e))?;
+                if options.ip.is_some() || options.port != 0 {
+                    let ip = options.ip.unwrap_or(if address.is_ipv6() {
+                        IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+                    } else {
+                        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+                    });
+                    socket
+                        .bind(SocketAddr::new(ip, options.port))
+                        .map_err(|e| posix(&e))?;
+                }
+                match socket.connect(address).await {
+                    Ok(io) => return Ok(io),
+                    Err(error) => last = posix(&error),
+                }
+            }
+            Err(last)
+        };
+        match with_timeout(timeout, connect).await {
             Some(Ok(io)) => {
                 let id = adopt(io, pid, &options);
-                reply(pid, op, |env| {
-                    let s = socket_term(env, id);
-                    ok_with(env, s)
+                reply(pid, op, |env| match id {
+                    Ok(id) => {
+                        let s = socket_term(env, id);
+                        ok_with(env, s)
+                    }
+                    Err(reason) => error_with(env, reason),
                 })
             }
-            Some(Err(e)) => reply(pid, op, |env| error_with(env, posix(&e))),
+            Some(Err(reason)) => reply(pid, op, |env| error_with(env, reason)),
             None => reply(pid, op, |env| error_with(env, "timeout")),
         }
     });
@@ -431,10 +520,15 @@ async fn read(stream: &Stream, length: usize) -> Read {
     loop {
         {
             let mut st = stream.state.lock();
-            let have = st.buffer.len();
-            if (length == 0 && have > 0) || (length > 0 && have >= length) {
-                let n = if length == 0 { have } else { length };
-                let data: Vec<u8> = st.buffer.drain(..n).collect();
+            if let Some(data) = st.pending.take() {
+                return Read::Data(data);
+            }
+            if packet::too_large(st.options.packet, &st.buffer, st.options.packet_size) {
+                return Read::Failed("emsgsize");
+            }
+            if let Some(frame) = packet::frame(st.options.packet, &st.buffer, length) {
+                let data = st.buffer[frame.skip..frame.skip + frame.len].to_vec();
+                st.buffer.drain(..frame.skip + frame.len);
                 return Read::Data(data);
             }
             if st.closed {
@@ -448,7 +542,7 @@ async fn read(stream: &Stream, length: usize) -> Read {
         if let Err(e) = ready {
             return Read::Failed(posix(&e));
         }
-        let mut chunk = vec![0u8; 65536];
+        let mut chunk = vec![0u8; stream.state.lock().options.buffer];
         match stream.io.try_read(&mut chunk) {
             Ok(0) => {
                 let mut st = stream.state.lock();
@@ -487,6 +581,10 @@ pub extern "C" fn tn_tcp_recv(c: *mut Ctx, socket: Term, length: Term, timeout: 
         reply(pid, op, |env| error_with(env, "einval"));
         return r;
     };
+    if stream.state.lock().active != Active::Passive {
+        reply(pid, op, |env| error_with(env, "einval"));
+        return r;
+    }
     if stream.state.lock().shut {
         reply(pid, op, |env| error_with(env, "enotconn"));
         return r;
@@ -494,7 +592,8 @@ pub extern "C" fn tn_tcp_recv(c: *mut Ctx, socket: Term, length: Term, timeout: 
     crate::sched::runtime().spawn(async move {
         match with_timeout(timeout, read(&stream, length)).await {
             Some(Read::Data(data)) => reply(pid, op, |env| {
-                let b = env.bytes(&data);
+                let options = &stream.state.lock().options;
+                let b = data_term(env, &data, options.binary, options.header);
                 ok_with(env, b)
             }),
             Some(Read::Closed) => {
@@ -515,7 +614,7 @@ pub extern "C" fn tn_tcp_recv(c: *mut Ctx, socket: Term, length: Term, timeout: 
 fn start_reader(id: u64, stream: Arc<Stream>) {
     {
         let mut st = stream.state.lock();
-        if st.reading || st.active == Active::Passive {
+        if st.reading || st.closed || st.active == Active::Passive {
             return;
         }
         st.reading = true;
@@ -529,9 +628,7 @@ fn start_reader(id: u64, stream: Arc<Stream>) {
                 Read::Data(data) => {
                     if st.active == Active::Passive {
                         // Turned passive while waiting: keep the data for recv.
-                        let rest = std::mem::take(&mut st.buffer);
-                        st.buffer = data;
-                        st.buffer.extend(rest);
+                        st.pending = Some(data);
                         st.reading = false;
                         return;
                     }
@@ -549,10 +646,11 @@ fn start_reader(id: u64, stream: Arc<Stream>) {
                     if done {
                         st.reading = false;
                     }
+                    let (binary, header) = (st.options.binary, st.options.header);
                     drop(st);
                     deliver(owner, |env| {
                         let s = socket_term(env, id);
-                        let b = env.bytes(&data);
+                        let b = data_term(env, &data, binary, header);
                         env.tuple(&[a("tcp"), s, b])
                     });
                     if passive {
@@ -588,6 +686,21 @@ fn start_reader(id: u64, stream: Arc<Stream>) {
     });
 }
 
+fn data_term(env: &mut Env, data: &[u8], binary: bool, header: usize) -> Term {
+    if !binary {
+        return data
+            .iter()
+            .rev()
+            .fold(NIL_LIST, |tail, byte| env.cons(small(*byte as i64), tail));
+    }
+    let count = header.min(data.len());
+    let tail = env.bytes(&data[count..]);
+    data[..count]
+        .iter()
+        .rev()
+        .fold(tail, |tail, byte| env.cons(small(*byte as i64), tail))
+}
+
 // ---------------------------------------------------------------------------
 // Writing
 // ---------------------------------------------------------------------------
@@ -605,7 +718,12 @@ async fn write_all(stream: &Stream, data: &[u8]) -> Result<(), &'static str> {
         match stream.io.try_write(&data[written..]) {
             Ok(n) => written += n,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset) => {
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
+                ) =>
+            {
                 return Err("closed")
             }
             Err(e) => return Err(posix(&e)),
@@ -630,6 +748,11 @@ pub extern "C" fn tn_tcp_send(c: *mut Ctx, socket: Term, data: Term) -> Term {
     if !crate::nif::flatten_iolist(data, &mut bytes) {
         return ctx.badarg("argument error");
     }
+    let header = match packet::header(stream.state.lock().options.packet, bytes.len()) {
+        Ok(header) => header,
+        Err(reason) => return ctx_result(ctx, None, Some(reason)),
+    };
+    bytes.splice(0..0, header);
     if let Ok(_guard) = stream.writes.try_lock() {
         let mut written = 0;
         loop {
@@ -644,7 +767,12 @@ pub extern "C" fn tn_tcp_send(c: *mut Ctx, socket: Term, data: Term) -> Term {
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) if matches!(e.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset) => {
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
+                    ) =>
+                {
                     return ctx_result(ctx, None, Some("closed"))
                 }
                 Err(e) => return ctx_result(ctx, None, Some(posix(&e))),
@@ -652,12 +780,27 @@ pub extern "C" fn tn_tcp_send(c: *mut Ctx, socket: Term, data: Term) -> Term {
         }
         bytes.drain(..written);
     }
+    let socket_id = word(socket, 1);
     let (r, op, pid) = operation(ctx);
     crate::sched::runtime().spawn(async move {
         let _guard = stream.writes.lock().await;
-        match write_all(&stream, &bytes).await {
-            Ok(()) => reply(pid, op, |_| atom(a::OK)),
-            Err(reason) => reply(pid, op, |env| error_with(env, reason)),
+        let (timeout, close_on_timeout) = {
+            let st = stream.state.lock();
+            (st.options.send_timeout, st.options.send_timeout_close)
+        };
+        match with_timeout(timeout, write_all(&stream, &bytes)).await {
+            Some(Ok(())) => reply(pid, op, |_| atom(a::OK)),
+            Some(Err(reason)) => reply(pid, op, |env| error_with(env, reason)),
+            None => {
+                if close_on_timeout {
+                    SOCKETS
+                        .lock()
+                        .as_mut()
+                        .and_then(|sockets| sockets.remove(&socket_id));
+                    close(Socket::Stream(stream.clone()));
+                }
+                reply(pid, op, |env| error_with(env, "timeout"));
+            }
         }
     });
     r
@@ -672,7 +815,10 @@ pub extern "C" fn tn_tcp_close(_c: *mut Ctx, socket: Term) -> Term {
     if !is_ref(socket) || crate::udp::remove(socket) {
         return atom(a::OK);
     }
-    let removed = SOCKETS.lock().as_mut().and_then(|m| m.remove(&word(socket, 1)));
+    let removed = SOCKETS
+        .lock()
+        .as_mut()
+        .and_then(|m| m.remove(&word(socket, 1)));
     if let Some(s) = removed {
         close(s);
     }
@@ -699,7 +845,9 @@ pub fn detach(socket: Term) -> Option<std::net::TcpStream> {
     }
     let mut sockets = SOCKETS.lock();
     let m = sockets.as_mut()?;
-    let Some(Socket::Stream(s)) = m.get(&word(socket, 1)).cloned() else { return None };
+    let Some(Socket::Stream(s)) = m.get(&word(socket, 1)).cloned() else {
+        return None;
+    };
     let fd = unsafe { libc::dup(s.io.as_raw_fd()) };
     if fd < 0 {
         return None;
@@ -728,7 +876,11 @@ pub fn owner_exited(pid: u64) {
     let owned: Vec<Socket> = {
         let mut sockets = SOCKETS.lock();
         let Some(m) = sockets.as_mut() else { return };
-        let ids: Vec<u64> = m.iter().filter(|(_, s)| owner_of(s) == pid).map(|(id, _)| *id).collect();
+        let ids: Vec<u64> = m
+            .iter()
+            .filter(|(_, s)| owner_of(s) == pid)
+            .map(|(id, _)| *id)
+            .collect();
         ids.into_iter().filter_map(|id| m.remove(&id)).collect()
     };
     owned.into_iter().for_each(close);
@@ -788,40 +940,74 @@ pub extern "C" fn tn_inet_setopts(c: *mut Ctx, socket: Term, opts: Term) -> Term
     if let Some(udp) = crate::udp::lookup(socket) {
         return crate::udp::setopts(ctx, udp, socket, opts);
     }
+    if !proper_list(opts) {
+        return ctx_result(ctx, None, Some("einval"));
+    }
     let socket_value = lookup(socket);
     let Some(socket_value) = socket_value else {
         return ctx_result(ctx, None, Some("einval"));
     };
-    for item in list_items(opts) {
-        match (option(item), &socket_value) {
-            (Some(("active", v)), Socket::Stream(s)) => {
-                let Some(active) = active_of(v) else {
-                    return ctx_result(ctx, None, Some("einval"));
-                };
+    let items = list_items(opts);
+    if items.iter().any(|item| {
+        matches!(
+            option(*item),
+            Some(("ip" | "ifaddr" | "inet" | "inet6" | "port" | "backlog", _))
+        )
+    }) {
+        return ctx_result(ctx, None, Some("einval"));
+    }
+    match socket_value {
+        Socket::Stream(stream) => {
+            let mut next = stream.state.lock().options.clone();
+            next.settings.clear();
+            if config::apply(&mut next, opts).is_none() {
+                return ctx_result(ctx, None, Some("einval"));
+            }
+            if let Err(error) = config::transport(
+                &socket2::SockRef::from(&stream.io),
+                &next,
+                stream.io.local_addr().is_ok_and(|a| a.is_ipv6()),
+            ) {
+                return ctx_result(ctx, None, Some(posix(&error)));
+            }
+            {
+                let mut st = stream.state.lock();
+                if items
+                    .iter()
+                    .any(|item| matches!(option(*item), Some(("active", _))))
                 {
-                    let mut st = s.state.lock();
-                    st.active = match (st.active, active) {
+                    st.active = match (st.active, next.active) {
                         (Active::Count(n), Active::Count(m)) => Active::Count(n + m),
                         (_, other) => other,
                     };
+                    if matches!(st.active, Active::Count(n) if n <= 0) {
+                        st.active = Active::Passive;
+                        deliver(st.owner, |env| {
+                            let socket = socket_term(env, word(socket, 1));
+                            env.tuple(&[a("tcp_passive"), socket])
+                        });
+                    }
                 }
-                start_reader(word(socket, 1), s.clone());
+                next.active = st.active;
+                st.keep_open = next.keep_open;
+                st.options = next;
             }
-            (Some(("active", v)), Socket::Listener(l)) => {
-                if let Some(active) = active_of(v) {
-                    l.options.lock().active = active;
-                }
+            start_reader(word(socket, 1), stream);
+        }
+        Socket::Listener(listener) => {
+            let mut next = listener.options.lock().clone();
+            next.settings.clear();
+            if config::apply(&mut next, opts).is_none() {
+                return ctx_result(ctx, None, Some("einval"));
             }
-            (Some(("nodelay", v)), Socket::Stream(s)) => {
-                let _ = s.io.set_nodelay(v == TRUE);
+            if let Err(error) = config::transport(
+                &socket2::SockRef::from(&listener.io),
+                &next,
+                listener.io.local_addr().is_ok_and(|a| a.is_ipv6()),
+            ) {
+                return ctx_result(ctx, None, Some(posix(&error)));
             }
-            (Some(("nodelay", v)), Socket::Listener(l)) => l.options.lock().nodelay = v == TRUE,
-            (Some(("exit_on_close", v)), Socket::Stream(s)) => s.state.lock().keep_open = v != TRUE,
-            (Some(("exit_on_close", v)), Socket::Listener(l)) => l.options.lock().keep_open = v != TRUE,
-            (Some(("packet", v)), _) if v != small(0) && !(is_atom(v) && crate::atoms::name(atom_idx(v)) == "raw") => {
-                return ctx_result(ctx, None, Some("einval"))
-            }
-            _ => {}
+            *listener.options.lock() = next;
         }
     }
     atom(a::OK)
@@ -830,22 +1016,38 @@ pub extern "C" fn tn_inet_setopts(c: *mut Ctx, socket: Term, opts: Term) -> Term
 #[no_mangle]
 pub extern "C" fn tn_inet_getopts(c: *mut Ctx, socket: Term, opts: Term) -> Term {
     let ctx = cx(c);
+    if !proper_list(opts) {
+        return ctx_result(ctx, None, Some("einval"));
+    }
     if let Some(udp) = crate::udp::lookup(socket) {
         return crate::udp::getopts(ctx, udp, opts);
     }
     let Some(socket_value) = lookup(socket) else {
         return ctx_result(ctx, None, Some("einval"));
     };
-    let mut found: Vec<(&'static str, Term)> = Vec::new();
+    let (options, active) = match &socket_value {
+        Socket::Stream(stream) => {
+            let st = stream.state.lock();
+            (st.options.clone(), st.active)
+        }
+        Socket::Listener(listener) => {
+            let options = listener.options.lock().clone();
+            let active = options.active;
+            (options, active)
+        }
+    };
+    let socket = match &socket_value {
+        Socket::Stream(stream) => socket2::SockRef::from(&stream.io),
+        Socket::Listener(listener) => socket2::SockRef::from(&listener.io),
+    };
+    let ipv6 = socket.local_addr().is_ok_and(|a| a.is_ipv6());
+    let mut env = Env::new(std::ptr::null_mut(), std::ptr::null_mut());
+    let mut found = Vec::new();
     for item in list_items(opts) {
         if !is_atom(item) {
-            continue;
+            return ctx_result(ctx, None, Some("einval"));
         }
         let name = crate::atoms::name(atom_idx(item));
-        let active = match &socket_value {
-            Socket::Stream(s) => s.state.lock().active,
-            Socket::Listener(l) => l.options.lock().active,
-        };
         let value = match name {
             "active" => match active {
                 Active::Passive => FALSE,
@@ -853,25 +1055,39 @@ pub extern "C" fn tn_inet_getopts(c: *mut Ctx, socket: Term, opts: Term) -> Term
                 Active::Once => a("once"),
                 Active::Count(n) => small(n),
             },
-            "nodelay" => match &socket_value {
-                Socket::Stream(s) => boolean(s.io.nodelay().unwrap_or(false)),
-                Socket::Listener(l) => boolean(l.options.lock().nodelay),
-            },
-            "mode" => a("binary"),
-            "packet" => small(0),
-            "sndbuf" | "recbuf" | "buffer" => small(65536),
-            "keepalive" | "reuseaddr" => FALSE,
-            _ => continue,
+            "mode" => a(if options.binary { "binary" } else { "list" }),
+            "packet" => packet::term(options.packet),
+            "header" => small(options.header as i64),
+            "packet_size" => small(options.packet_size as i64),
+            "buffer" => small(options.buffer as i64),
+            "send_timeout" => options
+                .send_timeout
+                .map(|duration| small(duration.as_millis() as i64))
+                .unwrap_or(a("infinity")),
+            "send_timeout_close" => boolean(options.send_timeout_close),
+            "exit_on_close" => boolean(!options.keep_open),
+            name => {
+                let value = match name {
+                    "nodelay" => socket.tcp_nodelay().map(boolean),
+                    "keepalive" => socket.keepalive().map(boolean),
+                    "reuseaddr" => socket.reuse_address().map(boolean),
+                    "sndbuf" => socket.send_buffer_size().map(|n| small(n as i64)),
+                    "recbuf" => socket.recv_buffer_size().map(|n| small(n as i64)),
+                    _ => crate::udp::options::get(&socket, ipv6, name, &mut env),
+                };
+                match value {
+                    Ok(value) => value,
+                    Err(error) => return ctx_result(ctx, None, Some(posix(&error))),
+                }
+            }
         };
-        found.push((name, value));
+        found.push(env.tuple(&[a(name), value]));
     }
-    let base = ctx.roots.len();
-    for (name, value) in &found {
-        let t = ctx.tuple(&[a(name), *value]);
-        ctx.roots.push(t);
-    }
-    let list = ctx.list_from_roots(base, found.len(), NIL_LIST);
-    ctx.roots.truncate(base);
+    let list = found
+        .iter()
+        .rev()
+        .fold(NIL_LIST, |tail, pair| env.cons(*pair, tail));
+    let list = ctx.copy_in_by(list, &|p| env.owns_address(p));
     ctx_result(ctx, Some(list), None)
 }
 
@@ -881,8 +1097,16 @@ fn endpoint(c: *mut Ctx, socket: Term, peer: bool) -> Term {
         return crate::udp::endpoint(ctx, udp, peer);
     }
     let addr = match lookup(socket) {
-        Some(Socket::Stream(s)) if s.state.lock().shut => return ctx_result(ctx, None, Some(if peer { "enotconn" } else { "ebadf" })),
-        Some(Socket::Stream(s)) => if peer { s.io.peer_addr() } else { s.io.local_addr() },
+        Some(Socket::Stream(s)) if s.state.lock().shut => {
+            return ctx_result(ctx, None, Some(if peer { "enotconn" } else { "ebadf" }))
+        }
+        Some(Socket::Stream(s)) => {
+            if peer {
+                s.io.peer_addr()
+            } else {
+                s.io.local_addr()
+            }
+        }
         Some(Socket::Listener(l)) if !peer => l.io.local_addr(),
         Some(Socket::Listener(_)) => return ctx_result(ctx, None, Some("enotconn")),
         None => return ctx_result(ctx, None, Some("einval")),
@@ -931,4 +1155,3 @@ pub extern "C" fn tn_inet_getstat(c: *mut Ctx, socket: Term) -> Term {
     ctx.roots.truncate(base);
     ctx_result(ctx, Some(list), None)
 }
-

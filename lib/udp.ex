@@ -11,6 +11,16 @@ defmodule :gen_udp do
     end
   end
 
+  def connect(socket, %{addr: address, port: port}), do: connect(socket, address, port)
+  def connect(socket, address, port), do: await(:tonic.udp_connect(socket, address, port))
+
+  def send(socket, data) do
+    case :tonic.udp_send_connected(socket, data) do
+      ref when is_reference(ref) -> await(ref)
+      result -> result
+    end
+  end
+
   def send(socket, {address, port}, data), do: send(socket, address, port, data)
   def send(socket, %{addr: address, port: port}, data), do: send(socket, address, port, data)
 

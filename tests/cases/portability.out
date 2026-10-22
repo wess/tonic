@@ -1,0 +1,24 @@
+{:portable, "HÉLLO"}
+{:type, :external}
+[
+  {nil, :no, true},
+  {false, :no, true},
+  {:yes, true, false},
+  {:yes, 0, false},
+  {:yes, [], false},
+  {:yes, "", false},
+  {:yes, {}, false},
+  {:yes, %{}, false}
+]
+{true, false, 2}
+[false, false, true, false, false, false, false]
+{3, 1, 2}
+[1, 2]
+1000000000000000000000
+{:other, :list}
+{false, [nonnegative: 1]}
+nil
+{KeyError, :missing}
+selective receive retained the first message
+monitored exit
+PORTABLE

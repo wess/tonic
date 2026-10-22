@@ -1254,21 +1254,60 @@ pub extern "C" fn tn_lookup_mfa(c: *mut Ctx, m: Term, f: Term, arity: u64) -> *c
     }
 }
 
-#[no_mangle]
-pub extern "C" fn tn_function_exported(_c: *mut Ctx, m: Term, f: Term, arity: Term) -> Term {
-    if !is_atom(m) || !is_atom(f) || !is_small(arity) {
-        return FALSE;
-    }
-    let ar = small_val(arity);
-    if f == atom(crate::atoms::intern("module_info")) && (ar == 0 || ar == 1) {
-        return boolean(crate::sched::module_exists(m));
-    }
-    boolean(crate::sched::lookup_fun(m, f, ar as u64).is_some())
+fn eval_entry(name: &str, arity: u64) -> Option<*const c_void> {
+    let module = atom(crate::atoms::intern("Elixir.Tonic.Eval.Modules"));
+    let name = atom(crate::atoms::intern(name));
+    crate::sched::lookup_fun(module, name, arity).map(|pointer| pointer as *const c_void)
 }
 
 #[no_mangle]
-pub extern "C" fn tn_module_loaded(_c: *mut Ctx, m: Term) -> Term {
-    boolean(is_atom(m) && crate::sched::module_exists(m))
+pub extern "C" fn tn_function_exported(c: *mut Ctx, m: Term, f: Term, arity: Term) -> Term {
+    let ctx = cx(c);
+    if !is_atom(m) || !is_atom(f) || !is_small(arity) {
+        return ctx.badarg("argument error");
+    }
+    let arity_value = small_val(arity);
+    if !(-(1i64 << 59)..(1i64 << 59)).contains(&arity_value) {
+        return ctx.badarg("argument error");
+    }
+    // OTP narrows the small integer before checking the maximum export arity.
+    let ar = arity_value as u32 as u64;
+    if ar > 255 { return FALSE; }
+    if f == atom(crate::atoms::intern("module_info")) && (ar == 0 || ar == 1) && crate::sched::module_exists(m) {
+        return TRUE;
+    }
+    if crate::sched::function_exported(m, f, ar) { return TRUE; }
+    if let Some(predicate) = eval_entry("defines?", 4) {
+        let args = [m, f, small(ar as i64), FALSE];
+        let defined = unsafe { crate::sched::tonic_call_fnptr(c, predicate, 4, args.as_ptr()) };
+        if defined != FALSE { return defined; }
+    }
+    if let Some(name) = crate::atoms::name(atom_idx(f)).strip_prefix("MACRO-") {
+        if ar == 0 { return FALSE; }
+        let name = atom(crate::atoms::intern(name));
+        return tn_macro_exported(c, m, name, small(ar as i64 - 1));
+    }
+    FALSE
+}
+
+#[no_mangle]
+pub extern "C" fn tn_macro_exported(c: *mut Ctx, module: Term, name: Term, arity: Term) -> Term {
+    if !is_atom(module) || !is_atom(name) || !is_small(arity) || !(0..=255).contains(&small_val(arity)) {
+        return cx(c).badarg("argument error");
+    }
+    let (Some(loaded), Some(predicate)) = (eval_entry("loaded?", 1), eval_entry("macro?", 4)) else { return FALSE; };
+    let state = unsafe { crate::sched::tonic_call_fnptr(c, loaded, 1, &module) };
+    if state != TRUE { return state; }
+    let args = [module, name, arity, FALSE];
+    unsafe { crate::sched::tonic_call_fnptr(c, predicate, 4, args.as_ptr()) }
+}
+
+#[no_mangle]
+pub extern "C" fn tn_module_loaded(c: *mut Ctx, m: Term) -> Term {
+    if !is_atom(m) { return cx(c).badarg("argument error"); }
+    if crate::sched::module_exists(m) { return TRUE; }
+    let Some(predicate) = eval_entry("loaded?", 1) else { return FALSE; };
+    unsafe { crate::sched::tonic_call_fnptr(c, predicate, 1, &m) }
 }
 
 fn list_to_vec(l: Term) -> Option<Vec<Term>> {
@@ -1300,19 +1339,66 @@ pub extern "C" fn tn_apply_fun(c: *mut Ctx, f: Term, args: Term) -> Term {
 }
 
 /// apply(module, fun, args)
+/// Shared dispatch for apply, remote calls and external captures. The evaluator
+/// is optional: looking it up must never retain it in ordinary programs.
 #[no_mangle]
-pub extern "C" fn tn_apply_mfa(c: *mut Ctx, m: Term, f: Term, args: Term) -> Term {
+pub extern "C" fn tn_call_mfa(c: *mut Ctx, m: Term, f: Term, args: *const Term, n: u64) -> Term {
     let ctx = cx(c);
-    let v = match list_to_vec(args) {
-        Some(v) => v,
-        None => return ctx.badarg("argument error"),
-    };
-    let fp = tn_lookup_mfa_q(c, m, f, v.len() as u64);
-    if fp.is_null() {
-        tn_undef_raise(c, m, f, v.as_ptr(), v.len() as u64);
+    if !is_atom(m) || !is_atom(f) { return ctx.badarg("argument error"); }
+    if n > 255 {
+        tn_undef_raise(c, m, f, args, n);
         return NONE;
     }
-    unsafe { crate::sched::tonic_call_fnptr(c, fp, v.len() as u64, v.as_ptr()) }
+    if let Some(pointer) = crate::sched::lookup_fun(m, f, n) {
+        return unsafe { crate::sched::tonic_call_fnptr(c, pointer as *const c_void, n, args) };
+    }
+    let base = ctx.roots.len();
+    ctx.roots.push(m);
+    ctx.roots.push(f);
+    for i in 0..n as usize { ctx.roots.push(unsafe { *args.add(i) }); }
+    let dispatcher = eval_entry("apply", 3);
+    let predicate = eval_entry("defines?", 4);
+    if let (Some(dispatcher), Some(predicate)) = (dispatcher, predicate) {
+        let query = [ctx.roots[base], ctx.roots[base + 1], small(n as i64), FALSE];
+        let defined = unsafe { crate::sched::tonic_call_fnptr(c, predicate, 4, query.as_ptr()) };
+        if defined == NONE { ctx.truncate(base); return NONE; }
+        if defined == TRUE {
+            let arguments = ctx.list_from_roots(base + 2, n as usize, NIL_LIST);
+            let invoke = [ctx.roots[base], ctx.roots[base + 1], arguments];
+            let result = unsafe { crate::sched::tonic_call_fnptr(c, dispatcher, 3, invoke.as_ptr()) };
+            ctx.truncate(base);
+            return result;
+        }
+    }
+    if n > 0 {
+        if let Some(name) = crate::atoms::name(atom_idx(f)).strip_prefix("MACRO-") {
+            if let Some(dispatcher) = eval_entry("call_macro", 5) {
+                let name = atom(crate::atoms::intern(name));
+                let exported = tn_macro_exported(c, m, name, small(n as i64 - 1));
+                if exported == NONE { ctx.truncate(base); return NONE; }
+                if exported == TRUE {
+                    let arguments = ctx.list_from_roots(base + 3, n as usize - 1, NIL_LIST);
+                    let invoke = [ctx.roots[base], name, arguments, ctx.roots[base + 2], FALSE];
+                    let result = unsafe { crate::sched::tonic_call_fnptr(c, dispatcher, 5, invoke.as_ptr()) };
+                    ctx.truncate(base);
+                    return result;
+                }
+            }
+        }
+    }
+    let m = ctx.roots[base];
+    let f = ctx.roots[base + 1];
+    // the predicate can collect; the original caller's argument array is stale
+    let values = ctx.roots[base + 2..base + 2 + n as usize].to_vec();
+    tn_undef_raise(c, m, f, values.as_ptr(), n);
+    cx(c).truncate(base);
+    NONE
+}
+
+#[no_mangle]
+pub extern "C" fn tn_apply_mfa(c: *mut Ctx, m: Term, f: Term, args: Term) -> Term {
+    let Some(values) = list_to_vec(args) else { return cx(c).badarg("argument error"); };
+    tn_call_mfa(c, m, f, values.as_ptr(), values.len() as u64)
 }
 
 /// `x.field` on a map, or zero-arity remote call when `x` is a module atom.
@@ -1326,11 +1412,7 @@ pub extern "C" fn tn_dot(c: *mut Ctx, x: Term, key: Term) -> Term {
         };
     }
     if is_atom(x) {
-        let fp = tn_lookup_mfa(c, x, key, 0);
-        if fp.is_null() {
-            return NONE;
-        }
-        return unsafe { crate::sched::tonic_call_fnptr(c, fp, 0, std::ptr::null()) };
+        return tn_call_mfa(c, x, key, std::ptr::null(), 0);
     }
     ctx.badmap(x)
 }

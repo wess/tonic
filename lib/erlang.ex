@@ -480,7 +480,7 @@ defmodule :erlang do
     {module, name, arity} = :tonic.fun_info(fun)
 
     if is_atom(name) and String.starts_with?(Atom.to_string(name), "-") do
-      [pid: self(), module: module, new_index: 0, new_uniq: <<0::128>>, index: 0, uniq: 0, name: name, arity: arity, env: [], type: :local]
+      [pid: self(), module: module, new_index: 0, new_uniq: <<0::128>>, index: 0, uniq: 0, name: name, arity: arity, env: :tonic.fun_env(fun), type: :local]
     else
       [module: module, name: name, arity: arity, env: [], type: :external]
     end

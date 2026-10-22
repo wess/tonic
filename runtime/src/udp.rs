@@ -5,11 +5,13 @@
 //! `{:"$tonic_udp", ref, result}`. Active mode delivers
 //! `{:udp, socket, ip, port, data}` and `{:udp_passive, socket}` to the owner.
 
+pub(crate) mod options;
+
 use crate::bif_core::cx;
 use crate::heap::Ctx;
 use crate::net::{
-    a, active_of, ctx_result, deliver, error_with, host_of, ip_of, ip_term, list_items, ok_with, operation, option, posix,
-    socket_term, timeout_of, with_timeout, Active,
+    a, active_of, ctx_result, deliver, error_with, host_of, ip_of, ip_term, list_items, ok_with,
+    operation, option, posix, socket_term, timeout_of, with_timeout, Active,
 };
 use crate::nif::Env;
 use crate::term::*;
@@ -23,6 +25,8 @@ struct State {
     active: Active,
     list: bool,
     reading: bool,
+    buffer: usize,
+    read_packets: usize,
     closed: bool,
     // A datagram the active reader took after the socket turned passive.
     pending: Option<(SocketAddr, Vec<u8>)>,
@@ -45,7 +49,10 @@ pub(crate) fn lookup(t: Term) -> Option<Arc<Udp>> {
     if !is_ref(t) {
         return None;
     }
-    SOCKETS.lock().as_ref().and_then(|m| m.get(&word(t, 1)).cloned())
+    SOCKETS
+        .lock()
+        .as_ref()
+        .and_then(|m| m.get(&word(t, 1)).cloned())
 }
 
 /// `{:"$tonic_udp", ref, result}` for the operation `op`.
@@ -59,7 +66,9 @@ fn reply(pid: u64, op: u64, result: impl FnOnce(&mut Env) -> Term) {
 
 fn packet_term(env: &mut Env, data: &[u8], list: bool) -> Term {
     if list {
-        data.iter().rev().fold(NIL_LIST, |t, b| env.cons(small(*b as i64), t))
+        data.iter()
+            .rev()
+            .fold(NIL_LIST, |t, b| env.cons(small(*b as i64), t))
     } else {
         env.bytes(data)
     }
@@ -80,6 +89,9 @@ struct Config {
     broadcast: bool,
     recbuf: Option<usize>,
     sndbuf: Option<usize>,
+    buffer: Option<usize>,
+    read_packets: Option<usize>,
+    settings: Vec<options::Setting>,
 }
 
 fn address_option(v: Term) -> Option<IpAddr> {
@@ -90,32 +102,43 @@ fn address_option(v: Term) -> Option<IpAddr> {
     }
 }
 
+fn bool_option(v: Term) -> Option<bool> {
+    if v == TRUE {
+        Some(true)
+    } else if v == FALSE {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 fn size_option(v: Term) -> Option<usize> {
     (is_small(v) && small_val(v) > 0).then(|| small_val(v) as usize)
 }
 
 /// None for an option OTP rejects with `badarg`.
 fn configure(opts: Term) -> Option<Config> {
+    if !crate::net::proper_list(opts) {
+        return None;
+    }
     let mut config = Config::default();
     for item in list_items(opts) {
         match option(item)? {
             ("binary", _) => config.binary = true,
             ("list", _) => config.binary = false,
-            ("mode", v) => config.binary = v == a("binary"),
+            ("mode", v) if v == a("binary") || v == a("list") => config.binary = v == a("binary"),
             ("inet", _) => config.inet6 = false,
             ("inet6", _) => config.inet6 = true,
             ("ip" | "ifaddr", v) => config.ip = Some(address_option(v)?),
             ("active", v) => config.active = Some(active_of(v)?),
-            ("reuseaddr", v) => config.reuseaddr = v == TRUE,
-            ("reuseport" | "reuseport_lb", v) => config.reuseport = v == TRUE,
-            ("broadcast", v) => config.broadcast = v == TRUE,
+            ("reuseaddr", v) => config.reuseaddr = bool_option(v)?,
+            ("reuseport" | "reuseport_lb", v) => config.reuseport = bool_option(v)?,
+            ("broadcast", v) => config.broadcast = bool_option(v)?,
             ("recbuf", v) => config.recbuf = Some(size_option(v)?),
             ("sndbuf", v) => config.sndbuf = Some(size_option(v)?),
-            // Accepted for compatibility; the runtime has no use for them.
-            ("buffer" | "read_packets" | "deliver" | "dontroute" | "priority" | "tos" | "ttl" | "recvtos" | "recvttl"
-            | "high_msgq_watermark" | "low_msgq_watermark" | "multicast_ttl" | "multicast_loop" | "multicast_if"
-            | "exclusiveaddruse" | "debug", _) => {}
-            _ => return None,
+            ("buffer", v) => config.buffer = Some(size_option(v)?),
+            ("read_packets", v) => config.read_packets = Some(size_option(v)?),
+            (name, v) => config.settings.push(options::parse(name, v)?),
         }
     }
     Some(config)
@@ -142,6 +165,9 @@ fn bind(config: &Config, port: u16) -> std::io::Result<UdpSocket> {
     }
     if let Some(n) = config.sndbuf {
         socket.set_send_buffer_size(n)?;
+    }
+    for setting in &config.settings {
+        setting.apply(&socket, addr.is_ipv6())?;
     }
     socket.bind(&addr.into())?;
     socket.set_nonblocking(true)?;
@@ -171,6 +197,8 @@ pub extern "C" fn tn_udp_open(c: *mut Ctx, port: Term, opts: Term) -> Term {
             active,
             list: !config.binary,
             reading: false,
+            buffer: config.buffer.unwrap_or(8192),
+            read_packets: config.read_packets.unwrap_or(5),
             closed: false,
             pending: None,
             recv_oct: 0,
@@ -182,7 +210,10 @@ pub extern "C" fn tn_udp_open(c: *mut Ctx, port: Term, opts: Term) -> Term {
         closed: tokio::sync::Notify::new(),
     });
     let id = crate::sched::next_ref_id();
-    SOCKETS.lock().get_or_insert_with(HashMap::new).insert(id, socket.clone());
+    SOCKETS
+        .lock()
+        .get_or_insert_with(HashMap::new)
+        .insert(id, socket.clone());
     start_reader(id, socket);
     let t = crate::sched::mk_ref_term(ctx, id);
     ctx_result(ctx, Some(t), None)
@@ -211,7 +242,7 @@ async fn receive(socket: &Udp) -> Received {
     if socket.state.lock().closed {
         return Received::Closed;
     }
-    let mut buffer = vec![0u8; 65536];
+    let mut buffer = vec![0u8; socket.state.lock().buffer];
     tokio::select! {
         r = socket.io.recv_from(&mut buffer) => match r {
             Ok((n, from)) => {
@@ -287,12 +318,19 @@ fn start_reader(id: u64, socket: Arc<Udp>) {
         st.reading = true;
     }
     crate::sched::runtime().spawn(async move {
+        let mut delivered = 0;
         loop {
+            let quota = socket.state.lock().read_packets;
+            if delivered >= quota {
+                tokio::task::yield_now().await;
+                delivered = 0;
+            }
             let _guard = socket.reads.lock().await;
             let got = receive(&socket).await;
             let mut st = socket.state.lock();
             match got {
                 Received::Packet(from, data) => {
+                    delivered += 1;
                     if st.active == Active::Passive {
                         st.pending = Some((from, data));
                         st.reading = false;
@@ -364,8 +402,13 @@ fn destination(address: Term, port: u16) -> Option<Destination> {
 /// Resolves a host name in the socket's address family.
 async fn resolve(udp: &Udp, host: &str, port: u16) -> Result<SocketAddr, &'static str> {
     let v6 = udp.io.local_addr().map(|l| l.is_ipv6()).unwrap_or(false);
-    let found = tokio::net::lookup_host((host, port)).await.map_err(|_| "nxdomain")?;
-    found.into_iter().find(|addr| addr.is_ipv6() == v6).ok_or("nxdomain")
+    let found = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|_| "nxdomain")?;
+    found
+        .into_iter()
+        .find(|addr| addr.is_ipv6() == v6)
+        .ok_or("nxdomain")
 }
 
 fn sent(udp: &Udp, n: usize) {
@@ -377,7 +420,13 @@ fn sent(udp: &Udp, n: usize) {
 /// Sends at once when the address is known and the socket is writable;
 /// otherwise returns a reference the caller waits on.
 #[no_mangle]
-pub extern "C" fn tn_udp_send(c: *mut Ctx, socket: Term, address: Term, port: Term, data: Term) -> Term {
+pub extern "C" fn tn_udp_send(
+    c: *mut Ctx,
+    socket: Term,
+    address: Term,
+    port: Term,
+    data: Term,
+) -> Term {
     let ctx = cx(c);
     if !is_small(port) || !(0..=65535).contains(&small_val(port)) {
         return ctx.badarg("argument error");
@@ -440,7 +489,10 @@ pub(crate) fn remove(socket: Term) -> bool {
     if !is_ref(socket) {
         return false;
     }
-    let removed = SOCKETS.lock().as_mut().and_then(|m| m.remove(&word(socket, 1)));
+    let removed = SOCKETS
+        .lock()
+        .as_mut()
+        .and_then(|m| m.remove(&word(socket, 1)));
     removed.map(|udp| close(&udp)).is_some()
 }
 
@@ -455,7 +507,11 @@ pub fn owner_exited(pid: u64) {
     let owned: Vec<Arc<Udp>> = {
         let mut sockets = SOCKETS.lock();
         let Some(m) = sockets.as_mut() else { return };
-        let ids: Vec<u64> = m.iter().filter(|(_, s)| s.state.lock().owner == pid).map(|(id, _)| *id).collect();
+        let ids: Vec<u64> = m
+            .iter()
+            .filter(|(_, s)| s.state.lock().owner == pid)
+            .map(|(id, _)| *id)
+            .collect();
         ids.into_iter().filter_map(|id| m.remove(&id)).collect()
     };
     owned.iter().for_each(|udp| close(udp));
@@ -499,6 +555,9 @@ pub extern "C" fn tn_udp_controlling_process(c: *mut Ctx, socket: Term, owner: T
 
 /// `:inet.setopts/2` for a UDP socket.
 pub(crate) fn setopts(ctx: &mut Ctx, udp: Arc<Udp>, socket: Term, opts: Term) -> Term {
+    if !crate::net::proper_list(opts) {
+        return ctx_result(ctx, None, Some("einval"));
+    }
     let id = word(socket, 1);
     let sock = socket2::SockRef::from(&udp.io);
     for item in list_items(opts) {
@@ -522,9 +581,22 @@ pub(crate) fn setopts(ctx: &mut Ctx, udp: Arc<Udp>, socket: Term, opts: Term) ->
             }
             Some(("binary", _)) => Ok(udp.state.lock().list = false),
             Some(("list", _)) => Ok(udp.state.lock().list = true),
-            Some(("mode", v)) => Ok(udp.state.lock().list = v != a("binary")),
-            Some(("reuseaddr", v)) => sock.set_reuse_address(v == TRUE),
-            Some(("broadcast", v)) => sock.set_broadcast(v == TRUE),
+            Some(("mode", v)) if v == a("binary") || v == a("list") => {
+                Ok(udp.state.lock().list = v != a("binary"))
+            }
+            Some(("buffer", v)) => match size_option(v) {
+                Some(n) => Ok(udp.state.lock().buffer = n),
+                None => return ctx_result(ctx, None, Some("einval")),
+            },
+            Some(("read_packets", v)) => match size_option(v) {
+                Some(n) => Ok(udp.state.lock().read_packets = n),
+                None => return ctx_result(ctx, None, Some("einval")),
+            },
+            Some(("reuseport" | "reuseport_lb", v)) if v == TRUE || v == FALSE => {
+                sock.set_reuse_port(v == TRUE)
+            }
+            Some(("reuseaddr", v)) if v == TRUE || v == FALSE => sock.set_reuse_address(v == TRUE),
+            Some(("broadcast", v)) if v == TRUE || v == FALSE => sock.set_broadcast(v == TRUE),
             Some(("recbuf", v)) => match size_option(v) {
                 Some(n) => sock.set_recv_buffer_size(n),
                 None => return ctx_result(ctx, None, Some("einval")),
@@ -533,7 +605,13 @@ pub(crate) fn setopts(ctx: &mut Ctx, udp: Arc<Udp>, socket: Term, opts: Term) ->
                 Some(n) => sock.set_send_buffer_size(n),
                 None => return ctx_result(ctx, None, Some("einval")),
             },
-            _ => Ok(()),
+            Some((name, v)) => match options::parse(name, v) {
+                Some(setting) => {
+                    setting.apply(&sock, udp.io.local_addr().is_ok_and(|a| a.is_ipv6()))
+                }
+                None => return ctx_result(ctx, None, Some("einval")),
+            },
+            None => return ctx_result(ctx, None, Some("einval")),
         };
         if let Err(e) = applied {
             return ctx_result(ctx, None, Some(posix(&e)));
@@ -545,15 +623,19 @@ pub(crate) fn setopts(ctx: &mut Ctx, udp: Arc<Udp>, socket: Term, opts: Term) ->
 
 /// `:inet.getopts/2` for a UDP socket.
 pub(crate) fn getopts(ctx: &mut Ctx, udp: Arc<Udp>, opts: Term) -> Term {
+    if !crate::net::proper_list(opts) {
+        return ctx_result(ctx, None, Some("einval"));
+    }
     let sock = socket2::SockRef::from(&udp.io);
-    let (active, list) = {
+    let (active, list, buffer, read_packets) = {
         let st = udp.state.lock();
-        (st.active, st.list)
+        (st.active, st.list, st.buffer, st.read_packets)
     };
-    let mut found: Vec<(&'static str, Term)> = Vec::new();
+    let mut env = Env::new(std::ptr::null_mut(), std::ptr::null_mut());
+    let mut found: Vec<Term> = Vec::new();
     for item in list_items(opts) {
         if !is_atom(item) {
-            continue;
+            return ctx_result(ctx, None, Some("einval"));
         }
         let name = crate::atoms::name(atom_idx(item));
         let value = match name {
@@ -564,31 +646,40 @@ pub(crate) fn getopts(ctx: &mut Ctx, udp: Arc<Udp>, opts: Term) -> Term {
                 Active::Count(n) => small(n),
             },
             "mode" => a(if list { "list" } else { "binary" }),
+            "buffer" => small(buffer as i64),
+            "read_packets" => small(read_packets as i64),
             "reuseaddr" => boolean(sock.reuse_address().unwrap_or(false)),
             "reuseport" => boolean(sock.reuse_port().unwrap_or(false)),
             "broadcast" => boolean(sock.broadcast().unwrap_or(false)),
             "recbuf" => small(sock.recv_buffer_size().unwrap_or(0) as i64),
             "sndbuf" => small(sock.send_buffer_size().unwrap_or(0) as i64),
-            _ => continue,
+            _ => match options::get(
+                &sock,
+                udp.io.local_addr().is_ok_and(|a| a.is_ipv6()),
+                name,
+                &mut env,
+            ) {
+                Ok(value) => value,
+                Err(e) => return ctx_result(ctx, None, Some(posix(&e))),
+            },
         };
-        found.push((name, value));
+        found.push(env.tuple(&[a(name), value]));
     }
-    let base = ctx.roots.len();
-    for (name, value) in &found {
-        let t = ctx.tuple(&[a(name), *value]);
-        ctx.roots.push(t);
-    }
-    let list = ctx.list_from_roots(base, found.len(), NIL_LIST);
-    ctx.roots.truncate(base);
+    let list = found
+        .iter()
+        .rev()
+        .fold(NIL_LIST, |tail, t| env.cons(*t, tail));
+    let list = ctx.copy_in_by(list, &|p| env.owns_address(p));
     ctx_result(ctx, Some(list), None)
 }
 
-/// Local address; UDP sockets here are never connected, so no peer.
+/// Local or connected peer address.
 pub(crate) fn endpoint(ctx: &mut Ctx, udp: Arc<Udp>, peer: bool) -> Term {
-    if peer {
-        return ctx_result(ctx, None, Some("enotconn"));
-    }
-    match udp.io.local_addr() {
+    match if peer {
+        udp.io.peer_addr()
+    } else {
+        udp.io.local_addr()
+    } {
         Ok(addr) => {
             let mut env = Env::new(std::ptr::null_mut(), std::ptr::null_mut());
             let ip = ip_term(&mut env, addr.ip());
@@ -603,4 +694,67 @@ pub(crate) fn endpoint(ctx: &mut Ctx, udp: Arc<Udp>, peer: bool) -> Term {
 pub(crate) fn stats(udp: &Udp) -> [u64; 4] {
     let st = udp.state.lock();
     [st.recv_oct, st.recv_cnt, st.send_oct, st.send_cnt]
+}
+
+#[no_mangle]
+pub extern "C" fn tn_udp_connect(c: *mut Ctx, socket: Term, address: Term, port: Term) -> Term {
+    let ctx = cx(c);
+    if !is_small(port) || !(0..=65535).contains(&small_val(port)) {
+        return ctx.badarg("argument error");
+    }
+    let target = destination(address, small_val(port) as u16);
+    let udp = lookup(socket);
+    let (r, op, pid) = operation(ctx);
+    let (Some(target), Some(udp)) = (target, udp) else {
+        reply(pid, op, |env| error_with(env, "einval"));
+        return r;
+    };
+    crate::sched::runtime().spawn(async move {
+        let address = match target {
+            Destination::Address(addr) => addr,
+            Destination::Host(host, port) => match resolve(&udp, &host, port).await {
+                Ok(addr) => addr,
+                Err(reason) => return reply(pid, op, |env| error_with(env, reason)),
+            },
+        };
+        match udp.io.connect(address).await {
+            Ok(()) => reply(pid, op, |_| atom(a::OK)),
+            Err(e) => reply(pid, op, |env| error_with(env, posix(&e))),
+        }
+    });
+    r
+}
+
+#[no_mangle]
+pub extern "C" fn tn_udp_send_connected(c: *mut Ctx, socket: Term, data: Term) -> Term {
+    let ctx = cx(c);
+    let mut bytes = Vec::new();
+    if !crate::nif::flatten_iolist(data, &mut bytes) {
+        return ctx.badarg("argument error");
+    }
+    let Some(udp) = lookup(socket) else {
+        return ctx_result(ctx, None, Some("closed"));
+    };
+    if udp.io.peer_addr().is_err() {
+        return ctx_result(ctx, None, Some("enotconn"));
+    }
+    match udp.io.try_send(&bytes) {
+        Ok(n) => {
+            sent(&udp, n);
+            return atom(a::OK);
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+        Err(e) => return ctx_result(ctx, None, Some(posix(&e))),
+    }
+    let (r, op, pid) = operation(ctx);
+    crate::sched::runtime().spawn(async move {
+        match udp.io.send(&bytes).await {
+            Ok(n) => {
+                sent(&udp, n);
+                reply(pid, op, |_| atom(a::OK));
+            }
+            Err(e) => reply(pid, op, |env| error_with(env, posix(&e))),
+        }
+    });
+    r
 }

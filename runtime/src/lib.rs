@@ -24,6 +24,7 @@ pub mod num;
 pub mod phash;
 pub mod port;
 pub mod re;
+pub mod resource;
 pub mod ustr;
 pub mod zlib;
 pub mod resolve;

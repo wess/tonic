@@ -36,7 +36,7 @@ fn strings(value: Option<&E>, name: &str) -> Result<Vec<String>, String> {
     }
 }
 
-pub fn load(input: &str) -> Result<Option<Project>, String> {
+pub fn load_with_options(input: &str, test: bool, test_args: &[String]) -> Result<Option<Project>, String> {
     let path = Path::new(input);
     let root = if path.is_dir() && path.join("mix.exs").is_file() {
         path
@@ -65,14 +65,17 @@ pub fn load(input: &str) -> Result<Option<Project>, String> {
         native_sources: vec![],
         scratch,
     };
+    std::fs::write(project.scratch.join("testing.exs"), include_str!("testing.exs")).map_err(|e| e.to_string())?;
     let bridge = project.scratch.join("project.exs");
     std::fs::write(&bridge, include_str!("project.exs")).map_err(|e| e.to_string())?;
     let mix = std::env::var_os("TONIC_MIX").unwrap_or_else(|| "mix".into());
     let output = Command::new(&mix)
         .current_dir(&project.scratch)
         .env("HEX_OFFLINE", "1")
+        .env("MIX_ENV", std::env::var_os("MIX_ENV").unwrap_or_else(|| if test { "test".into() } else { "dev".into() }))
         .args(["run", "--no-mix-exs", "--no-compile", "--no-deps-check", "--no-start"])
         .arg(&bridge).arg(&root).arg(&project.scratch)
+        .arg(if test { "test" } else { "build" }).args(test_args)
         .stdin(Stdio::null()).output()
         .map_err(|e| format!("could not run Mix ({:?}): {}. Install Elixir/OTP and Mix or set TONIC_MIX; standalone source files do not require Mix", mix, e))?;
     if !output.stdout.is_empty() {

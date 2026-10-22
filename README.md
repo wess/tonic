@@ -1,6 +1,6 @@
 # tonic
 
-**0.1.0-beta.3 · beta.** Start with scripts and small native applications.
+**0.1.1-beta.1 · development beta.** Start with scripts and small native applications.
 Visit the [Tonic website](https://wess.io/tonic/).
 Install with `brew install wess/packages/tonic` or
 `curl -fsSL https://wess.io/tonic/install.sh | sh`; the
@@ -8,6 +8,12 @@ Install with `brew install wess/packages/tonic` or
 tasks. See the
 [compatibility report](docs/compatibility.md) for tested packages and limitations.
 Remaining work is tracked in [TODO.md](TODO.md).
+
+The 0.1.1-beta.1 source checkout includes unreleased portability changes after
+0.1.0-beta.3: native test/release workflows, umbrella builds, an API conformance
+inventory, Req support, resource reclamation and expanded networking. Build
+from source for those changes; published beta.3 bundles retain their original
+feature set.
 
 An ahead-of-time compiler for **Elixir** that produces native executables via
 **LLVM**, with a precise, moving garbage collector and an Erlang-style process
@@ -61,6 +67,8 @@ tonic run <file.exs>... [-- args]    compile (-O0 by default) and run
 tonic build <file.ex>... [-o out]    compile to an executable (-O2 by default)
 tonic emit-llvm <file.ex>... [-o x.ll]
 tonic check <file.ex>...             parse + expand only
+tonic test [project] [test paths]    compile and execute ExUnit natively
+tonic inventory                     emit declared exports as JSON
 ```
 
 Multiple files are compiled together as one program; top-level expressions in
@@ -129,6 +137,38 @@ compiler executable or configure `tonic: [executable: "/path/to/tonic"]` in
 `project/0`. Ordinary Mix dependency, Hex publishing, and package-management
 tasks continue to use Mix.
 
+### Native tests and releases
+
+The development checkout supports ExUnit and relocatable native bundles:
+
+```sh
+tonic test
+tonic test test/example_test.exs:12 --seed 0 --trace
+mix tonic test --only integration --timeout 30000
+mix tonic release -o ./native
+./native/bin/my_app argument
+```
+
+Tests use the project's test paths/helpers and start applications before the
+suite. File/directory/file:line selection, include/exclude/only tags, seed,
+timeout, trace and failure-limit options are passed through the native runner.
+Unsupported switches produce diagnostics. Releases include application `priv`
+assets and evaluate runtime configuration when started, so the bundle can move
+to a machine without Mix, Elixir or BEAM. These bundles have their own native
+launcher; they do not provide ERTS daemon, RPC or hot-upgrade commands.
+
+With the development Mix archive installed, opt a project into native routing
+for ordinary `mix run`, `mix test` and `mix release`:
+
+```elixir
+def project do
+  Tonic.native(app: :my_app, version: "0.1.0")
+end
+```
+
+`Tonic.native/1` configures the native compiler and task aliases. Projects that
+keep their ordinary Mix configuration continue to build and run on the BEAM.
+
 To make `mix compile` build the native executable, opt into the archive compiler:
 
 ```elixir
@@ -148,7 +188,8 @@ Set `consolidate_protocols: false` to disable Mix’s separate BEAM protocol
 consolidation. The Tonic compiler rebuilds on each invocation so evaluated
 configuration and toolchain changes cannot leave a stale native artifact.
 It produces a native artifact; it does not produce application
-BEAM files for `mix run` or `mix release`. Use `mix tonic run` to run it.
+BEAM files for `mix run` or `mix release`. Use `mix tonic run`, or the
+`Tonic.native/1` adapter above, to route execution to the native artifact.
 
 The locked example in `examples/packages/` uses Decimal from Hex:
 
@@ -167,8 +208,10 @@ language and runtime APIs implemented by Tonic. `rebar3` dependencies are
 compiled from their Erlang sources, and C NIFs built with `elixir_make` are
 compiled from `c_src/` and linked into the executable (see the
 [compatibility report](docs/compatibility.md)). Other custom compilers,
-prebuilt native libraries, other build managers, and lexer/parser generation
-fail explicitly. Umbrella applications must be built from each child project.
+prebuilt native libraries and other build managers fail explicitly. Umbrella
+roots compile their child applications together. Yecc/leex generators run in
+scratch directories; custom Mix source generators require explicit
+`tonic: [generators: [:task]]` configuration.
 
 `examples/helloweb` is a Plug, Bandit and Ecto (SQLite) service that builds to
 a single native executable.
@@ -240,7 +283,9 @@ with an unknown module, `apply/3` and `spawn/3` arguments, callback tuples such
 as `{Mod, :fun, args}`, protocol dispatch); atoms in user code keep their
 module's public functions. Programs that evaluate code at run time
 (`Code.eval_string/2` and friends) keep everything. A hello world is about
-4.5 MB.
+15 MB on Apple Silicon in the current checkout. Conservative retention for
+runtime-named I/O callbacks currently keeps all public function bodies;
+the published beta.3 build was about 4.5 MB.
 
 ### Processes on tokio
 
@@ -268,8 +313,10 @@ Native programs read these environment variables at startup:
 | `TONIC_GC_VERIFY` | off | Check the generational invariant after every minor collection (testing only) |
 
 `TONIC_KEEP_ALL=1` at compile time keeps every public standard library
-function in the executable, for programs that call functions whose names they
-build at run time (for example `apply(String, String.to_atom(name), args)`).
+function in the executable. Calls with runtime-created module/function names
+already retain matching public targets conservatively, including dynamic
+apply, function captures and process entry points. This setting is an explicit
+request to disable public-function pruning.
 
 Process stacks are reserved address space; memory is only committed as a
 process uses it. Stacks grow like the BEAM's: a function entered near the end
@@ -337,6 +384,13 @@ definition and before-compilation hooks but does not run after-compilation hooks
   wording; this does not imply complete regex-engine equivalence.
 
 ## Tests
+
+The [API conformance inventory](docs/coverage.md) compares bundled declarations
+with Elixir 1.18.3 / OTP 27 exports and links reviewed behavior to regressions.
+It distinguishes API presence from semantic evidence. Generate or verify it
+with `python3 tools/coverage.py` and `python3 tools/coverage.py --check` after
+building the compiler. Refresh the upstream snapshot explicitly with
+`--refresh-reference` when reviewing a baseline update.
 
 ```
 cargo build --workspace

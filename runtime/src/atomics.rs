@@ -1,34 +1,23 @@
 //! `:atomics` (and `:counters`, built on it): arrays of 64-bit integers
 //! shared between processes, updated with hardware atomics.
 //!
-//! An array is identified by the id of the reference returned to the program.
-//! Arrays are never freed, since the runtime cannot tell when the last
-//! reference to one is gone.
+//! Arrays live until their last reference is collected, including copies
+//! held by other processes and ETS tables.
 
 use crate::bif_core::cx;
 use crate::heap::Ctx;
 use crate::num;
 use crate::term::*;
-use parking_lot::RwLock;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 struct Array {
     signed: bool,
     cells: Vec<AtomicU64>,
 }
 
-fn arrays() -> &'static RwLock<HashMap<u64, Arc<Array>>> {
-    static A: OnceLock<RwLock<HashMap<u64, Arc<Array>>>> = OnceLock::new();
-    A.get_or_init(|| RwLock::new(HashMap::new()))
-}
-
 fn lookup(r: Term) -> Option<Arc<Array>> {
-    if !is_ref(r) {
-        return None;
-    }
-    arrays().read().get(&word(r, 1)).cloned()
+    crate::resource::get(r)
 }
 
 /// The array and cell named by (ref, 1-based index).
@@ -77,10 +66,8 @@ pub extern "C" fn tn_atomics_new(c: *mut Ctx, size: Term, signed: Term) -> Term 
         return ctx.badarg("argument error");
     }
     let n = small_val(size) as usize;
-    let r = ctx.make_ref();
     let a = Array { signed: signed == atom(crate::atoms::intern("true")), cells: (0..n).map(|_| AtomicU64::new(0)).collect() };
-    arrays().write().insert(word(r, 1), Arc::new(a));
-    r
+    ctx.managed_ref(a)
 }
 
 #[no_mangle]

@@ -67,6 +67,11 @@ pub struct Module {
     pub enforce: Vec<String>,
     pub exception: bool,
     pub guards: HashMap<(String, usize), (Vec<String>, E)>,
+    pub private_guards: HashSet<(String, usize)>,
+    pub guard_envs: HashMap<(String, usize), Rc<ModEnv>>,
+    pub guard_args: HashMap<(String, usize), Vec<E>>,
+    pub guard_generated: HashSet<(String, usize)>,
+    pub guard_order: HashMap<(String, usize), usize>,
     pub derive: Vec<String>,
     pub is_prelude: bool,
     pub line: u32,
@@ -118,6 +123,15 @@ pub fn elixir_name(a: &str) -> String {
         a.to_string()
     } else {
         format!("Elixir.{}", a)
+    }
+}
+
+fn definition_signature(e: &E) -> Option<(String, usize)> {
+    match &e.k {
+        K::Bin { op, l, .. } if op == "when" || op == "::" => definition_signature(l),
+        K::Call { name, args, .. } => Some((name.clone(), args.len())),
+        K::Var(name) => Some((name.clone(), 0)),
+        _ => None,
     }
 }
 
@@ -336,6 +350,24 @@ impl Collector {
 
     /// Process alias/import/require statements.
     pub fn env_stmt(&mut self, name: &str, args: &[E], env: &mut ModEnv, line: u32) -> R<()> {
+        if args.is_empty() || args.len() > 2 {
+            return Err(format!("{}:{}: invalid arguments for {}", env.file, line, name));
+        }
+        let alias_as = |default: String| -> R<String> {
+            match args.get(1).and_then(|o| o.kw_get("as")) {
+                Some(E { k: K::Alias(n), .. }) => {
+                    let simple = n.strip_prefix("Elixir.").unwrap_or(n);
+                    if simple.contains('.') {
+                        return Err(format!("{}:{}: invalid value for option :as, expected a simple alias, got nested alias: {}", env.file, line, n));
+                    }
+                    Ok(simple.to_string())
+                }
+                Some(E { k: K::Var(v), .. }) => Err(format!("{}:{}: undefined variable \"{}\"", env.file, line, v)),
+                Some(E { k: K::Atom(value), .. }) => Err(format!("{}:{}: invalid value for option :as, expected an alias, got: :{}", env.file, line, value)),
+                Some(_) => Err(format!("{}:{}: invalid value for option :as, expected an alias", env.file, line)),
+                None => Ok(default),
+            }
+        };
         match name {
             "alias" => {
                 let target = &args[0];
@@ -343,22 +375,13 @@ impl Collector {
                 match &target.k {
                     K::Alias(a) => {
                         let full = resolve_alias(env, a);
-                        let as_name = match opts.and_then(|o| o.kw_get("as")) {
-                            Some(E { k: K::Alias(n), .. }) => n.clone(),
-                            Some(E { k: K::Var(v), .. }) => {
-                                return Err(format!("{}:{}: undefined variable \"{}\"", env.file, line, v))
-                            }
-                            Some(E { k: K::Atom(v), .. }) => {
-                                return Err(format!(
-                                    "{}:{}: invalid value for option :as, expected an alias, got: :{}",
-                                    env.file, line, v
-                                ))
-                            }
-                            _ => full.rsplit('.').next().unwrap().to_string(),
-                        };
+                        let as_name = alias_as(full.rsplit('.').next().unwrap().to_string())?;
                         env.aliases.insert(as_name, full);
                     }
                     K::MultiAlias(base, items) => {
+                        if opts.and_then(|o| o.kw_get("as")).is_some() {
+                            return Err(format!("{}:{}: :as option is not supported by multi-alias call", env.file, line));
+                        }
                         let base = match &base.k {
                             K::Alias(a) => resolve_alias(env, a),
                             K::Var(v) if v == "__MODULE__" => env.module.clone(),
@@ -373,7 +396,7 @@ impl Collector {
                         }
                     }
                     K::Var(v) if v == "__MODULE__" => {
-                        let last = env.module.rsplit('.').next().unwrap().to_string();
+                        let last = alias_as(env.module.rsplit('.').next().unwrap().to_string())?;
                         let m = env.module.clone();
                         env.aliases.insert(last, m);
                     }
@@ -381,10 +404,7 @@ impl Collector {
                         if let (K::Var(v), K::Alias(a)) = (&l.k, &r.k) {
                             if v == "__MODULE__" {
                                 let full = format!("{}.{}", env.module, a);
-                                let as_name = match opts.and_then(|o| o.kw_get("as")) {
-                                    Some(E { k: K::Alias(n), .. }) => n.clone(),
-                                    _ => a.rsplit('.').next().unwrap().to_string(),
-                                };
+                                let as_name = alias_as(a.rsplit('.').next().unwrap().to_string())?;
                                 env.aliases.insert(as_name, full);
                             }
                         }
@@ -447,7 +467,7 @@ impl Collector {
                         (&args[0].k, opts.kw_get("as"))
                     {
                         let full = resolve_alias(env, a);
-                        env.aliases.insert(n.clone(), full);
+                        env.aliases.insert(alias_as(n.clone())?, full);
                     }
                 }
             }
@@ -511,6 +531,11 @@ impl Collector {
             enforce: Vec::new(),
             exception: false,
             guards: HashMap::new(),
+            private_guards: HashSet::new(),
+            guard_envs: HashMap::new(),
+            guard_args: HashMap::new(),
+            guard_generated: HashSet::new(),
+            guard_order: HashMap::new(),
             derive: Vec::new(),
             is_prelude: prelude,
             line,
@@ -714,6 +739,21 @@ impl Collector {
             crate::macrohost::check_loaded(name, &env.file, body_line)?;
         }
         let m = self.mods.get_mut(name).unwrap();
+        if !m.is_prelude {
+            for (attribute, declaration) in attrs.iter() {
+                if let Some(signature) = attribute.strip_prefix("\0spec:") {
+                    let (function, arity) = signature.rsplit_once('/').unwrap();
+                    let arity: usize = arity.parse().unwrap();
+                    let exists = m.guards.contains_key(&(function.to_string(), arity)) || m.defs.iter().any(|d| {
+                        let defaults = d.args.iter().filter(|a| matches!(&a.k, K::Bin { op, .. } if op == "\\\\")).count();
+                        d.name == function && d.arity >= arity && d.arity - defaults <= arity
+                    });
+                    if !exists {
+                        return Err(format!("{}:{}: spec for undefined function {}/{}", env.file, declaration.line, function, arity));
+                    }
+                }
+            }
+        }
         m.env = Some(Rc::new(env.clone()));
         Ok(())
     }
@@ -727,6 +767,9 @@ impl Collector {
         attrs: &HashMap<String, E>,
         line: u32,
     ) -> R<()> {
+        if args.is_empty() {
+            return Err(format!("{}:{}: missing function head for {}", env.file, line, kind));
+        }
         let public = kind == "def" || kind == "defmacro";
         let is_macro = kind.starts_with("defmacro");
         let head = &args[0];
@@ -899,6 +942,19 @@ impl Collector {
             m.super_targets.insert(key.clone(), hidden);
         }
         let super_target = m.super_targets.get(&key).cloned();
+        if !m.is_prelude && m.guard_generated.contains(&key) {
+            return Err(format!("{}:{}: {} {}/{} conflicts with defaults", env.file, line, kind, fname, fargs.len()));
+        }
+        if !m.is_prelude && fargs.iter().any(|a| matches!(&a.k, K::Bin { op, .. } if op == "\\\\"))
+            && m.guard_args.get(&key).map_or(false, |args| args.iter().any(|a| matches!(&a.k, K::Bin { op, .. } if op == "\\\\"))) {
+            return Err(format!("{}:{}: {} {}/{} defines defaults multiple times", env.file, line, kind, fname, fargs.len()));
+        }
+        if !m.is_prelude && m.guards.contains_key(&key) {
+            let old_kind = if m.private_guards.contains(&key) { "defmacrop" } else { "defmacro" };
+            if kind != old_kind {
+                return Err(format!("{}:{}: {} {}/{} already defined as {}", env.file, line, kind, fname, fargs.len(), old_kind));
+            }
+        }
         if !m.is_prelude {
             let kind_of = |public: bool, is_macro: bool| match (is_macro, public) {
                 (true, true) => "defmacro",
@@ -1316,35 +1372,116 @@ impl Collector {
                         E::list(vec![E::tuple(vec![E::atom("do", line), body], line)], line),
                     ];
                     self.add_def(module, "def", &def_args, env, attrs, line)?;
+                    attrs.remove("doc");
                 }
                 "defguard" | "defguardp" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}:{}: invalid defguard", env.file, line));
+                    }
                     // defguard name(args) when expr
                     if let K::Bin { op, l, r } = &args[0].k {
                         if op == "when" {
+                            let head = match &l.k {
+                                K::Var(name) => E::call(name, Vec::new(), l.line),
+                                _ => (**l).clone(),
+                            };
                             if let K::Call {
                                 name: gname,
                                 args: gargs,
                                 ..
-                            } = &l.k
+                            } = &head.k
                             {
-                                let params: Vec<String> = gargs
-                                    .iter()
-                                    .map(|a| match &a.k {
-                                        K::Var(v) => Ok(v.clone()),
-                                        _ => Err(format!(
-                                            "{}:{}: defguard params must be variables",
-                                            env.file, line
-                                        )),
-                                    })
-                                    .collect::<R<_>>()?;
+                                let mut warnings = std::mem::take(&mut self.warnings);
+                                let gargs: Vec<E> = gargs.iter().map(|arg| subst_attrs(arg, attrs, &mut warnings, &env.file)).collect();
+                                self.warnings = warnings;
+                                let mut params = Vec::new();
+                                let mut defaults = Vec::new();
+                                for arg in &gargs {
+                                    let (param, default) = match &arg.k {
+                                        K::Bin { op, l, r } if op == "\\\\" => (&**l, Some((**r).clone())),
+                                        _ => (arg, None),
+                                    };
+                                    if let K::Var(name) = &param.k {
+                                        params.push(name.clone());
+                                        defaults.push(default);
+                                    } else {
+                                        return Err(format!("{}:{}: defguard params must be variables", env.file, line));
+                                    }
+                                }
                                 let mut w = std::mem::take(&mut self.warnings);
                                 let body = subst_attrs(r, attrs, &mut w, &env.file);
                                 self.warnings = w;
-                                self.mods
-                                    .get_mut(module)
-                                    .unwrap()
-                                    .guards
-                                    .insert((gname.clone(), params.len()), (params, body));
+                                let metadata = self.mods.get_mut(module).unwrap();
+                                let key = (gname.clone(), params.len());
+                                let kind = if name == "defguardp" { "defmacrop" } else { "defmacro" };
+                                let count = defaults.iter().filter(|d| d.is_some()).count();
+                                for arity in params.len() - count..=params.len() {
+                                    let key = (gname.clone(), arity);
+                                    if let Some(old) = metadata.defs.iter().find(|d| {
+                                        let n = d.args.iter().filter(|a| matches!(&a.k, K::Bin { op, .. } if op == "\\\\")).count();
+                                        d.name == *gname && arity <= d.arity && arity >= d.arity - n
+                                    }) {
+                                        let old_kind = match (old.is_macro, old.public) {
+                                            (true, true) => "defmacro", (true, false) => "defmacrop",
+                                            (false, true) => "def", (false, false) => "defp",
+                                        };
+                                        if old_kind != kind {
+                                            return Err(format!("{}:{}: {} {}/{} already defined as {}", env.file, line, kind, gname, arity, old_kind));
+                                        }
+                                        if count > 0 && old.arity == params.len() && old.args.iter().any(|a| matches!(&a.k, K::Bin { op, .. } if op == "\\\\")) {
+                                            return Err(format!("{}:{}: {} {}/{} defines defaults multiple times", env.file, line, kind, gname, arity));
+                                        }
+                                    }
+                                    if metadata.guards.contains_key(&key) {
+                                        let old_kind = if metadata.private_guards.contains(&key) { "defmacrop" } else { "defmacro" };
+                                        if old_kind != kind {
+                                            return Err(format!("{}:{}: {} {}/{} already defined as {}", env.file, line, kind, gname, arity, old_kind));
+                                        }
+                                    }
+                                }
+                                if count > 0 && metadata.guard_args.get(&key).map_or(false, |args| args.iter().any(|a| matches!(&a.k, K::Bin { op, .. } if op == "\\\\"))) {
+                                    return Err(format!("{}:{}: {} {}/{} defines defaults multiple times", env.file, line, kind, gname, params.len()));
+                                }
+                                if metadata.guard_generated.contains(&key) {
+                                    return Err(format!("{}:{}: {} {}/{} conflicts with defaults", env.file, line, kind, gname, params.len()));
+                                }
+                                let repeated = metadata.guards.contains_key(&key);
+                                if !repeated {
+                                    if name == "defguardp" { metadata.private_guards.insert(key.clone()); }
+                                    metadata.guard_envs.insert(key.clone(), Rc::new(env.clone()));
+                                    metadata.guard_order.insert(key.clone(), metadata.defs.len());
+                                    metadata.guard_args.insert(key.clone(), gargs.clone());
+                                    metadata.guards.insert(key.clone(), (params.clone(), body));
+                                } else {
+                                    self.warnings.push(format!("{}:{}: warning: this clause for {}/{} cannot match because a previous clause always matches", env.file, line, gname, params.len()));
+                                    if count > 0 {
+                                        let names = metadata.guards[&key].0.clone();
+                                        metadata.guard_args.insert(key.clone(), names.iter().zip(&defaults).map(|(name, default)| {
+                                            let var = E::var(name, line);
+                                            match default { Some(value) => E::bin("\\\\", var, value.clone(), line), None => var }
+                                        }).collect());
+                                    }
+                                }
+                                for missing in 1..=count {
+                                    let mut keep = count - missing;
+                                    let mut supplied = Vec::new();
+                                    let mut values = Vec::new();
+                                    for (param, default) in params.iter().zip(&defaults) {
+                                        if let Some(default) = default {
+                                            if keep == 0 { values.push(default.clone()); continue; }
+                                            keep -= 1;
+                                        }
+                                        supplied.push(param.clone());
+                                        values.push(E::var(param, line));
+                                    }
+                                    let short = (gname.clone(), supplied.len());
+                                    metadata.guard_generated.insert(short.clone());
+                                    metadata.guard_order.insert(short.clone(), metadata.defs.len());
+                                    metadata.guard_envs.insert(short.clone(), Rc::new(env.clone()));
+                                    if name == "defguardp" { metadata.private_guards.insert(short.clone()); }
+                                    metadata.guards.insert(short, (supplied, E::call(gname, values, line)));
+                                }
+                                attrs.remove("doc");
                                 return Ok(());
                             }
                         }
@@ -1506,7 +1643,7 @@ impl Collector {
                             })
                             .map(|d| (d.name.clone(), d.arity))
                             .collect();
-                        if keys.is_empty() && n != "*" {
+                        if (keys.is_empty() || keys.iter().all(|key| m.overridable.contains(key))) && n != "*" {
                             return Err(format!("{}:{}: cannot make function {}/{} overridable because it was not defined", env.file, line, n, a.unwrap_or(0)));
                         }
                         m.overridable.extend(keys);
@@ -1587,9 +1724,14 @@ impl Collector {
                         {
                             attrs.insert(name.clone(), args[0].clone());
                         }
-                        "doc" | "moduledoc" | "spec" | "impl" | "type" | "typep" | "opaque"
+                        "doc" | "moduledoc" | "impl" | "type" | "typep" | "opaque"
                         | "typedoc" | "since" | "deprecated" | "behaviour" | "dialyzer"
                         | "external_resource" | "vsn" => {}
+                        "spec" => {
+                            if let Some(signature) = args.first().and_then(definition_signature) {
+                                attrs.insert(format!("\0spec:{}/{}", signature.0, signature.1), E::nil(line));
+                            }
+                        }
                         "optional_callbacks" => {
                             for spec in args {
                                 for (n, a) in spec.as_keyword().unwrap_or_default() {
@@ -2386,7 +2528,7 @@ pub fn map_expr(e: &E, f: &mut dyn FnMut(&E) -> Option<E>) -> E {
         }
         other => other.clone(),
     };
-    E { k, line, gen: e.gen }
+    E { k, line, column: e.column, gen: e.gen }
 }
 
 fn map_parts(ps: &[IPart], f: &mut dyn FnMut(&E) -> Option<E>) -> Vec<IPart> {
@@ -2468,14 +2610,10 @@ pub fn subst_attrs(e: &E, attrs: &HashMap<String, E>, warnings: &mut Vec<String>
                         }
                     })
                     .collect();
-                return Some(E::new(
-                    K::Call {
-                        name: name.clone(),
-                        args,
-                        parens: *parens,
-                    },
-                    x.line,
-                ));
+                return Some(E {
+                    k: K::Call { name: name.clone(), args, parens: *parens },
+                    ..x.clone()
+                });
             }
         }
         if let K::Attr(name) = &x.k {

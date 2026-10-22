@@ -52,6 +52,10 @@ jobs:
         run: mix local.hex --force
       - name: Debug runtime build
         run: cargo build --workspace --locked
+      - name: API conformance inventory
+        run: |
+          python3 tests/coverage.py
+          python3 tools/coverage.py --check
       - name: Rust tests
         run: cargo test --workspace --locked
       - name: Mix archive tasks
@@ -64,6 +68,10 @@ jobs:
         env:
           TONIC_TEST_HEX: '1'
         run: cargo test -p tonic --test packagesextra -- --ignored
+      - name: Req package HTTP portability
+        env:
+          TONIC_TEST_HEX: '1'
+        run: cargo test -p tonic --test req -- --ignored
       - name: Native web example (Plug, Bandit, Ecto, SQLite NIF)
         env:
           TONIC_TEST_HEX: '1'
@@ -79,7 +87,10 @@ jobs:
       - name: Garbage collector stress
         env:
           TONIC_GC_STRESS: '1'
-        run: bash tests/run.sh tests/cases/basics.exs tests/cases/binaries.exs tests/cases/enums.exs tests/cases/structs.exs tests/cases/regressions.exs
+          TONIC_GC_VERIFY: '1'
+        run: |
+          cargo test -p tonic-rt-core --test resources
+          bash tests/run.sh tests/cases/basics.exs tests/cases/binaries.exs tests/cases/enums.exs tests/cases/structs.exs tests/cases/regressions.exs tests/cases/portability.exs
       - name: Package and verify clean installation
         run: |
           python3 tools/release.py

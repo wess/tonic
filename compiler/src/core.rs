@@ -20,6 +20,8 @@ pub struct FunKey {
     pub module: String,
     pub name: String,
     pub arity: usize,
+    pub dynamic_module: bool,
+    pub dynamic_name: bool,
 }
 
 impl FunKey {
@@ -28,6 +30,17 @@ impl FunKey {
             module: m.to_string(),
             name: n.to_string(),
             arity: a,
+            dynamic_module: false,
+            dynamic_name: false,
+        }
+    }
+    pub fn dynamic(module: Option<&str>, name: Option<&str>, arity: usize) -> Self {
+        Self {
+            module: module.unwrap_or("").to_string(),
+            name: name.unwrap_or("").to_string(),
+            arity,
+            dynamic_module: module.is_none(),
+            dynamic_name: name.is_none(),
         }
     }
     pub fn symbol(&self) -> String {
@@ -84,7 +97,11 @@ pub struct Clause {
 #[derive(Clone, Debug)]
 pub enum Fail {
     CaseClause,
-    FunctionClause { module: String, name: String, line: u32 },
+    FunctionClause {
+        module: String,
+        name: String,
+        line: u32,
+    },
     WithClause,
     TryClause,
 }

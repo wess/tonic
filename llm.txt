@@ -8,6 +8,10 @@ the current release. Read the compatibility report before recommending an API,
 package, or deployment workflow. A successful package test covers the tested
 scenario, not every API in that package.
 
+This index follows 0.1.1-beta.1 development source, including unreleased changes after
+0.1.0-beta.3. Use the documentation from the matching tag for installed release
+bundles; new native test/release and networking behavior requires the checkout.
+
 The reference baseline is Elixir 1.18.3 / Erlang OTP 27; CI pins OTP 27.2.4.
 Upstream documentation and source should match that baseline. Newer Elixir or
 OTP behavior requires separate verification. Native compilation preserves the
@@ -36,6 +40,8 @@ rule or change a reference fixture to accept incorrect native behavior.
 
 ## Source and evidence
 
+- [API conformance inventory](https://wess.io/tonic/docs/coverage.md): Reference exports, native declarations, reviewed classifications, and linked regressions. Declaration counts do not measure full compatibility.
+- [Machine-readable conformance data](https://wess.io/tonic/docs/coverage.json): Per-function/macro status, source, reference presence, and test evidence.
 - [Compiler](https://github.com/wess/tonic/tree/main/compiler/src): Elixir/Erlang front ends, expansion, macro host, Mix project loading, and LLVM generation.
 - [Runtime](https://github.com/wess/tonic/tree/main/runtime/src): Tagged values, moving GC, scheduler, BIFs, networking, ports, and NIF subset.
 - [Bundled library](https://github.com/wess/tonic/tree/main/lib): Elixir library, Erlang sources, and native macro evaluator.

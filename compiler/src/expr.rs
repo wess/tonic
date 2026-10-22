@@ -171,6 +171,7 @@ impl Expander {
             }
             K::Var(name) => self.var_expr(name, line, cx),
             K::Alias(a) => Ok(CE::atom(&resolve_alias(&cx.env, a))),
+            K::Call { name, args, .. } if name == "quote" && matches!(args.len(), 1 | 2) => self.quote_expression(args, line, e.column, cx),
             K::Call { name, args, parens } => self.call(name, args, *parens, line, cx),
             K::Remote {
                 recv,
@@ -440,7 +441,8 @@ impl Expander {
             if self
                 .mods
                 .get(&imp.module)
-                .map(|md| md.guards.contains_key(&(name.to_string(), arity)))
+                .map(|md| md.guards.contains_key(&(name.to_string(), arity))
+                    && !md.private_guards.contains(&(name.to_string(), arity)))
                 .unwrap_or(false)
             {
                 return Some(Resolved::Guard(imp.module.clone()));
@@ -461,6 +463,21 @@ impl Expander {
         None
     }
 
+    pub fn validate_module_guards(&mut self, module: &Module, env: &ModEnv) -> R<()> {
+        for ((name, arity), (params, body)) in &module.guards {
+            if module.guard_generated.contains(&(name.clone(), *arity)) { continue; }
+            let env = module.guard_envs.get(&(name.clone(), *arity)).map(|e| (**e).clone()).unwrap_or_else(|| env.clone());
+            let mut cx = Cx::new(env, &format!("{}/{}", name, arity));
+            cx.macro_depth = 1;
+            for param in params {
+                let id = self.new_var();
+                cx.scopes[0].insert(param.clone(), id);
+            }
+            self.guard(body, &mut cx)?;
+        }
+        Ok(())
+    }
+
     fn inline_guard(
         &mut self,
         module: &str,
@@ -469,27 +486,67 @@ impl Expander {
         line: u32,
         cx: &mut Cx,
     ) -> R<CE> {
-        let (params, body) = self.mods[module].guards[&(name.to_string(), args.len())].clone();
-        let map: HashMap<String, E> = params.iter().cloned().zip(args.iter().cloned()).collect();
-        let sub = map_expr(&body, &mut |x: &E| {
-            if let K::Var(v) = &x.k {
-                if let Some(r) = map.get(v) {
-                    return Some(r.clone());
-                }
-            }
+        if cx.macro_depth > 100 {
+            return err(cx, line, "guard macro expansion is recursive");
+        }
+        let key = (name.to_string(), args.len());
+        let md = &self.mods[module];
+        let order = md.guard_order.get(&key).copied().unwrap_or(usize::MAX);
+        let earlier = md.defs.iter().take(order).any(|d| {
+            let defaults = d.args.iter().filter(|a| matches!(&a.k, K::Bin { op, .. } if op == "\\\\")).count();
+            d.is_macro && d.name == name && d.arity >= args.len() && d.arity - defaults <= args.len()
+        });
+        let duplicate_params = md.guards[&key].0.iter().collect::<std::collections::HashSet<_>>().len() != md.guards[&key].0.len();
+        if md.guard_generated.contains(&key) || earlier || duplicate_params {
+            let expanded = self.host_expand(module, name, args, line, cx)?;
+            cx.macro_depth += 1;
+            let result = self.expr(&expanded, cx);
+            cx.macro_depth -= 1;
+            return result;
+        }
+        let (params, body) = md.guards[&key].clone();
+        let mut used = std::collections::HashSet::new();
+        map_expr(&body, &mut |node| {
+            if let K::Var(name) = &node.k { used.insert(name.clone()); }
             None
         });
-        let _ = line;
+        let mut bindings = Vec::new();
+        let mut scope = HashMap::new();
+        let mut map = HashMap::new();
+        for (param, arg) in params.iter().zip(args) {
+            if !used.contains(param) { continue; }
+            if cx.guard {
+                map.insert(param.clone(), arg.clone());
+            } else {
+                let value = self.expr(arg, cx)?;
+                let id = self.new_var();
+                let var = format!("tonic_guard_{}", id);
+                scope.insert(var.clone(), id);
+                bindings.push(CE::Match(Pat::Bind(id), Box::new(value)));
+                map.insert(param.clone(), E::var(&var, line));
+            }
+        }
+        let sub = map_expr(&body, &mut |node| match &node.k {
+            K::Var(name) => map.get(name).cloned(),
+            _ => None,
+        });
         let saved = cx.env.clone();
+        cx.scopes.push(scope);
         cx.env.module = module.to_string();
-        if let Some(menv) = self.mods.get(module).and_then(|md| md.env.clone()) {
-            // The guard body resolves imports/aliases where it was defined.
+        if let Some(menv) = self.mods.get(module).and_then(|md| md.guard_envs.get(&key).cloned().or_else(|| md.env.clone())) {
             cx.env.imports.extend(menv.imports.clone());
             cx.env.aliases.extend(menv.aliases.clone());
         }
-        let r = self.expr(&sub, cx);
+        cx.macro_depth += 1;
+        let result = self.expr(&sub, cx);
+        cx.macro_depth -= 1;
         cx.env = saved;
-        r
+        cx.scopes.pop();
+        let result = result?;
+        if bindings.is_empty() { Ok(result) } else {
+            bindings.push(result);
+            Ok(CE::Block(bindings))
+        }
     }
 
     fn call(&mut self, name: &str, args: &[E], parens: bool, line: u32, cx: &mut Cx) -> R<CE> {
@@ -619,17 +676,7 @@ impl Expander {
                 cx.env = env;
                 return Ok(CE::atom("ok"));
             }
-            ("quote", 1 | 2) => {
-                let last = args.last().unwrap();
-                if let Some(body) = last.kw_get("do") {
-                    let opts = if args.len() == 2 {
-                        Some(&args[0])
-                    } else {
-                        Some(last)
-                    };
-                    return self.quote(body, opts, cx);
-                }
-            }
+            ("quote", 1 | 2) => return self.quote_expression(args, line, 0, cx),
             ("quote" | "unquote" | "unquote_splicing", _) => {
                 return err(
                     cx,
@@ -886,6 +933,9 @@ impl Expander {
                     .map(|md| md.guards.contains_key(&(name.to_string(), args.len())))
                     .unwrap_or(false)
                 {
+                    if self.mods[&m].private_guards.contains(&(name.to_string(), args.len())) {
+                        return err(cx, line, &format!("macro {}.{}/{} is undefined or private", m.trim_start_matches("Elixir."), name, args.len()));
+                    }
                     // defguard is a macro: user code must require its module
                     if !self.required(&m, cx) {
                         if cx.guard {
@@ -2744,6 +2794,16 @@ impl Expander {
     // patterns
     // ------------------------------------------------------------------
 
+    fn explicit_var_pattern(&mut self, args: &[E], cx: &mut Cx, b: &mut Bound) -> R<Pat> {
+        let mut var = ctx_var(args);
+        var.gen = false;
+        let depth = cx.macro_depth;
+        cx.macro_depth = 0;
+        let result = self.pat(&var, cx, b);
+        cx.macro_depth = depth;
+        result
+    }
+
     pub fn pat(&mut self, e: &E, cx: &mut Cx, b: &mut Bound) -> R<Pat> {
         let line = e.line;
         match &e.k {
@@ -3072,7 +3132,7 @@ impl Expander {
             K::Call { name, args, .. }
                 if name == "var!" && (args.len() == 1 || args.len() == 2) =>
             {
-                self.pat(&ctx_var(args), cx, b)
+                self.explicit_var_pattern(args, cx, b)
             }
             K::Remote {
                 recv, name, args, ..
@@ -3080,7 +3140,7 @@ impl Expander {
                 && matches!(&recv.k, K::Alias(a) if a == "Kernel")
                 && (args.len() == 1 || args.len() == 2) =>
             {
-                self.pat(&args[0], cx, b)
+                self.explicit_var_pattern(args, cx, b)
             }
             K::Interp(_) => err(cx, line, "interpolation is not allowed in patterns"),
             _ => match const_fold(e) {

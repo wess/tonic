@@ -244,7 +244,7 @@ defmodule Kernel do
   defp pop_in_data(data, [key | tail]), do: Access.get_and_update(data, key, &pop_in_data(&1, tail))
 
   def function_exported?(module, fun, arity), do: :erlang.function_exported(module, fun, arity)
-  def macro_exported?(module, fun, arity) when is_atom(module) and is_atom(fun) and is_integer(arity), do: Tonic.Internal.macro_exported?(module, fun, arity)
+  def macro_exported?(module, fun, arity) when is_atom(module) and is_atom(fun) and is_integer(arity) and arity >= 0 and arity <= 255, do: Tonic.Internal.macro_exported?(module, fun, arity)
 
   def binding, do: []
 

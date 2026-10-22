@@ -160,6 +160,58 @@ defmodule Tonic.ArchiveTest do
              )
   end
 
+  test "native test dispatch and failures pass through", context do
+    assert {"native output\n", 0} = mix(context, ["tonic", "test"])
+    assert capture(context) == [~s|["test", "."]|]
+
+    assert {"native output\n", 0} =
+             mix(context, [
+               "tonic",
+               "test",
+               "test/example_test.exs:12",
+               "--only",
+               "fast",
+               "--seed",
+               "0",
+               "-O0"
+             ])
+
+    assert List.last(capture(context)) ==
+             ~s|["test", "-O0", ".", "test/example_test.exs:12", "--only", "fast", "--seed", "0"]|
+
+    assert {"native output\n", 2} = mix(context, ["tonic.test"], [{"FAKESTATUS", "2"}])
+  end
+
+  test "native project opt in routes ordinary Mix commands", context do
+    File.write!(Path.join(context.root, "mix.exs"), """
+    defmodule Sample.MixProject do
+      use Mix.Project
+      def project, do: Tonic.native(app: :sample, version: "0.1.0", tonic: [executable: #{inspect(context.executable)}])
+    end
+    """)
+
+    assert {"native output\n", 0} = mix(context, ["test"])
+    assert {"native output\n", 0} = mix(context, ["run", "--", "literal"])
+    assert capture(context) == [~s|["test", "."]|, ~s|["run", ".", "--", "literal"]|]
+    assert Path.wildcard(Path.join(context.root, "_build/**/*.beam")) == []
+  end
+
+  test "release failures clean staging and preserve existing destinations", context do
+    destination = Path.join(context.root, "release")
+
+    assert {_, status} =
+             mix(context, ["tonic.release", "-o", destination], [{"FAKESTATUS", "17"}])
+
+    assert status == 17
+    refute File.exists?(destination)
+    assert Path.wildcard(destination <> ".*") == []
+    File.mkdir_p!(destination)
+    File.write!(Path.join(destination, "keep"), "existing")
+    assert {_, status} = mix(context, ["tonic.release", "-o", destination])
+    assert status != 0
+    assert File.read!(Path.join(destination, "keep")) == "existing"
+  end
+
   test "archive includes its own complete license and notice" do
     archive = Path.expand("../tonic.ez", __DIR__)
     assert {:ok, files} = :zip.extract(String.to_charlist(archive), [:memory])

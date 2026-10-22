@@ -52,7 +52,7 @@ defmodule :ssl do
 
   def clear_pem_cache, do: :ok
 
-  ## Cipher suites (rustls' set; the :ciphers option is accepted and ignored)
+  ## Cipher suites
 
   def cipher_suites(description, version), do: cipher_suites(description, version, :default)
 
@@ -101,7 +101,7 @@ defmodule :ssl do
 
   def connect(socket, options, timeout) when is_reference(socket) do
     with {:ok, options} <- client_options(options) do
-      await(:tonic.ssl_upgrade(socket, options, timeout))
+      await(:tonic.ssl_upgrade(socket, runtime_options(options), timeout), options)
     end
   end
 
@@ -109,7 +109,7 @@ defmodule :ssl do
 
   def connect(host, port, options, timeout) do
     with {:ok, options} <- client_options(options) do
-      await(:tonic.ssl_connect(host, port, options, timeout))
+      await(:tonic.ssl_connect(host, port, runtime_options(options), timeout), options)
     end
   end
 
@@ -117,20 +117,39 @@ defmodule :ssl do
 
   def listen(port, options) do
     case server_options(options) do
-      {:ok, options} -> :tonic.ssl_listen(port, options)
+      {:ok, options} ->
+        case :tonic.ssl_listen(port, runtime_options(options)) do
+          {:ok, socket} = result ->
+            Tonic.SSL.Options.put(socket, options)
+            result
+          error -> error
+        end
       error -> error
     end
   end
 
   def transport_accept(socket), do: transport_accept(socket, :infinity)
-  def transport_accept(socket, timeout), do: await(:tonic.ssl_accept(socket, timeout))
+  def transport_accept(socket, timeout) do
+    case await(:tonic.ssl_accept(socket, timeout)) do
+      {:ok, accepted} = result ->
+        Tonic.SSL.Options.put(accepted, Tonic.SSL.Options.get(socket))
+        result
+      error -> error
+    end
+  end
 
   def handshake(socket), do: handshake(socket, [], :infinity)
   def handshake(socket, timeout) when is_integer(timeout) or timeout == :infinity, do: handshake(socket, [], timeout)
   def handshake(socket, options) when is_list(options), do: handshake(socket, options, :infinity)
 
   def handshake(socket, options, timeout) do
-    await(:tonic.ssl_handshake(socket, normalize(options), timeout))
+    inherited = Tonic.SSL.Options.get(socket)
+    options = Keyword.merge(inherited, normalize(options))
+    try do
+      await(:tonic.ssl_handshake(socket, runtime_options(options), timeout), options)
+    after
+      Tonic.SSL.Options.delete(socket)
+    end
   end
 
   ## Data
@@ -145,7 +164,10 @@ defmodule :ssl do
   def recv(socket, length), do: recv(socket, length, :infinity)
   def recv(socket, length, timeout), do: await(:tonic.ssl_recv(socket, length, timeout))
 
-  def close(socket), do: :tonic.ssl_close(socket)
+  def close(socket) do
+    Tonic.SSL.Options.delete(socket)
+    :tonic.ssl_close(socket)
+  end
   def close(socket, _how_or_timeout), do: close(socket)
 
   def shutdown(socket, how) do
@@ -164,7 +186,14 @@ defmodule :ssl do
     with {:ok, found} <- :tonic.ssl_getopts(socket, names), do: {:ok, Enum.reverse(found)}
   end
 
-  def controlling_process(socket, pid), do: :tonic.ssl_controlling_process(socket, pid)
+  def controlling_process(socket, pid) do
+    case :tonic.ssl_controlling_process(socket, pid) do
+      :ok ->
+        Tonic.SSL.Options.transfer(socket, pid)
+        :ok
+      error -> error
+    end
+  end
   def peername(socket), do: :tonic.ssl_peername(socket)
   def sockname(socket), do: :tonic.ssl_sockname(socket)
   def getstat(socket), do: :tonic.ssl_getstat(socket)
@@ -227,14 +256,140 @@ defmodule :ssl do
       {:"$tonic_ssl", ^ref, result} -> result
     end
   end
-
   defp await(result), do: result
+
+  defp await(ref, options) when is_reference(ref) do
+    worker = spawn_link(fn -> callback_loop(options) end)
+    try do
+      await_callback(ref, worker)
+    after
+      monitor = Process.monitor(worker)
+      Process.unlink(worker)
+      Process.exit(worker, :kill)
+      receive do
+        {:DOWN, ^monitor, :process, ^worker, _} -> :ok
+      end
+      flush_callback_results(worker)
+    end
+  end
+
+  defp await(result, _options), do: result
+
+  defp await_callback(ref, worker) do
+    receive do
+      {:"$tonic_ssl", ^ref, result} -> result
+      {:"$tonic_ssl_callback", ^ref, callback, event} ->
+        Kernel.send(worker, {:callback, self(), callback, event})
+        await_callback(ref, worker)
+      {:tonic_ssl_callback_result, ^worker, callback, result} ->
+        :tonic.ssl_callback_reply(callback, result)
+        await_callback(ref, worker)
+    end
+  end
+
+  defp flush_callback_results(worker) do
+    receive do
+      {:tonic_ssl_callback_result, ^worker, _, _} -> flush_callback_results(worker)
+    after
+      0 -> :ok
+    end
+  end
+
+  defp callback_loop(options) do
+    receive do
+      {:callback, caller, reference, event} ->
+        {result, options} = callback(event, options)
+        Kernel.send(caller, {:tonic_ssl_callback_result, self(), reference, result})
+        callback_loop(options)
+    end
+  end
+
+  defp callback({:verify, der, event}, options) do
+    {fun, state} = Keyword.fetch!(Enum.reverse(options), :verify_fun)
+    cert = :public_key.pkix_decode_cert(der, :otp)
+    state = verify_extensions(cert, fun, state, event)
+    case fun.(cert, event, state) do
+      {:valid, state} -> {true, Keyword.put(options, :verify_fun, {fun, state})}
+      {:unknown, state} -> {event != :valid_peer and not match?({:bad_cert, _}, event), Keyword.put(options, :verify_fun, {fun, state})}
+      {:fail, _reason} -> {false, options}
+    end
+  rescue
+    _ -> {false, options}
+  catch
+    _, _ -> {false, options}
+  end
+
+  defp verify_extensions({:OTPCertificate, tbs, _, _} = cert, fun, state, event)
+       when event in [:valid, :valid_peer] do
+    extensions = elem(tbs, 10)
+    Enum.reduce(if(is_list(extensions), do: extensions, else: []), state, fn
+      {:Extension, {2, 5, 29, 17} = oid, critical, value}, state ->
+        extension = {:Extension, oid, critical, :public_key.hostname_names(value)}
+        case fun.(cert, {:extension, extension}, state) do
+          {:valid, state} -> state
+          {:unknown, state} when not critical -> state
+          _ -> throw(:invalid_extension)
+        end
+      _, state -> state
+    end)
+  end
+
+  defp verify_extensions(_cert, _fun, state, _event), do: state
+
+  defp callback({:hostname, der, hostname}, options) do
+    result = :public_key.pkix_verify_hostname(der, [{:dns_id, String.to_charlist(hostname)}],
+      Keyword.get(options, :customize_hostname_check, []))
+    {result, options}
+  rescue
+    _ -> {false, options}
+  end
+
+  defp callback({:partial_chain, certificates}, options) do
+    {Keyword.fetch!(options, :partial_chain).(certificates), options}
+  rescue
+    _ -> {:unknown_ca, options}
+  catch
+    _, _ -> {:unknown_ca, options}
+  end
+
+  defp callback({:sni, hostname}, options) do
+    case Keyword.fetch!(Enum.reverse(options), :sni_fun).(String.to_charlist(hostname)) do
+      :undefined -> {[], options}
+      extra when is_list(extra) ->
+        extra = normalize(extra)
+        {runtime_options(extra), Keyword.merge(options, extra)}
+      _ -> {false, options}
+    end
+  rescue
+    _ -> {false, options}
+  catch
+    _, _ -> {false, options}
+  end
+
+  defp runtime_options(options) do
+    Enum.flat_map(options, fn
+      {:verify_fun, {_fun, _state}} -> [tonic_verify_callback: true]
+      {:customize_hostname_check, _checks} -> [tonic_hostname_callback: true]
+      {:sni_fun, _fun} -> [tonic_sni_callback: true]
+      {:partial_chain, _fun} -> [tonic_partial_chain_callback: true]
+      {:ciphers, suites} -> [ciphers: Enum.map(suites, &cipher_name/1)]
+      other -> [other]
+    end)
+  end
+
+  defp cipher_name(%{} = suite), do: suite_to_str(suite) |> to_string()
+  defp cipher_name(name) do
+    case str_to_suite(name) do
+      %{} = suite -> suite_to_str(suite) |> to_string()
+      _ -> to_string(name)
+    end
+  end
 
   ## Option normalization
 
   defp client_options(options) do
     options = normalize(options)
-    verify = :proplists.get_value(:verify, options, :verify_peer)
+    verify = :proplists.get_value(:verify, Enum.reverse(options), :verify_peer)
     trusted? = List.keymember?(options, :cacerts, 0) or List.keymember?(options, :cacertfile, 0)
 
     cond do
@@ -248,7 +403,7 @@ defmodule :ssl do
 
   defp server_options(options) do
     options = normalize(options)
-    verify = :proplists.get_value(:verify, options, :verify_none)
+    verify = :proplists.get_value(:verify, Enum.reverse(options), :verify_none)
     {:ok, [{:verify, verify} | List.keydelete(options, :verify, 0)]}
   end
 
@@ -260,7 +415,7 @@ defmodule :ssl do
       {:cert, cert} when is_list(cert) -> [{:cert, Enum.map(cert, &der/1)}]
       {:cert, cert} -> [{:cert, [der(cert)]}]
       {:key, {_type, key}} when is_binary(key) -> [{:key, key}]
-      {:key, _} -> []
+      {:key, key} -> [{:key, key}]
       {:certs_keys, [first | _]} when is_map(first) -> Map.to_list(first) |> normalize()
       {:sni_hosts, hosts} -> [{:sni_hosts, Enum.map(hosts, fn {host, opts} -> {host, normalize(opts)} end)}]
       other -> [other]
@@ -269,4 +424,60 @@ defmodule :ssl do
 
   defp der({:cert, der, _}), do: der
   defp der(der), do: der
+end
+
+defmodule Tonic.SSL.Options do
+  @moduledoc false
+  use GenServer
+
+  def put(socket, options), do: request({:put, socket, options, self()})
+  def get(socket), do: request({:get, socket})
+  def delete(socket), do: request({:delete, socket})
+  def transfer(socket, owner), do: request({:transfer, socket, owner})
+
+  defp request(message) do
+    case GenServer.start(__MODULE__, nil, name: __MODULE__) do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> :ok
+    end
+    GenServer.call(__MODULE__, message)
+  end
+
+  def init(_), do: {:ok, %{}}
+
+  def handle_call({:get, socket}, _from, state) do
+    options = case Map.get(state, socket) do
+      {options, _monitor} -> options
+      nil -> []
+    end
+    {:reply, options, state}
+  end
+
+  def handle_call({:put, socket, options, owner}, _from, state) do
+    state = forget(state, socket)
+    {:reply, :ok, Map.put(state, socket, {options, Process.monitor(owner)})}
+  end
+
+  def handle_call({:transfer, socket, owner}, _from, state) do
+    state = case Map.get(state, socket) do
+      {options, _monitor} -> Map.put(forget(state, socket), socket, {options, Process.monitor(owner)})
+      nil -> state
+    end
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:delete, socket}, _from, state), do: {:reply, :ok, forget(state, socket)}
+
+  def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
+    {:noreply, Map.reject(state, fn {_socket, {_options, reference}} -> reference == monitor end)}
+  end
+
+  defp forget(state, socket) do
+    case Map.pop(state, socket) do
+      {{_options, monitor}, state} ->
+        Process.demonitor(monitor, [:flush])
+        state
+      {nil, state} -> state
+    end
+  end
 end

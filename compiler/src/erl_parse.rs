@@ -91,7 +91,11 @@ fn x(k: XK, line: u32) -> X {
 
 impl Parser {
     pub fn new(toks: Vec<Tok>, file: &str) -> Parser {
-        Parser { toks, pos: 0, file: file.to_string() }
+        Parser {
+            toks,
+            pos: 0,
+            file: file.to_string(),
+        }
     }
 
     fn peek(&self) -> &Tok {
@@ -115,7 +119,10 @@ impl Parser {
     }
     fn err<Y>(&self, m: &str) -> R<Y> {
         let t = self.peek();
-        Err(format!("{}:{}: syntax error: {} (near {:?})", self.file, t.line, m, t.t))
+        Err(format!(
+            "{}:{}: syntax error: {} (near {:?})",
+            self.file, t.line, m, t.t
+        ))
     }
     fn expect(&mut self, s: &str) -> R<()> {
         if self.is(s) {
@@ -198,8 +205,12 @@ impl Parser {
                             loop {
                                 match &self.peek().t {
                                     T::P(p) if (p == "," || p == "}") && depth == 0 => break,
-                                    T::P(p) if p == "(" || p == "[" || p == "{" || p == "<<" => depth += 1,
-                                    T::P(p) if p == ")" || p == "]" || p == "}" || p == ">>" => depth -= 1,
+                                    T::P(p) if p == "(" || p == "[" || p == "{" || p == "<<" => {
+                                        depth += 1
+                                    }
+                                    T::P(p) if p == ")" || p == "]" || p == "}" || p == ">>" => {
+                                        depth -= 1
+                                    }
                                     T::Eof | T::Dot => break,
                                     _ => {}
                                 }
@@ -228,7 +239,9 @@ impl Parser {
                     let mut fas = Vec::new();
                     let mut j = 0;
                     while j + 2 < toks.len() {
-                        if let (T::Atom(f), T::P(sl), T::Int(n)) = (&toks[j].t, &toks[j + 1].t, &toks[j + 2].t) {
+                        if let (T::Atom(f), T::P(sl), T::Int(n)) =
+                            (&toks[j].t, &toks[j + 1].t, &toks[j + 2].t)
+                        {
                             if sl == "/" {
                                 fas.push((f.clone(), *n as usize));
                             }
@@ -245,7 +258,10 @@ impl Parser {
                     let st = self.pos;
                     self.skip_form();
                     let toks = &self.toks[st..self.pos];
-                    if toks.iter().any(|t| matches!(&t.t, T::Atom(a) if a == "export_all")) {
+                    if toks
+                        .iter()
+                        .any(|t| matches!(&t.t, T::Atom(a) if a == "export_all"))
+                    {
                         return Ok(Form::ExportAll);
                     }
                     Ok(Form::Other)
@@ -313,7 +329,12 @@ impl Parser {
         let guard = self.opt_guard()?;
         self.expect("->")?;
         let body = self.body()?;
-        Ok(Cl { pats, guard, body, line })
+        Ok(Cl {
+            pats,
+            guard,
+            body,
+            line,
+        })
     }
 
     fn exprs_until(&mut self, close: &str) -> R<Vec<X>> {
@@ -372,7 +393,12 @@ impl Parser {
             let guard = self.opt_guard()?;
             self.expect("->")?;
             let body = self.body()?;
-            cls.push(Cl { pats: vec![pat], guard, body, line });
+            cls.push(Cl {
+                pats: vec![pat],
+                guard,
+                body,
+                line,
+            });
             if self.is(";") {
                 self.pos += 1;
                 continue;
@@ -421,7 +447,10 @@ impl Parser {
             let line = self.line();
             self.pos += 1;
             let r = self.expr150()?;
-            return Ok(x(XK::BinOp("orelse".into(), Box::new(l), Box::new(r)), line));
+            return Ok(x(
+                XK::BinOp("orelse".into(), Box::new(l), Box::new(r)),
+                line,
+            ));
         }
         Ok(l)
     }
@@ -432,7 +461,10 @@ impl Parser {
             let line = self.line();
             self.pos += 1;
             let r = self.expr160()?;
-            return Ok(x(XK::BinOp("andalso".into(), Box::new(l), Box::new(r)), line));
+            return Ok(x(
+                XK::BinOp("andalso".into(), Box::new(l), Box::new(r)),
+                line,
+            ));
         }
         Ok(l)
     }
@@ -467,7 +499,14 @@ impl Parser {
         let mut l = self.expr500()?;
         loop {
             let op = match &self.peek().t {
-                T::P(p) if matches!(p.as_str(), "+" | "-" | "bor" | "bxor" | "bsl" | "bsr" | "or" | "xor") => p.clone(),
+                T::P(p)
+                    if matches!(
+                        p.as_str(),
+                        "+" | "-" | "bor" | "bxor" | "bsl" | "bsr" | "or" | "xor"
+                    ) =>
+                {
+                    p.clone()
+                }
                 _ => break,
             };
             let line = self.line();
@@ -482,7 +521,9 @@ impl Parser {
         let mut l = self.expr600()?;
         loop {
             let op = match &self.peek().t {
-                T::P(p) if matches!(p.as_str(), "*" | "/" | "div" | "rem" | "band" | "and") => p.clone(),
+                T::P(p) if matches!(p.as_str(), "*" | "/" | "div" | "rem" | "band" | "and") => {
+                    p.clone()
+                }
                 _ => break,
             };
             let line = self.line();
@@ -694,7 +735,12 @@ impl Parser {
                         }
                         self.expect("->")?;
                         let body = self.body()?;
-                        cls.push(Cl { pats: vec![], guard: alts, body, line: l });
+                        cls.push(Cl {
+                            pats: vec![],
+                            guard: alts,
+                            body,
+                            line: l,
+                        });
                         if self.is(";") {
                             self.pos += 1;
                             continue;
@@ -714,7 +760,11 @@ impl Parser {
                 }
                 "receive" => {
                     self.pos += 1;
-                    let cls = if self.is("after") { vec![] } else { self.cr_clauses()? };
+                    let cls = if self.is("after") {
+                        vec![]
+                    } else {
+                        self.cr_clauses()?
+                    };
                     let mut after = None;
                     if self.is("after") {
                         self.pos += 1;
@@ -743,7 +793,12 @@ impl Parser {
                             let guard = self.opt_guard()?;
                             self.expect("->")?;
                             let b = self.body()?;
-                            catches.push(Cl { pats, guard, body: b, line: l });
+                            catches.push(Cl {
+                                pats,
+                                guard,
+                                body: b,
+                                line: l,
+                            });
                             if self.is(";") {
                                 self.pos += 1;
                                 continue;
@@ -827,7 +882,10 @@ impl Parser {
                     let f = self.exprmax()?;
                     self.expect("/")?;
                     let n = self.exprmax()?;
-                    return Ok(x(XK::FunRef(Some(Box::new(a)), Box::new(f), Box::new(n)), line));
+                    return Ok(x(
+                        XK::FunRef(Some(Box::new(a)), Box::new(f), Box::new(n)),
+                        line,
+                    ));
                 }
                 self.expect("/")?;
                 let n = self.exprmax()?;

@@ -14,6 +14,7 @@ PAGES = {
     "docs/compatibility.md": "docs/compatibility.md",
     "TODO.md": "roadmap.md",
     "docs/release.md": "docs/release.md",
+    "docs/coverage.md": "docs/coverage.md",
 }
 
 
@@ -33,12 +34,13 @@ def outputs():
                 "Upstream Elixir and OTP references are linked, not bundled.\n",
                 "Source: " + REPO + "llms.txt\n\n" + index]
     for source, content in pages.items():
-        if source != "docs/release.md":
+        if source not in {"docs/release.md", "docs/coverage.md"}:
             sections.append("Source: " + REPO + source + "\n\n" + content)
     full = "\n---\n\n".join(sections)
     result = {"llm.txt": index, "llmsfull.txt": full,
               "site/llms.txt": index, "site/llm.txt": index, "site/llmsfull.txt": full}
     result.update({"site/" + target: pages[source] for source, target in PAGES.items()})
+    result["site/docs/coverage.json"] = (ROOT / "docs/coverage.json").read_text(encoding="utf-8")
     return result
 
 

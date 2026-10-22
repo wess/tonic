@@ -549,7 +549,7 @@ fn copy_out(t: Term) -> Fragment {
     unsafe { buf.set_len(words.max(1)) };
     let mut free = buf.as_mut_ptr();
     let root = unsafe { crate::heap::copy_term(t, 0, usize::MAX, &mut free) };
-    Fragment { buf, root }
+    Fragment::new(buf, root, free)
 }
 
 /// The next key after `key` in iteration order, or `$end_of_table`.

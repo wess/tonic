@@ -1800,6 +1800,7 @@ defmodule Module do
 end
 
 defmodule Code do
+  def loaded?(module), do: :tonic.module_loaded(module)
   def ensure_loaded?(module), do: :tonic.module_loaded(module)
   def ensure_loaded(module), do: if(:tonic.module_loaded(module), do: {:module, module}, else: {:error, :nofile})
   def ensure_compiled(module), do: ensure_loaded(module)

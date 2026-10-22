@@ -1,6 +1,6 @@
 [package]
 name = "tonic-tls"
-version = "0.1.0-beta.3"
+version = "0.1.1-beta.1"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -18,3 +18,4 @@ rustls = { version = "=0.23.46", default-features = false, features = ["ring", "
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
 rustls-pki-types = { version = "=1.15.1", features = ["std"] }
 rustls-webpki = { version = "=0.103.15", default-features = false, features = ["ring", "std"] }
+socket2 = { version = "0.6", features = ["all"] }

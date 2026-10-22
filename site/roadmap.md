@@ -1,6 +1,7 @@
 # Tonic TODO
 
-Tonic is in public beta (0.1.0-beta.3), for scripts and applications within
+The development version is 0.1.1-beta.1; the latest public beta is 0.1.0-beta.3.
+Tonic targets scripts and applications within
 the supported boundary in docs/compatibility.md. The next priority is broader
 Elixir source and runtime compatibility, backed by comparisons against
 Elixir/OTP. Supporting `.ex` and `.exs` files does not establish full BEAM
@@ -16,6 +17,20 @@ compatibility.
 
 ## Beta follow-ups
 
+Development source after beta.3 adds these portability checks and fixes:
+
+- [x] Generate an API inventory against pinned Elixir/OTP exports, with reviewed
+  classifications, linked regressions and stale-output checks in CI.
+- [x] Retain dynamically named apply/capture/spawn targets conservatively.
+- [x] Embed remote captures from interpreted compile-time modules in module
+  attributes; compare unchanged Req GET/POST/redirect/status behavior with BEAM.
+- [x] Reclaim atomics/counters, unclosed zlib state and NIF resources when their
+  final term/native owner disappears, including messages, ETS and ETF recovery.
+- [x] Exercise TLS verification/hostname/partial-chain/SNI callbacks and socket
+  options, connected UDP/multicast, and TCP framing/list delivery against BEAM.
+- [x] Run ExUnit natively and produce relocatable native application bundles;
+  opt-in Mix aliases preserve ordinary run/test/release command workflows.
+
 Known differences are listed in docs/compatibility.md. In priority order:
 
 - [x] Grow process stacks on demand: functions continue on a new stack segment
@@ -27,9 +42,10 @@ Known differences are listed in docs/compatibility.md. In priority order:
 - [ ] Per-process baseline: a blocked process holds a stack page (16 KB on
   Apple Silicon). Copying small stacks out on block would approach the BEAM's
   ~3 KB.
-- [ ] Executable size: PCRE2 and the inspect/exception machinery are always
-  linked (hello world is ~4.5 MB); make regex and exception formatting
-  reachable only when used.
+- [ ] Executable size: hello world is now ~15 MB on Apple Silicon because
+  runtime-named I/O callbacks conservatively retain all public functions.
+  Specialize I/O request reachability without breaking dynamic apply; also
+  make regex and exception formatting reachable only when used.
 - [ ] Make `:calendar.local_time_to_universal_time/1` use the offset in effect
   at that local time, as the BEAM does.
 - [ ] Emit Elixir's remaining compile warnings (unused functions, aliases and
@@ -48,14 +64,14 @@ Known differences are listed in docs/compatibility.md. In priority order:
   `Record.is_record`, and record extraction from Erlang headers.
 - [x] Audit the remaining `:array` operations: the bundled module is now OTP
   27.3's own `array.erl`.
-- [ ] Audit Erlang preprocessing conditions. Unsupported expressions must
+- [x] Audit Erlang preprocessing conditions. Unsupported expressions must
   produce diagnostics rather than silently evaluate to false.
 - [ ] Continue adding file-and-line diagnostics for unsupported constructs;
   avoid accepting code whose executable behavior is discarded.
 
 ## Runtime and standard library
 
-- [ ] Build an API coverage inventory for the bundled Elixir and Erlang library:
+- [x] Build an API coverage inventory for the bundled Elixir and Erlang library:
   implemented, partially implemented, unsupported, and intentionally different.
   Link entries to runnable tests.
 - [ ] Broaden process tests for mailbox ordering, links, monitors, exit signals,
@@ -70,14 +86,15 @@ Known differences are listed in docs/compatibility.md. In priority order:
 
 ## Mix and package compatibility
 
-- [ ] Expand coverage beyond the current Decimal, Jason, NimbleOptions, and
-  DeepMerge scenarios. Exercise more APIs within each package as well as more
+- [ ] Expand coverage beyond the current Decimal, Jason, NimbleOptions,
+  DeepMerge and Req scenarios. Exercise more APIs within each package as well as more
   real packages; keep exact versions and lockfiles.
 - [ ] Test representative applications with dependencies, startup callbacks,
   runtime configuration, and supervised services—not only isolated functions.
 - [ ] Strengthen environment/target, optional dependency, protocol, and stale
   cache coverage across project and dependency sources.
-- [ ] Decide and document support for umbrella roots and custom compilers.
+- [x] Support umbrella roots, yecc/leex and explicitly configured Mix source
+  generators; reject unsupported artifact-only compiler pipelines.
 - [x] Turn `examples/helloweb` into an automated test (`compiler/tests/helloweb.rs`,
   run in CI): build it natively and exercise its HTTP endpoints.
 - [x] Refresh `licenses/cargo` for the crates tokio's `net` feature added
@@ -89,12 +106,13 @@ These are outside the current release. They need explicit design work and
 dedicated interoperability tests before any compatibility claims.
 
 - [x] Ports to external programs (`spawn`, `spawn_executable`), with `System.cmd/3` and `:os.cmd/1` over them. Port drivers, `{:fd, _, _}` and `:erlang.port_control/3` remain unsupported.
-- [ ] Extend the `erl_nif` subset (maps, monitors, select, dirty schedulers) and
-  release resources when no term references them. The same release would
-  free unclosed `:zlib` streams and `:atomics` arrays.
+- [ ] Extend the `erl_nif` subset (maps, monitors, select, dirty schedulers).
+  Term/native resource lifetime tracking is implemented and tested separately.
 - [x] SSL sockets: `:ssl` TLS 1.2/1.3 clients and servers on rustls.
-- [ ] `:gen_udp.connect`, UDP multicast, DTLS, and TLS session resumption,
-  custom `verify_fun`/`match_fun`/`sni_fun` callbacks and nested TLS.
+- [x] `:gen_udp.connect`, UDP multicast and custom
+  `verify_fun`/`match_fun`/`sni_fun`/`partial_chain` callbacks.
+- [ ] DTLS, TLS session resumption across independently created configurations,
+  nested TLS and callback overrides for unknown critical X.509 extensions.
 - [ ] Define the scope of distributed-node support and BEAM interoperability.
 - [ ] Decide how dynamic module loading and hot code replacement would work
   with native compilation.

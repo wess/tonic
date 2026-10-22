@@ -2,7 +2,10 @@
 //! -elif/-else/-endif, -include/-include_lib and macro expansion.
 
 use crate::erl_lex::{tokenize, Tok, T};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+#[path = "erlcond.rs"]
+mod condition;
 
 #[derive(Clone)]
 struct Macro {
@@ -15,6 +18,7 @@ pub struct Pp<'a> {
     module: String,
     macros: HashMap<(String, Option<usize>), Macro>,
     includes: &'a dyn Fn(&str) -> Option<String>,
+    undefined: HashSet<String>,
 }
 
 fn p(t: &Tok, s: &str) -> bool {
@@ -43,23 +47,40 @@ fn split_forms(toks: Vec<Tok>) -> Vec<Vec<Tok>> {
 
 impl<'a> Pp<'a> {
     pub fn new(file: &str, includes: &'a dyn Fn(&str) -> Option<String>) -> Pp<'a> {
-        Pp { file: file.to_string(), module: String::new(), macros: HashMap::new(), includes }
+        Pp {
+            file: file.to_string(),
+            module: String::new(),
+            macros: HashMap::new(),
+            includes,
+            undefined: HashSet::new(),
+        }
     }
 
     pub fn run(&mut self, src: &str) -> Result<Vec<Tok>, String> {
         let toks = tokenize(src, &self.file)?;
         let mut out = Vec::new();
-        let mut conds: Vec<(bool, bool)> = Vec::new(); // (active, any branch taken)
+        let mut conds: Vec<(bool, bool, bool)> = Vec::new(); // (active, branch taken, else seen)
         self.process(split_forms(toks), &mut out, &mut conds)?;
-        out.push(Tok { t: T::Eof, line: out.last().map(|t| t.line).unwrap_or(1) });
+        if !conds.is_empty() {
+            return Err(format!("{}: unterminated conditional directive", self.file));
+        }
+        out.push(Tok {
+            t: T::Eof,
+            line: out.last().map(|t| t.line).unwrap_or(1),
+        });
         Ok(out)
     }
 
-    fn active(conds: &[(bool, bool)]) -> bool {
+    fn active(conds: &[(bool, bool, bool)]) -> bool {
         conds.iter().all(|c| c.0)
     }
 
-    fn process(&mut self, forms: Vec<Vec<Tok>>, out: &mut Vec<Tok>, conds: &mut Vec<(bool, bool)>) -> Result<(), String> {
+    fn process(
+        &mut self,
+        forms: Vec<Vec<Tok>>,
+        out: &mut Vec<Tok>,
+        conds: &mut Vec<(bool, bool, bool)>,
+    ) -> Result<(), String> {
         for form in forms {
             if form.len() >= 2 && p(&form[0], "-") {
                 let dname = match &form[1].t {
@@ -72,37 +93,54 @@ impl<'a> Pp<'a> {
                     match d.as_str() {
                         "ifdef" | "ifndef" => {
                             let name = self.directive_name(&form)?;
-                            let def = self.macros.keys().any(|(n, _)| *n == name) || self.predefined(&name);
+                            let def = self.macros.keys().any(|(n, _)| *n == name)
+                                || self.predefined(&name);
                             let v = if d == "ifdef" { def } else { !def };
                             let on = Self::active(conds);
-                            conds.push((v && on, v));
+                            conds.push((v && on, v, false));
                             continue;
                         }
                         "if" | "elif" => {
                             if d == "elif" {
-                                let (_, taken) = conds.pop().ok_or("elif without if")?;
+                                let (_, taken, was_else) = conds.pop().ok_or("elif without if")?;
+                                if was_else {
+                                    return Err(format!("{}:{}: elif after else", self.file, line));
+                                }
                                 let on = Self::active(conds);
                                 if taken {
-                                    conds.push((false, true));
+                                    conds.push((false, true, false));
                                 } else {
-                                    let v = self.eval_cond(&form[2..form.len() - 1])?;
-                                    conds.push((v && on, v));
+                                    let v = if on {
+                                        self.eval_cond(&form[2..form.len() - 1])?
+                                    } else {
+                                        false
+                                    };
+                                    conds.push((v && on, v, false));
                                 }
                             } else {
                                 let on = Self::active(conds);
-                                let v = if on { self.eval_cond(&form[2..form.len() - 1])? } else { false };
-                                conds.push((v && on, v));
+                                let v = if on {
+                                    self.eval_cond(&form[2..form.len() - 1])?
+                                } else {
+                                    false
+                                };
+                                conds.push((v && on, v, false));
                             }
                             continue;
                         }
                         "else" => {
-                            let (_, taken) = conds.pop().ok_or("else without if")?;
+                            let (_, taken, was_else) = conds.pop().ok_or("else without if")?;
+                            if was_else {
+                                return Err(format!("{}:{}: repeated else", self.file, line));
+                            }
                             let on = Self::active(conds);
-                            conds.push((!taken && on, true));
+                            conds.push((!taken && on, true, true));
                             continue;
                         }
                         "endif" => {
-                            conds.pop();
+                            conds.pop().ok_or_else(|| {
+                                format!("{}:{}: endif without if", self.file, line)
+                            })?;
                             continue;
                         }
                         _ => {}
@@ -118,16 +156,24 @@ impl<'a> Pp<'a> {
                         "undef" => {
                             let name = self.directive_name(&form)?;
                             self.macros.retain(|(n, _), _| *n != name);
+                            self.undefined.insert(name);
                             continue;
                         }
                         "include" | "include_lib" => {
                             let path = match form.get(3).map(|t| &t.t) {
-                                Some(T::Str(cps)) => cps.iter().filter_map(|c| char::from_u32(*c)).collect::<String>(),
+                                Some(T::Str(cps)) => cps
+                                    .iter()
+                                    .filter_map(|c| char::from_u32(*c))
+                                    .collect::<String>(),
                                 _ => return Err(format!("{}:{}: bad include", self.file, line)),
                             };
                             let base = path.rsplit('/').next().unwrap_or(&path).to_string();
-                            let src = (self.includes)(&base)
-                                .ok_or_else(|| format!("{}:{}: can't find include file {:?}", self.file, line, path))?;
+                            let src = (self.includes)(&base).ok_or_else(|| {
+                                format!(
+                                    "{}:{}: can't find include file {:?}",
+                                    self.file, line, path
+                                )
+                            })?;
                             let saved = std::mem::replace(&mut self.file, base.clone());
                             let toks = tokenize(&src, &base)?;
                             let r = self.process(split_forms(toks), out, conds);
@@ -157,10 +203,18 @@ impl<'a> Pp<'a> {
     }
 
     fn predefined(&self, n: &str) -> bool {
-        matches!(n, "MODULE" | "MODULE_STRING" | "FILE" | "LINE" | "MACHINE" | "FUNCTION_NAME" | "FUNCTION_ARITY" | "OTP_RELEASE" | "BEAM")
+        !self.undefined.contains(n)
+            && match n {
+                "MODULE" | "MODULE_STRING" => !self.module.is_empty(),
+                "FILE" | "LINE" | "MACHINE" | "OTP_RELEASE" | "BEAM" => true,
+                _ => false,
+            }
     }
 
     fn directive_name(&self, form: &[Tok]) -> Result<String, String> {
+        if form.len() != 6 || !p(&form[2], "(") || !p(&form[4], ")") {
+            return Err(format!("{}:{}: bad directive", self.file, form[0].line));
+        }
         match form.get(3).map(|t| &t.t) {
             Some(T::Atom(a)) | Some(T::Var(a)) => Ok(a.clone()),
             _ => Err(format!("{}:{}: bad directive", self.file, form[0].line)),
@@ -195,47 +249,34 @@ impl<'a> Pp<'a> {
         let end = form.len() - 2;
         let body = form[i + 1..end].to_vec();
         let arity = params.as_ref().map(|p| p.len());
+        if self.macros.contains_key(&(name.clone(), arity)) || self.predefined(&name) {
+            return Err(format!("{}:{}: redefining macro {}", self.file, line, name));
+        }
+        self.undefined.remove(&name);
         self.macros.insert((name, arity), Macro { params, body });
         Ok(())
     }
 
     fn eval_cond(&mut self, toks: &[Tok]) -> Result<bool, String> {
         let toks = self.expand(toks, "", 0, 0)?;
-        // tiny evaluator: [not] A [op B] with ints/atoms; `defined(X)` unsupported -> false
-        let vals: Vec<&T> = toks.iter().map(|t| &t.t).collect();
-        fn num(t: &T) -> Option<i128> {
-            match t {
-                T::Int(v) => Some(*v),
-                _ => None,
-            }
-        }
-        // strip outer parens
-        let mut v: Vec<&T> = vals;
-        while v.len() >= 2 && matches!(v[0], T::P(x) if x == "(") && matches!(v[v.len() - 1], T::P(x) if x == ")") {
-            v = v[1..v.len() - 1].to_vec();
-        }
-        match v.as_slice() {
-            [T::Atom(a)] => Ok(a == "true"),
-            [a, T::P(op), b] => {
-                let (x, y) = match (num(a), num(b)) {
-                    (Some(x), Some(y)) => (x, y),
-                    _ => return Ok(false),
-                };
-                Ok(match op.as_str() {
-                    ">=" => x >= y,
-                    ">" => x > y,
-                    "<" => x < y,
-                    "=<" => x <= y,
-                    "==" | "=:=" => x == y,
-                    "/=" | "=/=" => x != y,
-                    _ => false,
-                })
-            }
-            _ => Ok(false),
-        }
+        condition::condition(toks, &self.file, |name| {
+            self.macros.keys().any(|(n, _)| n == name)
+                || (!self.undefined.contains(name)
+                    && matches!(
+                        name,
+                        "MODULE" | "MODULE_STRING" | "FUNCTION_NAME" | "FUNCTION_ARITY"
+                    ))
+                || self.predefined(name)
+        })
     }
 
-    fn expand(&mut self, toks: &[Tok], fname: &str, farity: usize, depth: usize) -> Result<Vec<Tok>, String> {
+    fn expand(
+        &mut self,
+        toks: &[Tok],
+        fname: &str,
+        farity: usize,
+        depth: usize,
+    ) -> Result<Vec<Tok>, String> {
         if depth > 50 {
             return Err(format!("{}: macro expansion too deep", self.file));
         }
@@ -253,7 +294,10 @@ impl<'a> Pp<'a> {
                 };
                 if stringify {
                     // ??Arg is only meaningful inside macro bodies (handled at substitution)
-                    out.push(Tok { t: T::Str(name.chars().map(|c| c as u32).collect()), line });
+                    out.push(Tok {
+                        t: T::Str(name.chars().map(|c| c as u32).collect()),
+                        line,
+                    });
                     i += 2;
                     continue;
                 }
@@ -261,17 +305,22 @@ impl<'a> Pp<'a> {
                 // predefined
                 let pre = match name.as_str() {
                     "MODULE" => Some(T::Atom(self.module.clone())),
-                    "MODULE_STRING" => Some(T::Str(self.module.chars().map(|c| c as u32).collect())),
+                    "MODULE_STRING" => {
+                        Some(T::Str(self.module.chars().map(|c| c as u32).collect()))
+                    }
                     "FILE" => Some(T::Str(self.file.chars().map(|c| c as u32).collect())),
                     "LINE" => Some(T::Int(line as i128)),
                     "MACHINE" => Some(T::Atom("BEAM".into())),
+                    "BEAM" => Some(T::Atom("true".into())),
                     "FUNCTION_NAME" => Some(T::Atom(fname.to_string())),
                     "FUNCTION_ARITY" => Some(T::Int(farity as i128)),
                     "OTP_RELEASE" => Some(T::Int(27)),
                     _ => None,
                 };
                 if let Some(pt) = pre {
-                    if !self.macros.contains_key(&(name.clone(), None)) {
+                    if !self.undefined.contains(&name)
+                        && !self.macros.contains_key(&(name.clone(), None))
+                    {
                         out.push(Tok { t: pt, line });
                         continue;
                     }
@@ -290,7 +339,10 @@ impl<'a> Pp<'a> {
                                 if let Some(T::Var(v)) = m.body.get(k + 1).map(|t| &t.t) {
                                     if let Some(pi) = params.iter().position(|x| x == v) {
                                         let s = tokens_to_string(&args[pi]);
-                                        body.push(Tok { t: T::Str(s.chars().map(|c| c as u32).collect()), line });
+                                        body.push(Tok {
+                                            t: T::Str(s.chars().map(|c| c as u32).collect()),
+                                            line,
+                                        });
                                         k += 2;
                                         continue;
                                     }
@@ -303,7 +355,10 @@ impl<'a> Pp<'a> {
                                     continue;
                                 }
                             }
-                            body.push(Tok { t: bt.t.clone(), line });
+                            body.push(Tok {
+                                t: bt.t.clone(),
+                                line,
+                            });
                             k += 1;
                         }
                         let e = self.expand(&body, fname, farity, depth + 1)?;
@@ -313,11 +368,23 @@ impl<'a> Pp<'a> {
                 }
                 match self.macros.get(&(name.clone(), None)).cloned() {
                     Some(m) => {
-                        let body: Vec<Tok> = m.body.iter().map(|bt| Tok { t: bt.t.clone(), line }).collect();
+                        let body: Vec<Tok> = m
+                            .body
+                            .iter()
+                            .map(|bt| Tok {
+                                t: bt.t.clone(),
+                                line,
+                            })
+                            .collect();
                         let e = self.expand(&body, fname, farity, depth + 1)?;
                         out.extend(e);
                     }
-                    None => return Err(format!("{}:{}: undefined macro '{}'", self.file, line, name)),
+                    None => {
+                        return Err(format!(
+                            "{}:{}: undefined macro '{}'",
+                            self.file, line, name
+                        ))
+                    }
                 }
                 continue;
             }
@@ -342,11 +409,14 @@ fn collect_args(toks: &[Tok], i: usize) -> Result<(Vec<Vec<Tok>>, usize), String
         let t = &toks[j];
         if let T::P(x) = &t.t {
             match x.as_str() {
-                "(" | "[" | "{" | "<<" | "begin" | "case" | "if" | "receive" | "try" | "maybe" => depth += 1,
+                "(" | "[" | "{" | "<<" | "begin" | "case" | "if" | "receive" | "try" | "maybe" => {
+                    depth += 1
+                }
                 "fun" => {
                     // `fun (` / `fun Name(` opens a block; `fun f/1` does not
                     if toks.get(j + 1).map(|t| p(t, "(")).unwrap_or(false)
-                        || (matches!(toks.get(j + 1).map(|t| &t.t), Some(T::Var(_))) && toks.get(j + 2).map(|t| p(t, "(")).unwrap_or(false))
+                        || (matches!(toks.get(j + 1).map(|t| &t.t), Some(T::Var(_)))
+                            && toks.get(j + 2).map(|t| p(t, "(")).unwrap_or(false))
                     {
                         depth += 1;
                     }
@@ -381,7 +451,12 @@ fn tokens_to_string(ts: &[Tok]) -> String {
             T::Int(i) => i.to_string(),
             T::Float(f) => f.to_string(),
             T::Char(c) => format!("${}", char::from_u32(*c).unwrap_or('?')),
-            T::Str(cps) => format!("\"{}\"", cps.iter().filter_map(|c| char::from_u32(*c)).collect::<String>()),
+            T::Str(cps) => format!(
+                "\"{}\"",
+                cps.iter()
+                    .filter_map(|c| char::from_u32(*c))
+                    .collect::<String>()
+            ),
             T::P(p) => p.clone(),
             _ => String::new(),
         };

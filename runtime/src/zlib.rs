@@ -3,7 +3,8 @@
 //!
 //! zlib itself is the stock C library built by libz-sys, which keeps the
 //! compressed bytes identical to the BEAM's. A stream is named by the id of
-//! the reference returned from `open`; closing it drops all native state.
+//! the reference returned from `open`; closing it or collecting its final
+//! reference releases the codec state.
 
 use crate::bif_bin::flatten_io;
 use crate::bif_core::cx;
@@ -11,9 +12,7 @@ use crate::heap::{Ctx, Fragment};
 use crate::term::*;
 use libz_sys as z;
 use parking_lot::Mutex;
-use std::collections::HashMap;
 use std::os::raw::{c_int, c_void};
-use std::sync::{Arc, OnceLock};
 
 const DICT_SIZE: usize = 32768;
 
@@ -36,6 +35,7 @@ struct Stream {
     input: Vec<u8>,
     at: usize,
     stash: Option<Fragment>,
+    closed: bool,
 }
 
 // The raw pointers in z_stream only refer to zlib's own allocations.
@@ -45,13 +45,6 @@ impl Drop for Stream {
     fn drop(&mut self) {
         end(self);
     }
-}
-
-type Shared = Arc<Mutex<Stream>>;
-
-fn streams() -> &'static Mutex<HashMap<u64, Shared>> {
-    static S: OnceLock<Mutex<HashMap<u64, Shared>>> = OnceLock::new();
-    S.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 unsafe extern "C" fn zalloc(_: *mut c_void, items: z::uInt, size: z::uInt) -> *mut c_void {
@@ -130,11 +123,14 @@ fn with<F>(ctx: &mut Ctx, r: Term, f: F) -> Term
 where
     F: FnOnce(&mut Ctx, &mut Stream) -> Term,
 {
-    let found = if is_ref(r) { streams().lock().get(&word(r, 1)).cloned() } else { None };
+    let found = crate::resource::get::<Mutex<Stream>>(r);
     let Some(shared) = found else {
         return ctx.badarg("argument error");
     };
     let mut st = shared.lock();
+    if st.closed {
+        return ctx.badarg("argument error");
+    }
     if st.owner != ctx.pid() {
         return ctx.raise_error(sym("not_on_controlling_process"));
     }
@@ -168,24 +164,19 @@ pub extern "C" fn tn_zlib_open(c: *mut Ctx) -> Term {
         adler: 0,
         reserved: 0,
     });
-    let st = Stream { s, mode: Mode::None, eos: 2, eos_seen: false, raw: false, owner: ctx.pid(), input: Vec::new(), at: 0, stash: None };
-    let r = ctx.make_ref();
-    streams().lock().insert(word(r, 1), Arc::new(Mutex::new(st)));
-    r
+    let st = Stream { s, mode: Mode::None, eos: 2, eos_seen: false, raw: false, owner: ctx.pid(), input: Vec::new(), at: 0, stash: None, closed: false };
+    ctx.managed_ref(Mutex::new(st))
 }
 
 #[no_mangle]
 pub extern "C" fn tn_zlib_close(c: *mut Ctx, r: Term) -> Term {
     let ctx = cx(c);
-    let res = with(ctx, r, |_, st| {
+    with(ctx, r, |_, st| {
         end(st);
         reset_input(st);
+        st.closed = true;
         ok()
-    });
-    if res == ok() {
-        streams().lock().remove(&word(r, 1));
-    }
-    res
+    })
 }
 
 #[no_mangle]

@@ -23,14 +23,16 @@ pub struct Tok {
 }
 
 const KEYWORDS: &[&str] = &[
-    "after", "and", "andalso", "band", "begin", "bnot", "bor", "bsl", "bsr", "bxor", "case", "catch", "cond", "div",
-    "end", "fun", "if", "let", "not", "of", "or", "orelse", "receive", "rem", "try", "when", "xor", "maybe", "else",
+    "after", "and", "andalso", "band", "begin", "bnot", "bor", "bsl", "bsr", "bxor", "case",
+    "catch", "cond", "div", "end", "fun", "if", "let", "not", "of", "or", "orelse", "receive",
+    "rem", "try", "when", "xor", "maybe", "else",
 ];
 
 // Longest first.
 const PUNCT: &[&str] = &[
-    "=:=", "=/=", "...", "<<", ">>", "<-", "<=", "=>", ":=", "->", "||", "++", "--", "==", "/=", "=<", ">=", "::", "..",
-    "?=", "??", "(", ")", "{", "}", "[", "]", ",", ";", ":", "|", "!", "=", "<", ">", "+", "-", "*", "/", "#", "?", ".",
+    "=:=", "=/=", "...", "<<", ">>", "<-", "<=", "=>", ":=", "->", "||", "++", "--", "==", "/=",
+    "=<", ">=", "::", "..", "?=", "??", "(", ")", "{", "}", "[", "]", ",", ";", ":", "|", "!", "=",
+    "<", ">", "+", "-", "*", "/", "#", "?", ".",
 ];
 
 pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
@@ -64,15 +66,24 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
                 i += 1;
             }
             if i < s.len() && s[i] == '#' {
-                let base: u32 = s[st..i].iter().filter(|c| **c != '_').collect::<String>().parse().unwrap_or(10);
+                let base: u32 = s[st..i]
+                    .iter()
+                    .filter(|c| **c != '_')
+                    .collect::<String>()
+                    .parse()
+                    .unwrap_or(10);
                 i += 1;
                 let ds = i;
                 while i < s.len() && (s[i].is_ascii_alphanumeric() || s[i] == '_') {
                     i += 1;
                 }
                 let digits: String = s[ds..i].iter().filter(|c| **c != '_').collect();
-                let v = i128::from_str_radix(&digits, base).map_err(|_| format!("{}:{}: bad number", file, tl))?;
-                out.push(Tok { t: T::Int(v), line: tl });
+                let v = i128::from_str_radix(&digits, base)
+                    .map_err(|_| format!("{}:{}: bad number", file, tl))?;
+                out.push(Tok {
+                    t: T::Int(v),
+                    line: tl,
+                });
                 continue;
             }
             if i + 1 < s.len() && s[i] == '.' && s[i + 1].is_ascii_digit() {
@@ -95,11 +106,23 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
                     }
                 }
                 let txt: String = s[st..i].iter().filter(|c| **c != '_').collect();
-                out.push(Tok { t: T::Float(txt.parse().map_err(|_| format!("{}:{}: bad float", file, tl))?), line: tl });
+                out.push(Tok {
+                    t: T::Float(
+                        txt.parse()
+                            .map_err(|_| format!("{}:{}: bad float", file, tl))?,
+                    ),
+                    line: tl,
+                });
                 continue;
             }
             let txt: String = s[st..i].iter().filter(|c| **c != '_').collect();
-            out.push(Tok { t: T::Int(txt.parse().map_err(|_| format!("{}:{}: bad integer", file, tl))?), line: tl });
+            out.push(Tok {
+                t: T::Int(
+                    txt.parse()
+                        .map_err(|_| format!("{}:{}: bad integer", file, tl))?,
+                ),
+                line: tl,
+            });
             continue;
         }
         if c == '$' {
@@ -107,12 +130,19 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
             if i >= s.len() {
                 return err(tl, "bad char");
             }
-            let (ch, ni) = if s[i] == '\\' { escape(&s, i + 1)? } else { (s[i] as u32, i + 1) };
+            let (ch, ni) = if s[i] == '\\' {
+                escape(&s, i + 1)?
+            } else {
+                (s[i] as u32, i + 1)
+            };
             if s[i] == '\n' {
                 line += 1;
             }
             i = ni;
-            out.push(Tok { t: T::Char(ch), line: tl });
+            out.push(Tok {
+                t: T::Char(ch),
+                line: tl,
+            });
             continue;
         }
         if c.is_lowercase() || (c.is_alphabetic() && !c.is_uppercase() && c != '_') {
@@ -122,9 +152,15 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
             }
             let w: String = s[st..i].iter().collect();
             if KEYWORDS.contains(&w.as_str()) {
-                out.push(Tok { t: T::P(w), line: tl });
+                out.push(Tok {
+                    t: T::P(w),
+                    line: tl,
+                });
             } else {
-                out.push(Tok { t: T::Atom(w), line: tl });
+                out.push(Tok {
+                    t: T::Atom(w),
+                    line: tl,
+                });
             }
             continue;
         }
@@ -133,7 +169,10 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
             while i < s.len() && (s[i].is_alphanumeric() || s[i] == '_' || s[i] == '@') {
                 i += 1;
             }
-            out.push(Tok { t: T::Var(s[st..i].iter().collect()), line: tl });
+            out.push(Tok {
+                t: T::Var(s[st..i].iter().collect()),
+                line: tl,
+            });
             continue;
         }
         if c == '\'' {
@@ -153,7 +192,10 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
                 }
             }
             i += 1;
-            out.push(Tok { t: T::Atom(a), line: tl });
+            out.push(Tok {
+                t: T::Atom(a),
+                line: tl,
+            });
             continue;
         }
         if c == '"' {
@@ -173,7 +215,12 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
                         while m < s.len() && (s[m] == ' ' || s[m] == '\t') {
                             m += 1;
                         }
-                        if m + 2 < s.len() + 0 && m + 2 <= s.len() - 1 && s[m] == '"' && s[m + 1] == '"' && s[m + 2] == '"' {
+                        if m + 2 < s.len() + 0
+                            && m + 2 <= s.len() - 1
+                            && s[m] == '"'
+                            && s[m + 1] == '"'
+                            && s[m + 2] == '"'
+                        {
                             end_pos = Some((k, m - (k + 1), m + 3));
                             break;
                         }
@@ -184,7 +231,11 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
                     Some(x) => x,
                     None => return err(tl, "unterminated triple-quoted string"),
                 };
-                let body: String = if body_start <= body_end { s[body_start..body_end].iter().collect() } else { String::new() };
+                let body: String = if body_start <= body_end {
+                    s[body_start..body_end].iter().collect()
+                } else {
+                    String::new()
+                };
                 let mut cps = Vec::new();
                 for (n, l) in body.split('\n').enumerate() {
                     if n > 0 {
@@ -199,7 +250,10 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
                     }
                 }
                 i = after;
-                out.push(Tok { t: T::Str(cps), line: tl });
+                out.push(Tok {
+                    t: T::Str(cps),
+                    line: tl,
+                });
                 continue;
             }
             i += 1;
@@ -218,7 +272,10 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
                 }
             }
             i += 1;
-            out.push(Tok { t: T::Str(cps), line: tl });
+            out.push(Tok {
+                t: T::Str(cps),
+                line: tl,
+            });
             continue;
         }
         if c == '~' {
@@ -243,7 +300,8 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
                             while m < s.len() && (s[m] == ' ' || s[m] == '\t') {
                                 m += 1;
                             }
-                            if m + 2 < s.len() && s[m] == '"' && s[m + 1] == '"' && s[m + 2] == '"' {
+                            if m + 2 < s.len() && s[m] == '"' && s[m + 1] == '"' && s[m + 2] == '"'
+                            {
                                 for ch in &s[i..m + 3] {
                                     if *ch == '\n' {
                                         line += 1;
@@ -259,7 +317,10 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
                     if !found {
                         return err(tl, "unterminated sigil");
                     }
-                    out.push(Tok { t: T::Str(cps.clone()), line: tl });
+                    out.push(Tok {
+                        t: T::Str(cps.clone()),
+                        line: tl,
+                    });
                     continue;
                 }
             }
@@ -288,7 +349,10 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
                     }
                 }
                 i = j + 1;
-                out.push(Tok { t: T::Str(cps), line: tl });
+                out.push(Tok {
+                    t: T::Str(cps),
+                    line: tl,
+                });
                 continue;
             }
         }
@@ -301,13 +365,19 @@ pub fn tokenize(src: &str, file: &str) -> Result<Vec<Tok>, String> {
                     // form end: followed by whitespace, % or EOF
                     let nx = s.get(i + 1).copied();
                     if nx.is_none() || nx.map(|c| c.is_whitespace() || c == '%').unwrap_or(false) {
-                        out.push(Tok { t: T::Dot, line: tl });
+                        out.push(Tok {
+                            t: T::Dot,
+                            line: tl,
+                        });
                         i += 1;
                         matched = true;
                         break;
                     }
                 }
-                out.push(Tok { t: T::P(p.to_string()), line: tl });
+                out.push(Tok {
+                    t: T::P(p.to_string()),
+                    line: tl,
+                });
                 i += pc.len();
                 matched = true;
                 break;

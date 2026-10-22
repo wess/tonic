@@ -174,6 +174,125 @@ defmodule :public_key do
 
   ## Host names
 
+  def pkix_verify_hostname(cert, references), do: pkix_verify_hostname(cert, references, [])
+
+  def pkix_verify_hostname(der, references, options) when is_binary(der),
+    do: pkix_verify_hostname(pkix_decode_cert(der, :otp), references, options)
+
+  def pkix_verify_hostname({:OTPCertificate, tbs, _, _} = cert, references, options) do
+    extensions = elem(tbs, 10)
+    names =
+      if is_list(extensions) do
+        Enum.flat_map(extensions, fn
+          {:Extension, {2, 5, 29, 17}, _, value} -> hostname_names(value)
+          _ -> []
+        end)
+      else
+        []
+      end
+
+    names =
+      if names == [] do
+        {:rdnSequence, rdns} = elem(tbs, 6)
+        for rdn <- rdns, {:AttributeTypeAndValue, {2, 5, 4, 3}, name} <- rdn,
+          do: {:cn, hostname_text(name)}
+      else
+        names
+      end
+
+    references = Enum.map(references, fn {type, value} -> {type, hostname_text(value)} end)
+    names = Enum.map(names, fn {type, value} -> {type, if(is_binary(value), do: :binary.bin_to_list(value), else: value)} end)
+    fqdn_fun = Keyword.get(options, :fqdn_fun, fn _ -> :default end)
+    fqdns = fn ->
+      Enum.flat_map(references, fn reference ->
+        value = try do
+          case fqdn_fun.(reference) do
+            :default -> hostname_fqdn(reference)
+            value -> value
+          end
+        rescue
+          _ -> :undefined
+        catch
+          _, _ -> :undefined
+        end
+        if is_list(value) and value != [] and :inet.parse_address(value) == {:error, :einval}, do: [value], else: []
+      end)
+    end
+    if Enum.any?(names, &match?({:cn, _}, &1)) do
+      hostname_loop(fqdns.(), names, options, cert)
+    else
+      hostname_loop(references, names, options, cert) or
+        hostname_loop(Enum.map(fqdns.(), &{:dns_id, &1}), names, options, cert)
+    end
+  end
+
+  defp hostname_fqdn({:dns_id, name}), do: name
+  defp hostname_fqdn({:uri_id, uri}) do
+    case :uri_string.normalize(uri, [:return_map]) do
+      %{scheme: ~c"https", host: host} -> host
+      _ -> :undefined
+    end
+  end
+  defp hostname_fqdn(_), do: :undefined
+
+  defp hostname_loop(references, names, options, cert) do
+    match_fun = Keyword.get(options, :match_fun, fn _, _ -> :default end)
+    fail = Keyword.get(options, :fail_callback, fn _ -> false end)
+    Enum.any?(references, fn reference ->
+      Enum.any?(names, fn presented ->
+        result = case match_fun.(reference, presented) do
+          :default -> hostname_match(reference, presented)
+          result -> result == true
+        end
+        result or fail.(cert)
+      end)
+    end)
+  end
+
+  @doc false
+  def hostname_names(value) when is_binary(value) do
+    Enum.flat_map(Der.items(Der.body(value)), fn
+      {0x82, name, _} -> [{:dNSName, String.to_charlist(name)}]
+      {0x87, address, _} -> [{:iPAddress, address}]
+      {0x86, uri, _} -> [{:uniformResourceIdentifier, String.to_charlist(uri)}]
+      _ -> []
+    end)
+  end
+
+  def hostname_names(names) when is_list(names), do: names
+
+  defp hostname_text({_type, text}), do: hostname_text(text)
+  defp hostname_text(text) when is_binary(text), do: String.to_charlist(text)
+  defp hostname_text(text), do: text
+
+  defp hostname_match({:dns_id, reference}, {:dNSName, name}), do: hostname_equal(reference, name)
+  defp hostname_match({:uri_id, reference}, {:uniformResourceIdentifier, name}), do: hostname_equal(reference, name)
+  defp hostname_match({:srv_id, reference}, {type, name}) when type in [:srvName, {1, 3, 6, 1, 4, 1, 434, 2, 2, 1, 37, 0}],
+    do: hostname_equal(reference, name)
+  defp hostname_match(reference, {:cn, name}) when is_list(reference), do: wildcard_match(reference, name)
+  defp hostname_equal(a, b), do: String.downcase(to_string(a)) == String.downcase(to_string(b))
+
+  defp hostname_match({:ip, reference}, {:iPAddress, address}) do
+    ip =
+      cond do
+        is_tuple(reference) -> reference
+        is_binary(reference) -> :inet.parse_address(String.to_charlist(reference)) |> hostname_ip()
+        is_list(reference) -> :inet.parse_address(reference) |> hostname_ip()
+        true -> nil
+      end
+
+    address = if is_list(address), do: :binary.list_to_bin(address), else: address
+    case {ip, address} do
+      {{a, b, c, d}, <<a, b, c, d>>} -> true
+      {{a, b, c, d, e, f, g, h}, <<a::16, b::16, c::16, d::16, e::16, f::16, g::16, h::16>>} -> true
+      _ -> false
+    end
+  end
+
+  defp hostname_match(_, _), do: false
+  defp hostname_ip({:ok, ip}), do: ip
+  defp hostname_ip(_), do: nil
+
   def pkix_verify_hostname_match_fun(:https) do
     fn
       {:dns_id, [_ | _] = fqdn}, {:dNSName, [_ | _] = name} -> wildcard_match(fqdn, name)
@@ -184,13 +303,13 @@ defmodule :public_key do
   defp wildcard_match(fqdn, name) do
     [host | domain] = fqdn |> to_string() |> String.downcase() |> String.split(".")
     [first | rest] = name |> to_string() |> String.downcase() |> String.split(".")
-    wild?(host, first) and rest == domain
+    not String.contains?(host, "*") and wild?(host, first) and rest == domain
   end
 
   defp wild?(host, pattern) do
     case String.split(pattern, "*", parts: 2) do
       [^host] -> true
-      [prefix, suffix] -> String.starts_with?(host, prefix) and String.ends_with?(host, suffix)
+      [prefix, suffix] -> not String.contains?(suffix, "*") and byte_size(host) >= byte_size(prefix) + byte_size(suffix) and String.starts_with?(host, prefix) and String.ends_with?(host, suffix)
       _ -> false
     end
   end

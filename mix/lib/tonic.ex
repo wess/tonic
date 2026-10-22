@@ -1,5 +1,27 @@
 defmodule Tonic do
-  @moduledoc false
+  @moduledoc """
+  Mix integration for native projects.
+
+  Wrap the keyword list returned by `project/0` with `Tonic.native/1` to route
+  `mix run`, `mix test`, and `mix release` to the native tasks. Omitting the
+  wrapper leaves the normal BEAM workflows intact.
+  """
+
+  def native(config) do
+    aliases =
+      Keyword.merge(config[:aliases] || [],
+        run: "tonic.run",
+        test: "tonic.test",
+        release: "tonic.release"
+      )
+
+    Keyword.merge(config,
+      compilers: [:tonic],
+      prune_code_paths: false,
+      consolidate_protocols: false,
+      aliases: aliases
+    )
+  end
 
   def executable do
     configured = System.get_env("TONIC") || config()[:executable] || "tonic"
@@ -12,10 +34,17 @@ defmodule Tonic do
 
   def output do
     config()[:output] ||
-      Path.join([Mix.Project.build_path(), "tonic", to_string(Mix.Project.config()[:app])])
+      Path.join([Mix.Project.build_path(), "tonic", app()])
   end
 
+  def app, do: to_string(Mix.Project.config()[:app] || Path.basename(File.cwd!()))
+
+  def run("release", args), do: Tonic.Release.run(args)
+
   def run(command, args) do
+    if command == "test" and is_nil(System.get_env("MIX_ENV")),
+      do: System.put_env("MIX_ENV", "test")
+
     Mix.Project.get!()
     {options, runtime} = Enum.split_while(args, &(&1 != "--"))
     {fetch, options} = Enum.split_with(options, &(&1 == "--deps-get"))
@@ -28,7 +57,18 @@ defmodule Tonic do
 
     if command == "build", do: File.mkdir_p!(Path.dirname(outputarg(options)))
     args = options ++ runtime
-    status = command([command, "." | args])
+
+    native_args =
+      if command == "test" do
+        {compiler, tests} =
+          Enum.split_with(args, &(&1 in ["-O0", "-O1", "-O2", "-O3", "-v", "--keep"]))
+
+        [command] ++ compiler ++ ["."] ++ tests
+      else
+        [command, "." | args]
+      end
+
+    status = command(native_args)
     if status != 0, do: System.halt(status)
     :ok
   end
@@ -37,8 +77,13 @@ defmodule Tonic do
   # runs write straight to the caller's stdout and stderr. Port programs do not
   # see the BEAM's stdin, so it is copied into a FIFO the program reads instead;
   # closing the FIFO at end of input gives the program a real EOF.
-  def command(args) do
-    fifo = Path.join(System.tmp_dir!(), "tonicstdin#{System.unique_integer([:positive])}")
+  def command(args, env \\ []) do
+    fifo =
+      Path.join(
+        System.tmp_dir!(),
+        "tonicstdin#{System.pid()}x#{System.unique_integer([:positive])}"
+      )
+
     {_, 0} = System.cmd("mkfifo", [fifo])
 
     try do
@@ -47,6 +92,10 @@ defmodule Tonic do
           :nouse_stdio,
           :exit_status,
           :binary,
+          env:
+            Enum.map(env, fn {key, value} ->
+              {String.to_charlist(key), String.to_charlist(value)}
+            end),
           args: ["-c", ~s(f=$1; shift; exec "$@" < "$f"), "sh", fifo, executable() | args]
         ])
 

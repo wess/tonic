@@ -674,14 +674,7 @@ fn build(ctx: &mut Ctx, d: &D) -> Term {
         D::Bin(b) => ctx.binary(b),
         D::Bits(b, n) => ctx.bitstring(b, *n),
         D::Pid(p) => pid(*p),
-        D::Ref(id) => {
-            let p = ctx.alloc(2);
-            unsafe {
-                *p = header(T_REF, 1);
-                *p.add(1) = *id;
-            }
-            p as Term
-        }
+        D::Ref(id) => ctx.ref_from_id(*id),
         D::Port(id) => crate::port::term(ctx, *id),
         D::Tuple(v) => {
             let base = ctx.roots.len();

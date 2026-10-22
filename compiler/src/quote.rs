@@ -93,7 +93,14 @@ enum Piece {
 }
 
 impl Expander {
-    pub fn quote(&mut self, body: &E, opts: Option<&E>, cx: &mut Cx) -> R<CE> {
+    pub fn quote_expression(&mut self, args: &[E], line: u32, column: u32, cx: &mut Cx) -> R<CE> {
+        let last = args.last().unwrap();
+        let body = last.kw_get("do").ok_or_else(|| format!("{}:{}: missing :do option in quote", cx.file(), line))?;
+        let opts = if args.len() == 2 { Some(&args[0]) } else { Some(last) };
+        self.quote(body, opts, line, column, cx)
+    }
+
+    fn quote(&mut self, body: &E, opts: Option<&E>, line: u32, column: u32, cx: &mut Cx) -> R<CE> {
         let ctx = match cx.module() {
             "" | "Elixir.Tonic.Script" => "Elixir".to_string(),
             m => m.to_string(),
@@ -117,33 +124,71 @@ impl Expander {
             }
             if let Some(bq) = o.kw_get("bind_quoted") {
                 q.unquote = false;
-                let literal = matches!(&bq.k, K::List(items, None) if items.iter().all(|it| matches!(&it.k, K::Tuple(kv) if kv.len() == 2 && matches!(kv[0].k, K::Atom(_)))));
-                if !literal {
-                    let bindings = self.expr(bq, cx)?;
-                    let b = q.q(&mut ExUnq { ex: self, cx }, body)?;
-                    return Ok(CE::DynCall(
-                        Box::new(CE::atom("Elixir.Tonic.Internal")),
-                        "bind_quoted".into(),
-                        vec![bindings, CE::atom(&q.ctx), b],
-                    ));
-                }
-                let mut exprs = Vec::new();
-                if let K::List(items, _) = &bq.k {
-                    for it in items {
-                        if let K::Tuple(kv) = &it.k {
-                            if let K::Atom(name) = &kv[0].k {
-                                let v = self.expr(&kv[1], cx)?;
-                                exprs.push(triple(
-                                    CE::atom("="),
-                                    CE::Lit(Lit::Nil),
-                                    list(vec![
-                                        triple(CE::atom(name), CE::Lit(Lit::Nil), CE::atom(&q.ctx)),
-                                        v,
-                                    ]),
-                                ));
+                let binding_args = match &bq.k {
+                    K::Call { name, args, .. } if name == "binding" => Some(args),
+                    K::Remote { recv, name, args, .. } if name == "binding" && match &recv.k {
+                        K::Alias(alias) => crate::collect::resolve_alias(&cx.env, alias) == "Elixir.Kernel",
+                        K::Atom(module) => module == "Elixir.Kernel",
+                        _ => false,
+                    } => Some(args),
+                    _ => None,
+                };
+                let lexical_binding = binding_args.map_or(false, |args| args.len() <= 1);
+                let invalid = "invalid :bind_quoted for quote, expected a keyword list of variable names";
+                let mut bindings = Vec::new();
+                match &bq.k {
+                    K::List(items, None) if items.iter().all(|it| matches!(&it.k, K::Tuple(kv) if kv.len() == 2 && matches!(kv[0].k, K::Atom(_)))) => {
+                        for it in items {
+                            if let K::Tuple(kv) = &it.k {
+                                if let K::Atom(name) = &kv[0].k {
+                                    bindings.push((name.clone(), self.expr(&kv[1], cx)?));
+                                }
                             }
                         }
                     }
+                    _ if lexical_binding => {
+                        // binding/0 expands to a lexical keyword list before quote validates it.
+                        let mut value = if binding_args.unwrap().first().map_or(false, |context| !matches!(context.k, K::Atom(_))) {
+                            CE::Lit(Lit::Nil)
+                        } else {
+                            self.expr(bq, cx)?
+                        };
+                        loop {
+                            match value {
+                                CE::Cons(head, tail) => {
+                                    let pair = match *head {
+                                        CE::Tuple(pair) => match pair.as_slice() {
+                                            [CE::Lit(Lit::Atom(name)), value] => Some((name.clone(), value.clone())),
+                                            _ => None,
+                                        },
+                                        _ => None,
+                                    };
+                                    let Some(pair) = pair else { return crate::expand::err(cx, bq.line, invalid); };
+                                    bindings.push(pair);
+                                    value = *tail;
+                                }
+                                CE::Lit(Lit::Nil) => break,
+                                _ => return crate::expand::err(cx, bq.line, invalid),
+                            }
+                        }
+                    }
+                    _ => return crate::expand::err(cx, bq.line, invalid),
+                }
+                let mut binding_meta = vec![("line", CE::int(line as i64))];
+                if column != 0 {
+                    binding_meta.push(("column", CE::int(column as i64)));
+                }
+                let binding_meta = kw(binding_meta);
+                let mut exprs = Vec::new();
+                for (name, value) in bindings {
+                    exprs.push(triple(
+                        CE::atom("="),
+                        CE::Lit(Lit::Nil),
+                        list(vec![
+                            triple(CE::atom(&name), binding_meta.clone(), CE::atom(&q.ctx)),
+                            value,
+                        ]),
+                    ));
                 }
                 let b = q.q(&mut ExUnq { ex: self, cx }, body)?;
                 exprs.push(b);

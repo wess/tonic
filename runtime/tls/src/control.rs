@@ -3,12 +3,15 @@
 use crate::alert::{self, Failure};
 use crate::io::{self, Read};
 use crate::{build, data_term, id_of, lookup, packet, reply, Conn, Socket};
-use tonic_core::bif_core::cx;
-use tonic_core::heap::Ctx;
-use tonic_core::net::{a, active_of, ctx_result, list_items, ok_with, operation, option, timeout_of, with_timeout, Active};
-use tonic_core::term::*;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
+use tonic_core::bif_core::cx;
+use tonic_core::heap::Ctx;
+use tonic_core::net::{
+    a, active_of, ctx_result, list_items, ok_with, operation, option, timeout_of, with_timeout,
+    Active,
+};
+use tonic_core::term::*;
 
 pub fn conn_of(socket: Term) -> Option<Arc<Conn>> {
     match lookup(socket) {
@@ -24,7 +27,9 @@ pub fn closed(ctx: &mut Ctx) -> Term {
 #[no_mangle]
 pub extern "C" fn tn_ssl_send(c: *mut Ctx, socket: Term, data: Term) -> Term {
     let ctx = cx(c);
-    let Some(conn) = conn_of(socket) else { return closed(ctx) };
+    let Some(conn) = conn_of(socket) else {
+        return closed(ctx);
+    };
     let mut bytes = Vec::new();
     if !tonic_core::nif::flatten_iolist(data, &mut bytes) {
         return ctx.badarg("argument error");
@@ -75,7 +80,9 @@ pub extern "C" fn tn_ssl_recv(c: *mut Ctx, socket: Term, length: Term, timeout: 
                     ok_with(env, d)
                 })
             }
-            Some(Read::Closed) => reply(pid, op, |env| alert::error(env, &Failure::Posix("closed"))),
+            Some(Read::Closed) => {
+                reply(pid, op, |env| alert::error(env, &Failure::Posix("closed")))
+            }
             Some(Read::Failed(f)) => reply(pid, op, |env| alert::error(env, &f)),
             None => reply(pid, op, |env| alert::error(env, &Failure::Posix("timeout"))),
         }
@@ -139,16 +146,29 @@ pub extern "C" fn tn_ssl_controlling_process(c: *mut Ctx, socket: Term, owner: T
 #[no_mangle]
 pub extern "C" fn tn_ssl_setopts(c: *mut Ctx, socket: Term, opts: Term) -> Term {
     let ctx = cx(c);
+    if !tonic_core::net::proper_list(opts) {
+        return ctx_result(ctx, None, Some("einval"));
+    }
     let target = lookup(socket);
-    let items: Vec<(&'static str, Term)> = list_items(opts).into_iter().filter_map(option).collect();
-    let Some(target) = target else { return closed(ctx) };
+    let Some(items) = list_items(opts)
+        .into_iter()
+        .map(option)
+        .collect::<Option<Vec<_>>>()
+    else {
+        return ctx_result(ctx, None, Some("einval"));
+    };
+    let Some(target) = target else {
+        return closed(ctx);
+    };
     match target {
         Socket::Conn(conn) => {
             for (name, v) in items {
                 let mut st = conn.state.lock();
                 match name {
                     "active" => {
-                        let Some(active) = active_of(v) else { return ctx_result(ctx, None, Some("einval")) };
+                        let Some(active) = active_of(v) else {
+                            return ctx_result(ctx, None, Some("einval"));
+                        };
                         st.active = match (st.active, active) {
                             (Active::Count(n), Active::Count(m)) => Active::Count(n + m),
                             (_, other) => other,
@@ -169,13 +189,24 @@ pub extern "C" fn tn_ssl_setopts(c: *mut Ctx, socket: Term, opts: Term) -> Term 
                     }
                     "binary" => st.binary = true,
                     "list" => st.binary = false,
-                    "mode" => st.binary = v == a("binary"),
+                    "mode" if v == a("binary") || v == a("list") => st.binary = v == a("binary"),
                     "packet" => match packet::of(v) {
                         Some(p) => st.packet = p,
                         None => return ctx_result(ctx, None, Some("einval")),
                     },
-                    "nodelay" => {}
-                    _ => {}
+                    "buffer" if is_small(v) && small_val(v) > 0 => {
+                        st.read_buffer = small_val(v) as usize
+                    }
+                    "packet_size" if is_small(v) && small_val(v) >= 0 => {
+                        st.packet_size = small_val(v) as usize
+                    }
+                    "header" if v == small(0) => {}
+                    "nodelay" | "keepalive" | "reuseaddr" | "recbuf" | "sndbuf" => {
+                        if let Err(e) = crate::tcp::set(&conn, name, v) {
+                            return ctx_result(ctx, None, Some(tonic_core::net::posix(&e)));
+                        }
+                    }
+                    _ => return ctx_result(ctx, None, Some("einval")),
                 }
             }
             if let Some(id) = id_of(socket) {
@@ -188,13 +219,16 @@ pub extern "C" fn tn_ssl_setopts(c: *mut Ctx, socket: Term, opts: Term) -> Term 
             let applied = crate::options::apply(&mut sub, opts);
             match applied {
                 Ok(()) => {
+                    if let Err(error) = crate::tcp::apply(&l.io, &sub) {
+                        return ctx_result(ctx, None, Some(tonic_core::net::posix(&error)));
+                    }
                     *l.opts.lock() = sub;
                     atom(a::OK)
                 }
                 Err(_) => ctx_result(ctx, None, Some("einval")),
             }
         }
-        Socket::Pending(_) => atom(a::OK),
+        Socket::Pending(_) => ctx_result(ctx, None, Some("einval")),
     }
 }
 
@@ -202,44 +236,81 @@ pub extern "C" fn tn_ssl_setopts(c: *mut Ctx, socket: Term, opts: Term) -> Term 
 #[no_mangle]
 pub extern "C" fn tn_ssl_getopts(c: *mut Ctx, socket: Term, names: Term) -> Term {
     let ctx = cx(c);
+    if !tonic_core::net::proper_list(names) {
+        return ctx_result(ctx, None, Some("einval"));
+    }
     let target = lookup(socket);
-    let names: Vec<&'static str> =
-        list_items(names).into_iter().filter(|t| is_atom(*t)).map(|t| tonic_core::atoms::name(atom_idx(t))).collect();
-    let (active, binary, packet) = match &target {
+    let Some(names) = list_items(names)
+        .into_iter()
+        .map(|term| is_atom(term).then(|| tonic_core::atoms::name(atom_idx(term))))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return ctx_result(ctx, None, Some("einval"));
+    };
+    let (active, binary, packet, buffer, packet_size) = match &target {
         Some(Socket::Conn(conn)) => {
             let st = conn.state.lock();
-            (st.active, st.binary, st.packet)
+            (
+                st.active,
+                st.binary,
+                st.packet,
+                st.read_buffer,
+                st.packet_size,
+            )
         }
         Some(Socket::Listener(l)) => {
             let o = l.opts.lock();
-            (o.active, o.binary, o.packet)
+            (o.active, o.binary, o.packet, o.buffer, o.packet_size)
         }
-        Some(Socket::Pending(p)) => (p.opts.active, p.opts.binary, p.opts.packet),
+        Some(Socket::Pending(p)) => (
+            p.opts.active,
+            p.opts.binary,
+            p.opts.packet,
+            p.opts.buffer,
+            p.opts.packet_size,
+        ),
         None => return closed(ctx),
     };
+    let mut values = Vec::new();
+    for name in names {
+        let value = match name {
+            "active" => match active {
+                Active::Passive => FALSE,
+                Active::On => TRUE,
+                Active::Once => a("once"),
+                Active::Count(n) => small(n),
+            },
+            "mode" => a(if binary { "binary" } else { "list" }),
+            "packet" => packet::term(packet),
+            "header" => small(0),
+            "buffer" => small(buffer as i64),
+            "packet_size" => small(packet_size as i64),
+            "nodelay" | "keepalive" | "reuseaddr" | "sndbuf" | "recbuf" => match &target {
+                Some(Socket::Conn(conn)) => match crate::tcp::get(conn, name) {
+                    Ok(value) => value,
+                    Err(e) => return ctx_result(ctx, None, Some(tonic_core::net::posix(&e))),
+                },
+                Some(Socket::Listener(listener)) => match crate::tcp::get_io(&listener.io, name) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        return ctx_result(ctx, None, Some(tonic_core::net::posix(&error)))
+                    }
+                },
+                _ => return ctx_result(ctx, None, Some("einval")),
+            },
+            _ => return ctx_result(ctx, None, Some("einval")),
+        };
+        values.push((name, value));
+    }
     build(ctx, |env| {
-        let pairs: Vec<Term> = names
+        let pairs: Vec<Term> = values
             .iter()
-            .filter_map(|name| {
-                let value = match *name {
-                    "active" => match active {
-                        Active::Passive => FALSE,
-                        Active::On => TRUE,
-                        Active::Once => a("once"),
-                        Active::Count(n) => small(n),
-                    },
-                    "mode" => a(if binary { "binary" } else { "list" }),
-                    "packet" => packet::term(packet),
-                    "nodelay" | "keepalive" | "reuseaddr" => FALSE,
-                    "header" | "packet_size" => small(0),
-                    "sndbuf" | "recbuf" | "buffer" => small(65536),
-                    _ => return None,
-                };
-                Some(value).map(|v| (name, v))
-            })
-            .map(|(name, v)| env.tuple(&[a(name), v]))
+            .map(|(name, value)| env.tuple(&[a(name), *value]))
             .collect();
-        let list = pairs.iter().rev().fold(NIL_LIST, |tail, p| env.cons(*p, tail));
+        let list = pairs
+            .iter()
+            .rev()
+            .fold(NIL_LIST, |tail, p| env.cons(*p, tail));
         ok_with(env, list)
     })
 }

@@ -91,6 +91,7 @@ pub struct Ctx {
     pub raise_frame: *mut u64,
     /// Per-argument badarg descriptions waiting for the BIF's stack frame.
     pub pending_args: Term,
+    offheap: Vec<Term>,
 }
 
 pub const REDUCTIONS: i64 = 4000;
@@ -155,6 +156,7 @@ impl Ctx {
             ttl_scratch: Vec::new(),
             raise_frame: std::ptr::null_mut(),
             pending_args: 0,
+            offheap: Vec::new(),
         })
     }
 
@@ -270,6 +272,7 @@ impl Ctx {
             gc.scan(to_start, old_scan);
         }
         let young_used = (gc.young_free as usize - to_start as usize) / 8;
+        self.sweep_resources(false);
         self.old_top = gc.old_free;
         self.set_young(to, to_start, to_words, young_used);
         // next young size: room for four times what survived
@@ -304,6 +307,7 @@ impl Ctx {
             self.evac_roots(&mut gc);
             gc.scan(std::ptr::null_mut(), old_start);
         }
+        self.sweep_resources(true);
         self.old_buf = old;
         self.old_start = old_start;
         self.old_words = old_words;
@@ -315,6 +319,52 @@ impl Ctx {
         let young_start = young.as_mut_ptr();
         unsafe { young.set_len(young_words) };
         self.set_young(young, young_start, young_words, 0);
+    }
+
+    fn sweep_resources(&mut self, major: bool) {
+        let old_lo = self.old_start as usize;
+        let old_hi = self.old_top as usize;
+        self.offheap.retain_mut(|t| unsafe {
+            if !major && (*t as usize) >= old_lo && (*t as usize) < old_hi {
+                return true;
+            }
+            if boxed_tag(*t) == T_FORWARD {
+                *t = word(*t, 1);
+                true
+            } else {
+                crate::resource::release(*t);
+                false
+            }
+        });
+    }
+
+    pub fn managed_ref<T: std::any::Any + Send + Sync>(&mut self, value: T) -> Term {
+        self.managed_ref_id(crate::sched::next_ref_id(), value)
+    }
+
+    fn managed_ref_id<T: std::any::Any + Send + Sync>(&mut self, id: u64, value: T) -> Term {
+        let p = self.alloc(3);
+        unsafe { crate::resource::write(p, id, value) };
+        self.offheap.push(p as Term);
+        p as Term
+    }
+
+    pub fn ref_from_id(&mut self, id: u64) -> Term {
+        if let Some(state) = crate::resource::find(id) {
+            let p = self.alloc(3);
+            unsafe { crate::resource::write_existing(p, state) };
+            self.offheap.push(p as Term);
+            return p as Term;
+        }
+        if let Some(resource) = crate::nif::resource_from_id(id) {
+            return self.managed_ref_id(id, resource);
+        }
+        let p = self.alloc(2);
+        unsafe {
+            *p = header(T_REF, 1);
+            *p.add(1) = id;
+        }
+        p as Term
     }
 
     fn set_young(&mut self, buf: Vec<u64>, start: *mut u64, words: usize, used: usize) {
@@ -407,6 +457,14 @@ impl Ctx {
     #[inline]
     pub fn truncate(&mut self, n: usize) {
         self.roots.truncate(n)
+    }
+}
+
+impl Drop for Ctx {
+    fn drop(&mut self) {
+        for t in self.offheap.drain(..) {
+            unsafe { crate::resource::release(t) };
+        }
     }
 }
 
@@ -862,8 +920,24 @@ pub mod smallvec_like {
 pub struct Fragment {
     pub buf: Vec<u64>,
     pub root: Term,
+    offheap: Vec<Term>,
 }
 unsafe impl Send for Fragment {}
+
+impl Fragment {
+    pub fn new(buf: Vec<u64>, root: Term, end: *mut u64) -> Fragment {
+        let offheap = unsafe { crate::resource::collect(buf.as_ptr() as *mut u64, end) };
+        Fragment { buf, root, offheap }
+    }
+}
+
+impl Drop for Fragment {
+    fn drop(&mut self) {
+        for t in self.offheap.drain(..) {
+            unsafe { crate::resource::release(t) };
+        }
+    }
+}
 
 /// Words needed to copy `t` out of the region [lo, hi).
 pub fn copy_size(t: Term, lo: usize, hi: usize) -> usize {
@@ -1027,6 +1101,7 @@ pub unsafe fn copy_term_by<F: Fn(usize) -> bool>(t: Term, inside: &F, free: &mut
             let dst = *free;
             *free = dst.add(words);
             std::ptr::copy_nonoverlapping(ptr(t), dst, words);
+            crate::resource::retain(dst as Term);
             dst as u64
         }
     }
@@ -1041,7 +1116,7 @@ impl Ctx {
         unsafe { buf.set_len(words.max(1)) };
         let mut free = buf.as_mut_ptr();
         let root = unsafe { copy_term_by(t, &inside, &mut free) };
-        Fragment { buf, root }
+        Fragment::new(buf, root, free)
     }
 
     /// Copy the objects of `t` for which `inside` holds into this heap.
@@ -1050,6 +1125,7 @@ impl Ctx {
         self.reserve(words);
         let mut free = self.hp;
         let r = unsafe { copy_term_by(t, inside, &mut free) };
+        self.offheap.extend(unsafe { crate::resource::collect(self.hp, free) });
         self.hp = free;
         r
     }
@@ -1062,6 +1138,7 @@ impl Ctx {
         self.reserve(words);
         let mut free = self.hp;
         let r = unsafe { copy_term(f.root, lo, hi, &mut free) };
+        self.offheap.extend(unsafe { crate::resource::collect(self.hp, free) });
         self.hp = free;
         r
     }

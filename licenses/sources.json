@@ -406,7 +406,7 @@
         "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/rand.erl": "7f956b3658f5b2054fe5809b7db1221e76109339a27ca728184d5a90fc679b0d",
         "https://raw.githubusercontent.com/erlang/otp/OTP-27.3/lib/stdlib/src/calendar.erl": "ced1faf7e4d87181f2f78dbc9820539c6873b623d7e91fde831a9dcd0b3f9e85"
       },
-      "sha256": "d8840f4e30f4d2297403188e25d4e0bdd0b642d046a648bca64bef2a83067806"
+      "sha256": "ab5af3a1cc2efb2d8355c3a8c1f410d7901a2633bfd87d00c105f609d61094a5"
     },
     {
       "file": "lib/erlang_ds.ex",

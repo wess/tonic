@@ -282,6 +282,11 @@ defmodule Tonic.Eval do
     end
   end
 
+  defp guard_argument?({name, meta, args}) when (is_atom(name) or is_tuple(name)) and is_list(meta) and (is_atom(args) or is_list(args)), do: true
+  defp guard_argument?({a, b}), do: guard_argument?(a) and guard_argument?(b)
+  defp guard_argument?(list) when is_list(list), do: Enum.all?(list, &guard_argument?/1)
+  defp guard_argument?(value), do: is_number(value) or is_atom(value) or is_bitstring(value)
+
   def expr({:tonic_macro_forward, _, [name, arguments]}, st) do
     {values, _} = exprs(arguments, st)
     {Tonic.Eval.Modules.call_macro(st.module, name, tl(values), hd(values), true), st}
@@ -484,7 +489,46 @@ defmodule Tonic.Eval do
   end
 
   def expr({kind, meta, [{:when, _, [head, guard]}]}, %{in_module: true} = st) when kind in [:defguard, :defguardp] do
-    define(if(kind == :defguard, do: :def, else: :defp), head, [do: guard], meta, st)
+    head = case head do
+      {name, meta, context} when is_atom(context) -> {name, meta, []}
+      head -> head
+    end
+    {_, _, arguments} = head
+    plain = Enum.map(arguments, fn {:\\, _, [var, _]} -> var; var -> var end)
+    params = Enum.map(plain, fn {name, _, _} -> name end)
+    template = do_quote(attributes(guard, st), %{st | quote_unquote: false})
+    call = {{:., [], [__MODULE__, :guard_expansion]}, [], [params, escape(template), plain, {:__CALLER__, [], nil}, st.module]}
+    define(if(kind == :defguard, do: :defmacro, else: :defmacrop), head, [do: call], meta, st)
+  end
+
+  def guard_expansion(params, body, arguments, caller, module) do
+    {_, used} = Macro.prewalk(body, MapSet.new(), fn
+      {name, _, context} = node, used when is_atom(name) and is_atom(context) ->
+        {node, if(name in params, do: MapSet.put(used, name), else: used)}
+      node, used -> {node, used}
+    end)
+
+    {values, bindings} =
+      params
+      |> Enum.zip(arguments)
+      |> Enum.with_index()
+      |> Enum.reduce({%{}, []}, fn {{name, argument}, i}, {values, bindings} ->
+        if MapSet.member?(used, name) and not guard_argument?(argument), do: raise(ArgumentError, "tried to unquote invalid AST: #{inspect(argument)}")
+        cond do
+          not MapSet.member?(used, name) or Map.has_key?(values, name) -> {values, bindings}
+          caller.context == :guard -> {Map.put(values, name, argument), bindings}
+          true ->
+            var = {:"tonic_guard_#{i}", [generated: true], module}
+            {Map.put(values, name, var), [{:=, [generated: true], [var, argument]} | bindings]}
+        end
+      end)
+
+    expanded = Macro.prewalk(body, fn
+      {name, _, context} = node when is_atom(name) and is_atom(context) -> Map.get(values, name, node)
+      node -> node
+    end)
+
+    if bindings == [], do: expanded, else: {:__block__, [generated: true], Enum.reverse(bindings) ++ [expanded]}
   end
 
   def expr({:defprotocol, meta, [name_ast, [do: body]]}, st) do
@@ -1072,6 +1116,7 @@ defmodule Tonic.Eval do
     callback_guards = if guard == true, do: [], else: [guard]
     Tonic.Eval.Modules.on_definition(%{st | line: Keyword.get(meta, :line, st.line)}, kind, name, callback_args, callback_guards, body)
     Tonic.Eval.Modules.snapshot_attributes(st.module, Keyword.get(meta, :line, st.line))
+    Tonic.Eval.Modules.delete_attribute(st.module, :doc)
     {:ok, st}
   end
 
@@ -1152,6 +1197,11 @@ defmodule Tonic.Eval do
   defp fragment(v), do: escape(v)
 
   @doc false
+  def escape(v) when is_function(v) do
+    {module, name, arity} = capture_identity(v)
+    {:&, [], [{:/, [], [{{:., [], [module, name]}, [], []}, arity]}]}
+  end
+
   def escape(v) when is_tuple(v) and tuple_size(v) == 2, do: {escape(elem(v, 0)), escape(elem(v, 1))}
   def escape(v) when is_tuple(v), do: {:{}, [], Enum.map(Tuple.to_list(v), &escape/1)}
   def escape(v) when is_list(v), do: Enum.map(v, &escape/1)
@@ -1164,6 +1214,31 @@ defmodule Tonic.Eval do
   end
 
   def escape(v), do: v
+
+  @doc false
+  def capture_identity(fun) do
+    case Function.info(fun, :type) do
+      {:type, :external} ->
+        {:module, module} = Function.info(fun, :module)
+        {:name, name} = Function.info(fun, :name)
+        {:arity, arity} = Function.info(fun, :arity)
+        {module, name, arity}
+      _ ->
+        {:env, env} = Function.info(fun, :env)
+        {:module, owner} = Function.info(fun, :module)
+        {:name, wrapper} = Function.info(fun, :name)
+        {:arity, actual_arity} = Function.info(fun, :arity)
+        case env do
+          [{:tonic_capture, module, name, arity}] when owner == __MODULE__ and arity == actual_arity ->
+            if String.starts_with?(Atom.to_string(wrapper), "-interpreted_capture/2-fun-") do
+              {module, name, arity}
+            else
+              raise ArgumentError, "cannot embed an anonymous function; use a remote function capture"
+            end
+          _ -> raise ArgumentError, "cannot embed an anonymous function; use a remote function capture"
+        end
+    end
+  end
 
   ## Interpreted functions
 
@@ -1857,11 +1932,30 @@ defmodule Tonic.Eval do
     {m, _} = expr(mod, st)
 
     if Tonic.Eval.Modules.loaded?(m) do
-      args = for i <- 1..arity//1, do: {:"tonic_c#{i}", [], __MODULE__}
-      make_fun([{:->, [], [args, {{:., [], [m, fun]}, [], args}]}], st)
+      interpreted_capture({:tonic_capture, m, fun, arity}, arity)
     else
       Function.capture(m, fun, arity)
     end
+  end
+
+  defp interpreted_capture(target, arity) do
+    case arity do
+      0 -> fn -> invoke_capture(target, []) end
+      1 -> fn a -> invoke_capture(target, [a]) end
+      2 -> fn a, b -> invoke_capture(target, [a, b]) end
+      3 -> fn a, b, c -> invoke_capture(target, [a, b, c]) end
+      4 -> fn a, b, c, d -> invoke_capture(target, [a, b, c, d]) end
+      5 -> fn a, b, c, d, e -> invoke_capture(target, [a, b, c, d, e]) end
+      6 -> fn a, b, c, d, e, f -> invoke_capture(target, [a, b, c, d, e, f]) end
+      7 -> fn a, b, c, d, e, f, g -> invoke_capture(target, [a, b, c, d, e, f, g]) end
+      8 -> fn a, b, c, d, e, f, g, h -> invoke_capture(target, [a, b, c, d, e, f, g, h]) end
+      9 -> fn a, b, c, d, e, f, g, h, i -> invoke_capture(target, [a, b, c, d, e, f, g, h, i]) end
+      10 -> fn a, b, c, d, e, f, g, h, i, j -> invoke_capture(target, [a, b, c, d, e, f, g, h, i, j]) end
+    end
+  end
+
+  defp invoke_capture({:tonic_capture, module, name, _arity}, args) do
+    Tonic.Eval.Modules.apply(module, name, args)
   end
 
   defp capture({:/, meta, [{name, _, ctx}, arity]}, _meta, st) when is_atom(name) and is_atom(ctx) and is_integer(arity) do
@@ -2451,6 +2545,7 @@ defmodule Tonic.Eval.Modules do
     # redefinition replaces the previous version
     for entry <- :ets.tab2list(t), match?({_, ^mod, _, _}, elem(entry, 0)), do: :ets.delete(t, elem(entry, 0))
     :ets.match_delete(t, {{:attr, mod, :_}, :_})
+    :ets.delete(t, {:attribute_names, mod})
     :ets.match_delete(t, {{:accumulate, mod, :_}, :_})
     :ets.delete(t, {:struct, mod})
     :ets.delete(t, {:enforce, mod})
@@ -2538,7 +2633,11 @@ defmodule Tonic.Eval.Modules do
   end
 
   def snapshot_attributes(mod, line) do
-    attributes = for {{:attr, ^mod, name}, value} <- :ets.tab2list(tab()), name not in [:before_compile, :after_compile, :on_definition, :tonic_callback_expansions], into: %{}, do: {name, value}
+    attributes =
+      for name <- attribute_names(mod),
+          name not in [:before_compile, :after_compile, :on_definition, :tonic_callback_expansions],
+          {_, value} <- :ets.lookup(tab(), {:attr, mod, name}),
+          into: %{}, do: {name, value}
     :ets.insert(tab(), {{:snapshot, mod, line}, attributes})
     :ok
   end
@@ -2662,10 +2761,23 @@ defmodule Tonic.Eval.Modules do
     end
   end
 
+  defp attribute_names(mod) do
+    case :ets.lookup(tab(), {:attribute_names, mod}) do
+      [{_, names}] -> names
+      [] -> []
+    end
+  end
+
+  defp track_attribute(mod, name) do
+    names = attribute_names(mod)
+    unless name in names, do: :ets.insert(tab(), {{:attribute_names, mod}, [name | names]})
+  end
+
   def put_attribute(mod, name, value) do
     accumulated = name in [:before_compile, :after_compile, :on_definition, :callback, :macrocallback, :behaviour] or :ets.member(tab(), {:accumulate, mod, name})
     value = if accumulated, do: [value | (get_attribute(mod, name) || [])], else: value
     :ets.insert(tab(), {{:attr, mod, name}, value})
+    track_attribute(mod, name)
     :ok
   end
 
@@ -2675,6 +2787,7 @@ defmodule Tonic.Eval.Modules do
     if opts[:accumulate] do
       :ets.insert(tab(), {{:accumulate, mod, name}, true})
       if get_attribute(mod, name) == nil, do: :ets.insert(tab(), {{:attr, mod, name}, []})
+      track_attribute(mod, name)
     end
     :ok
   end
@@ -2682,6 +2795,7 @@ defmodule Tonic.Eval.Modules do
   def delete_attribute(mod, name) do
     value = get_attribute(mod, name)
     :ets.delete(tab(), {:attr, mod, name})
+    :ets.insert(tab(), {{:attribute_names, mod}, List.delete(attribute_names(mod), name)})
     value
   end
 

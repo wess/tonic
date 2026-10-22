@@ -67,6 +67,8 @@ pub struct Gen {
     fun_syms: HashSet<String>,
     ref_wrappers: HashMap<String, String>,
     pub fun_table: Vec<(String, String, usize, String)>,
+    /// Export metadata survives pruning without retaining function bodies.
+    pub declared_exports: Vec<(String, String, usize)>,
     /// Functions of the precompiled prelude this program can reach; the
     /// program's table lists them so the linker can drop the rest.
     pub table_externs: Vec<(String, String, usize, String)>,
@@ -151,6 +153,7 @@ impl Gen {
             fun_syms: HashSet::new(),
             ref_wrappers: HashMap::new(),
             fun_table: Vec::new(),
+            declared_exports: Vec::new(),
             table_externs: Vec::new(),
             max_arity: 8,
         };
@@ -376,10 +379,20 @@ impl Gen {
                 }
             }
         }
+        if self.mode != Mode::Prelude {
+            let mut known: HashSet<(String, String, usize)> = ft.iter()
+                .map(|(module, name, arity, _)| (module.clone(), name.clone(), *arity)).collect();
+            for (module, name, arity) in std::mem::take(&mut self.declared_exports) {
+                if known.insert((module.clone(), name.clone(), arity)) {
+                    ft.push((module, name, arity, String::new()));
+                }
+            }
+        }
         for (m, n, a, sym) in &ft {
             let ma = self.atom(m);
             let na = self.atom(n);
-            entries.push(format!("{{ i64, i64, i64, ptr }} {{ i64 {}, i64 {}, i64 {}, ptr @{} }}", ma, na, a, q(sym)));
+            let pointer = if sym.is_empty() { "null".to_string() } else { format!("@{}", q(sym)) };
+            entries.push(format!("{{ i64, i64, i64, ptr }} {{ i64 {}, i64 {}, i64 {}, ptr {} }}", ma, na, a, pointer));
         }
         self.fun_table = ft;
         if self.mode != Mode::Prelude {
@@ -502,8 +515,8 @@ impl Gen {
             for i in 0..a {
                 let _ = writeln!(s, "  %e{} = getelementptr i64, ptr %arr, i64 {}\n  store i64 %a{}, ptr %e{}", i, i, i, i);
             }
-            let _ = writeln!(s, "  call void @tn_undef_raise(ptr %ctx, i64 %m, i64 %n, ptr %arr, i64 {})", a);
-            s.push_str("  ret i64 0\nok:\n");
+            let _ = writeln!(s, "  %fallback = call i64 @tn_call_mfa(ptr %ctx, i64 %m, i64 %n, ptr %arr, i64 {})", a);
+            s.push_str("  ret i64 %fallback\nok:\n");
             let _ = writeln!(s, "  %r = tail call tailcc i64 %fp({})\n  ret i64 %r\n}}\n", args.join(", "));
             tr.push(format!("ptr @tonic_ext_tramp_{}", a));
         }
@@ -569,8 +582,14 @@ impl Gen {
             Target::Dynamic => {
                 let m = self.atom(&key.module);
                 let n = self.atom(&key.name);
-                let _ = writeln!(s, "  %fp = call ptr @tn_lookup_mfa(ptr %ctx, i64 {}, i64 {}, i64 {})", m, n, key.arity);
-                s.push_str("  %z = icmp eq ptr %fp, null\n  br i1 %z, label %bad, label %ok\nbad:\n  ret i64 0\nok:\n");
+                let _ = writeln!(s, "  %fp = call ptr @tn_lookup_mfa_q(ptr %ctx, i64 {}, i64 {}, i64 {})", m, n, key.arity);
+                s.push_str("  %z = icmp eq ptr %fp, null\n  br i1 %z, label %bad, label %ok\nbad:\n");
+                let _ = writeln!(s, "  %arr = alloca [{} x i64]", key.arity.max(1));
+                for i in 0..key.arity {
+                    let _ = writeln!(s, "  %e{} = getelementptr i64, ptr %arr, i64 {}\n  store i64 %a{}, ptr %e{}", i, i, i, i);
+                }
+                let _ = writeln!(s, "  %fallback = call i64 @tn_call_mfa(ptr %ctx, i64 {}, i64 {}, ptr %arr, i64 {})", m, n, key.arity);
+                s.push_str("  ret i64 %fallback\nok:\n");
                 let _ = writeln!(s, "  %r = tail call tailcc i64 %fp({})", args.join(", "));
                 s.push_str("  ret i64 %r\n}\n\n");
             }
@@ -1263,46 +1282,8 @@ go:
                     let Some(o) = self.val(a) else { return Flow::Done };
                     ops.push(o);
                 }
-                let mv = self.load(&mo);
-                let na = self.g.atom(name);
-                self.store_line();
-                let fp = self.t();
-                self.emit(&format!(
-                    "{} = call ptr @tn_lookup_mfa_q(ptr %ctx, i64 {}, i64 {}, i64 {})",
-                    fp,
-                    mv,
-                    na,
-                    args.len()
-                ));
-                let z = self.t();
-                self.emit(&format!("{} = icmp eq ptr {}, null", z, fp));
-                let ok = self.label();
-                let undefb = self.label();
-                let target = self.exc.clone();
-                self.term(&format!("br i1 {}, label %{}, label %{}", z, undefb, ok));
-                // undef: the top stack entry carries the call's arguments
-                self.block(&undefb);
-                let base = self.slots(ops.len().max(1));
-                for (i, o) in ops.iter().enumerate() {
-                    self.put(base + i as u32, o);
-                }
-                let ap = self.slot_ptr(base);
-                let mv2 = self.load(&mo);
-                self.emit(&format!(
-                    "call void @tn_undef_raise(ptr %ctx, i64 {}, i64 {}, ptr {}, i64 {})",
-                    mv2,
-                    na,
-                    ap,
-                    ops.len()
-                ));
-                self.term(&format!("br label %{}", target));
-                self.block(&ok);
-                let mut av = vec!["ptr %ctx".to_string()];
-                for o in &ops {
-                    let v = self.load(o);
-                    av.push(format!("i64 {}", v));
-                }
-                self.emit_call(&format!("{}", fp), &av, tail)
+                let name = self.g.atom(name);
+                self.dynamic_call(&mo, name, &ops, tail)
             }
             CE::Apply(f, args) => {
                 let Some(fo) = self.val(f) else { return Flow::Done };
@@ -1455,6 +1436,44 @@ go:
         self.finish_val(Op::Slot(s), tail)
     }
 
+    fn dynamic_call(&mut self, module: &Op, name: u64, args: &[Op], tail: bool) -> Flow {
+        self.store_line();
+        let module_value = self.load(module);
+        let pointer = self.t();
+        self.emit(&format!("{} = call ptr @tn_lookup_mfa_q(ptr %ctx, i64 {}, i64 {}, i64 {})", pointer, module_value, name, args.len()));
+        let missing = self.t();
+        self.emit(&format!("{} = icmp eq ptr {}, null", missing, pointer));
+        let native = self.label();
+        let interpreted = self.label();
+        let joined = self.label();
+        let result = self.new_slot();
+        self.term(&format!("br i1 {}, label %{}, label %{}", missing, interpreted, native));
+        self.block(&interpreted);
+        let base = self.slots(args.len().max(1));
+        for (index, argument) in args.iter().enumerate() { self.put(base + index as u32, argument); }
+        let values = self.slot_ptr(base);
+        let module_value = self.load(module);
+        let fallback = self.t();
+        self.emit(&format!("{} = call i64 @tn_call_mfa(ptr %ctx, i64 {}, i64 {}, ptr {}, i64 {})", fallback, module_value, name, values, args.len()));
+        self.check(&fallback);
+        self.store(result, &fallback);
+        if tail {
+            self.finish_val(Op::Slot(result), true);
+        } else { self.br(&joined); }
+        self.block(&native);
+        let mut values = vec!["ptr %ctx".to_string()];
+        for argument in args { values.push(format!("i64 {}", self.load(argument))); }
+        match self.emit_call(&pointer, &values, tail) {
+            Flow::Val(value) => {
+                self.put(result, &value);
+                self.br(&joined);
+                self.block(&joined);
+                Flow::Val(Op::Slot(result))
+            }
+            Flow::Done => Flow::Done,
+        }
+    }
+
     fn call(&mut self, k: &FunKey, args: &[CE], tail: bool) -> Flow {
         let mut ops = Vec::new();
         for a in args {
@@ -1468,19 +1487,9 @@ go:
         }
         let callee = format!("@{}", q(&k.symbol()));
         if !self.g.known_fun(&k.symbol(), k.arity) {
-            // Should not happen (unreachable functions are filtered); emit a
-            // dynamic lookup that raises UndefinedFunctionError.
-            let m = self.g.atom(&k.module);
-            let n = self.g.atom(&k.name);
-            let fp = self.t();
-            self.emit(&format!("{} = call ptr @tn_lookup_mfa(ptr %ctx, i64 {}, i64 {}, i64 {})", fp, m, n, k.arity));
-            let target = self.exc.clone();
-            let z = self.t();
-            self.emit(&format!("{} = icmp eq ptr {}, null", z, fp));
-            let ok = self.label();
-            self.term(&format!("br i1 {}, label %{}, label %{}", z, target, ok));
-            self.block(&ok);
-            return self.emit_call(&fp, &av, tail);
+            let module = self.g.atom(&k.module);
+            let name = self.g.atom(&k.name);
+            return self.dynamic_call(&Op::Imm(module), name, &ops, tail);
         }
         self.emit_call(&callee, &av, tail)
     }
@@ -2496,6 +2505,7 @@ declare i64 @tn_grow_closure(ptr, i64, i64, ptr)
 declare ptr @tn_lookup_mfa(ptr, i64, i64, i64)
 declare void @tn_undef_args(ptr, ptr, i64)
 declare ptr @tn_lookup_mfa_q(ptr, i64, i64, i64)
+declare i64 @tn_call_mfa(ptr, i64, i64, ptr, i64)
 declare void @tn_undef_raise(ptr, i64, i64, ptr, i64)
 declare void @tn_set_ext_tramps(ptr, i64)
 declare i64 @tn_map_build(ptr, ptr, i64)

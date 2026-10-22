@@ -18,6 +18,10 @@ the current release. Read the compatibility report before recommending an API,
 package, or deployment workflow. A successful package test covers the tested
 scenario, not every API in that package.
 
+This index follows 0.1.1-beta.1 development source, including unreleased changes after
+0.1.0-beta.3. Use the documentation from the matching tag for installed release
+bundles; new native test/release and networking behavior requires the checkout.
+
 The reference baseline is Elixir 1.18.3 / Erlang OTP 27; CI pins OTP 27.2.4.
 Upstream documentation and source should match that baseline. Newer Elixir or
 OTP behavior requires separate verification. Native compilation preserves the
@@ -46,6 +50,8 @@ rule or change a reference fixture to accept incorrect native behavior.
 
 ## Source and evidence
 
+- [API conformance inventory](https://wess.io/tonic/docs/coverage.md): Reference exports, native declarations, reviewed classifications, and linked regressions. Declaration counts do not measure full compatibility.
+- [Machine-readable conformance data](https://wess.io/tonic/docs/coverage.json): Per-function/macro status, source, reference presence, and test evidence.
 - [Compiler](https://github.com/wess/tonic/tree/main/compiler/src): Elixir/Erlang front ends, expansion, macro host, Mix project loading, and LLVM generation.
 - [Runtime](https://github.com/wess/tonic/tree/main/runtime/src): Tagged values, moving GC, scheduler, BIFs, networking, ports, and NIF subset.
 - [Bundled library](https://github.com/wess/tonic/tree/main/lib): Elixir library, Erlang sources, and native macro evaluator.
@@ -93,7 +99,7 @@ Upstream documentation defines documented behavior; pinned source and small
 reference programs resolve edge cases. Tonic's tests establish the behavior
 actually exercised. An exported function or an accepted option alone does not
 establish correct implementation. Consult the compatibility report for partial
-implementations and accepted options that currently have no effect.
+implementations, unsupported options, and backend limits.
 
 ## Preserve Elixir semantics
 
@@ -203,7 +209,10 @@ With Tonic's Mix archive installed, `mix tonic check`, `mix tonic build`, and
 `mix tonic run` invoke the native compiler. Ordinary `mix compile`, `mix run`,
 and `mix release` use the project's configured Mix pipeline. Opting into the
 `:tonic` compiler produces a native artifact; it does not produce BEAM modules
-for `mix run` or `mix release`.
+for `mix run` or `mix release`. The development `Tonic.native/1` project adapter
+routes ordinary run/test/release tasks to native equivalents. `tonic test` and
+`mix tonic test` run ExUnit natively, and `mix tonic release` bundles the native
+executable with relocatable application assets and runtime configuration.
 
 Current project boundaries, supported dependency compilers, NIF restrictions,
 and application startup behavior are in the
@@ -289,7 +298,7 @@ Source: https://github.com/wess/tonic/blob/main/README.md
 
 # tonic
 
-**0.1.0-beta.3 · beta.** Start with scripts and small native applications.
+**0.1.1-beta.1 · development beta.** Start with scripts and small native applications.
 Visit the [Tonic website](https://wess.io/tonic/).
 Install with `brew install wess/packages/tonic` or
 `curl -fsSL https://wess.io/tonic/install.sh | sh`; the
@@ -297,6 +306,12 @@ Install with `brew install wess/packages/tonic` or
 tasks. See the
 [compatibility report](https://github.com/wess/tonic/blob/main/docs/compatibility.md) for tested packages and limitations.
 Remaining work is tracked in [TODO.md](https://github.com/wess/tonic/blob/main/TODO.md).
+
+The 0.1.1-beta.1 source checkout includes unreleased portability changes after
+0.1.0-beta.3: native test/release workflows, umbrella builds, an API conformance
+inventory, Req support, resource reclamation and expanded networking. Build
+from source for those changes; published beta.3 bundles retain their original
+feature set.
 
 An ahead-of-time compiler for **Elixir** that produces native executables via
 **LLVM**, with a precise, moving garbage collector and an Erlang-style process
@@ -350,6 +365,8 @@ tonic run <file.exs>... [-- args]    compile (-O0 by default) and run
 tonic build <file.ex>... [-o out]    compile to an executable (-O2 by default)
 tonic emit-llvm <file.ex>... [-o x.ll]
 tonic check <file.ex>...             parse + expand only
+tonic test [project] [test paths]    compile and execute ExUnit natively
+tonic inventory                     emit declared exports as JSON
 ```
 
 Multiple files are compiled together as one program; top-level expressions in
@@ -418,6 +435,38 @@ compiler executable or configure `tonic: [executable: "/path/to/tonic"]` in
 `project/0`. Ordinary Mix dependency, Hex publishing, and package-management
 tasks continue to use Mix.
 
+### Native tests and releases
+
+The development checkout supports ExUnit and relocatable native bundles:
+
+```sh
+tonic test
+tonic test test/example_test.exs:12 --seed 0 --trace
+mix tonic test --only integration --timeout 30000
+mix tonic release -o ./native
+./native/bin/my_app argument
+```
+
+Tests use the project's test paths/helpers and start applications before the
+suite. File/directory/file:line selection, include/exclude/only tags, seed,
+timeout, trace and failure-limit options are passed through the native runner.
+Unsupported switches produce diagnostics. Releases include application `priv`
+assets and evaluate runtime configuration when started, so the bundle can move
+to a machine without Mix, Elixir or BEAM. These bundles have their own native
+launcher; they do not provide ERTS daemon, RPC or hot-upgrade commands.
+
+With the development Mix archive installed, opt a project into native routing
+for ordinary `mix run`, `mix test` and `mix release`:
+
+```elixir
+def project do
+  Tonic.native(app: :my_app, version: "0.1.0")
+end
+```
+
+`Tonic.native/1` configures the native compiler and task aliases. Projects that
+keep their ordinary Mix configuration continue to build and run on the BEAM.
+
 To make `mix compile` build the native executable, opt into the archive compiler:
 
 ```elixir
@@ -437,7 +486,8 @@ Set `consolidate_protocols: false` to disable Mix’s separate BEAM protocol
 consolidation. The Tonic compiler rebuilds on each invocation so evaluated
 configuration and toolchain changes cannot leave a stale native artifact.
 It produces a native artifact; it does not produce application
-BEAM files for `mix run` or `mix release`. Use `mix tonic run` to run it.
+BEAM files for `mix run` or `mix release`. Use `mix tonic run`, or the
+`Tonic.native/1` adapter above, to route execution to the native artifact.
 
 The locked example in `examples/packages/` uses Decimal from Hex:
 
@@ -456,8 +506,10 @@ language and runtime APIs implemented by Tonic. `rebar3` dependencies are
 compiled from their Erlang sources, and C NIFs built with `elixir_make` are
 compiled from `c_src/` and linked into the executable (see the
 [compatibility report](https://github.com/wess/tonic/blob/main/docs/compatibility.md)). Other custom compilers,
-prebuilt native libraries, other build managers, and lexer/parser generation
-fail explicitly. Umbrella applications must be built from each child project.
+prebuilt native libraries and other build managers fail explicitly. Umbrella
+roots compile their child applications together. Yecc/leex generators run in
+scratch directories; custom Mix source generators require explicit
+`tonic: [generators: [:task]]` configuration.
 
 `examples/helloweb` is a Plug, Bandit and Ecto (SQLite) service that builds to
 a single native executable.
@@ -529,7 +581,9 @@ with an unknown module, `apply/3` and `spawn/3` arguments, callback tuples such
 as `{Mod, :fun, args}`, protocol dispatch); atoms in user code keep their
 module's public functions. Programs that evaluate code at run time
 (`Code.eval_string/2` and friends) keep everything. A hello world is about
-4.5 MB.
+15 MB on Apple Silicon in the current checkout. Conservative retention for
+runtime-named I/O callbacks currently keeps all public function bodies;
+the published beta.3 build was about 4.5 MB.
 
 ### Processes on tokio
 
@@ -557,8 +611,10 @@ Native programs read these environment variables at startup:
 | `TONIC_GC_VERIFY` | off | Check the generational invariant after every minor collection (testing only) |
 
 `TONIC_KEEP_ALL=1` at compile time keeps every public standard library
-function in the executable, for programs that call functions whose names they
-build at run time (for example `apply(String, String.to_atom(name), args)`).
+function in the executable. Calls with runtime-created module/function names
+already retain matching public targets conservatively, including dynamic
+apply, function captures and process entry points. This setting is an explicit
+request to disable public-function pruning.
 
 Process stacks are reserved address space; memory is only committed as a
 process uses it. Stacks grow like the BEAM's: a function entered near the end
@@ -626,6 +682,13 @@ definition and before-compilation hooks but does not run after-compilation hooks
   wording; this does not imply complete regex-engine equivalence.
 
 ## Tests
+
+The [API conformance inventory](https://github.com/wess/tonic/blob/main/docs/coverage.md) compares bundled declarations
+with Elixir 1.18.3 / OTP 27 exports and links reviewed behavior to regressions.
+It distinguishes API presence from semantic evidence. Generate or verify it
+with `python3 tools/coverage.py` and `python3 tools/coverage.py --check` after
+building the compiler. Refresh the upstream snapshot explicitly with
+`--refresh-reference` when reviewing a baseline update.
 
 ```
 cargo build --workspace
@@ -719,7 +782,16 @@ Source: https://github.com/wess/tonic/blob/main/docs/compatibility.md
 
 # Compatibility
 
-Tonic 0.1.0-beta.3 compiles supported Elixir and Erlang source to LLVM and links a native runtime. `.exs` scripts use the same compiler. Native executables do not contain BEAM bytecode.
+Tonic 0.1.1-beta.1 development source compiles supported Elixir and Erlang source to LLVM and links a native runtime. `.exs` scripts use the same compiler. Native executables do not contain BEAM bytecode.
+
+This report follows the current development source. The API inventory, Req
+coverage, managed native-resource lifetimes, expanded socket semantics, and
+native Mix test/release workflows below are changes after the published
+0.1.0-beta.3 bundles. Build the current checkout to exercise them.
+
+The [API conformance inventory](https://github.com/wess/tonic/blob/main/docs/coverage.md) compares reference exports with
+native declarations and reviewed test evidence. A declaration alone defaults
+to partial support; counts do not measure a percentage of Elixir compatibility.
 
 ## Package coverage
 
@@ -734,7 +806,7 @@ The package integration tests fetch exact Hex versions into an isolated project,
 
 The web example in `examples/helloweb` was built natively and exercised over HTTP (create, list, fetch, validation errors, 404s), matching the same project on the BEAM. It covers Plug 1.20.3, Bandit 1.12.5, ThousandIsland 1.5.0, Ecto 3.14.2, Ecto SQL 3.14.0, ecto_sqlite3 0.25.0, exqlite 0.42.0, DBConnection 2.10.2, Jason 1.4.5 and Telemetry 1.4.2. `compiler/tests/helloweb.rs` now builds and exercises the native HTTP service automatically in Linux/macOS CI; the BEAM comparison was verified manually.
 
-Mint 1.11.0 builds natively and fetches over HTTPS (HTTP/2). Req does not compile yet: it stores function captures of modules that only exist at compile time in a module attribute.
+Mint 1.11.0 builds natively and fetches over HTTPS (HTTP/2). Req 0.7.5 now compiles unchanged: remote function captures stored in compile-time module attributes retain their module/name/arity identity in the native program. `compiler/tests/req.rs` compares GET with query/header handling, JSON POST, redirects and HTTP error status against the same locked project on the BEAM. A native Req HTTPS request to Hex was also verified manually. Optional Req adapters, archive/compression codecs, and all package APIs are not covered by those checks.
 
 These are specific compatibility checks, not a claim that every function in these packages or every Hex package works. The package fixtures are in `tests/fixtures/packages`; the Decimal example is in `examples/packages`.
 
@@ -743,6 +815,7 @@ Decimal uses the patched 3.0.0 release. Earlier versions below 3.0.0 are affecte
 ```sh
 TONIC_TEST_HEX=1 cargo test -p tonic --test packages -- --ignored
 TONIC_TEST_HEX=1 cargo test -p tonic --test packagesextra -- --ignored
+TONIC_TEST_HEX=1 cargo test -p tonic --test req -- --ignored
 ```
 
 ## Macros and compilation callbacks
@@ -750,6 +823,13 @@ TONIC_TEST_HEX=1 cargo test -p tonic --test packagesextra -- --ignored
 User macros can execute compile-time code through the macro host. Coverage includes caller environments, computed expansions, default macro arguments, map splicing, generated definitions, `use`, and chained overridable functions and macros. In a Mix project, compile-time code can call `Mix.Project.config/0` (the `:app` and `:version` of the project the code belongs to) and the functions of each project's own `mix.exs` module.
 
 `@on_definition` callbacks receive definition metadata and can update attributes seen by subsequent definitions. `@before_compile` callbacks can inject definitions and attributes. Native `@after_compile` callbacks run after LLVM generation; their second argument is the emitted LLVM IR binary. It is not a BEAM module binary. Interpreted `Code.eval_*` modules receive an empty binary because they do not emit a compiled artifact.
+
+Modules created through `Code.eval_string` run in Tonic's interpreter. Compiled
+code can call their ordinary public functions through remote calls, `apply` and
+external captures; private functions stay private. Function and macro reflection
+recognize those definitions. `compiler/tests/evaluation.rs` compares these paths,
+exceptions and moving-GC behavior with BEAM. This does not implement BEAM artifact
+loading, full generated-module introspection, or native module replacement.
 
 ## Concurrent applications
 
@@ -766,17 +846,27 @@ TONIC_SOAK_SECONDS=60 cargo test -p tonic --test soak -- --nocapture
 
 Mix evaluates project metadata, dependency selection and compile configuration. Coverage includes computed metadata, transitive path dependencies, `only`, `targets`, `runtime: false`, application startup ordering, version checks, lock checks, and runtime configuration that reads the executable's environment.
 
-Tonic accepts the supported standard Mix source compilation pipeline. `rebar3` dependencies are compiled from their `src/*.erl` sources and `.app.src` specification. Mix tasks shipped in dependencies (`lib/mix/`) are not compiled into the program. Other custom dependency compilers, prebuilt native shared libraries and other build managers are rejected with diagnostics. Fetch dependencies with `mix deps.get` or `mix tonic.build --deps-get`; native compilation does not fetch missing packages.
+Tonic accepts the supported standard Mix source compilation pipeline, including umbrella roots and interdependent child applications. `rebar3` dependencies are compiled from their Erlang sources and `.app.src` specification; yecc/leex generation runs in a scratch directory. Mix source generators explicitly listed in `tonic: [generators: [:task]]` run through installed Mix before native source collection. Their host dependencies must be available. Dependency Mix tasks are not linked into the native program. Undeclared custom compiler tasks, prebuilt BEAM/object-only artifacts, prebuilt native shared libraries and other build managers are rejected with diagnostics. Fetch dependencies with `mix deps.get` or `mix tonic.build --deps-get`; native compilation does not fetch missing packages.
+
+`tonic test`, `mix tonic test` and `mix tonic.test` compile and execute ExUnit
+natively, including helpers, application startup, file/directory/file:line
+selection, tag filters, seed, timeout, trace and failure-limit options.
+`mix tonic release` creates a relocatable native executable with application
+`priv` assets and runtime configuration. `Tonic.native/1` is an opt-in project
+adapter for ordinary `mix run`, `mix test` and `mix release`; projects that do
+not opt in keep their normal BEAM pipeline. Native releases do not implement
+ERTS release daemon, RPC or hot-upgrade protocols. These workflows are exercised
+in `compiler/tests/tooling.rs` and `compiler/tests/tooling/filtering.rs`.
 
 ## NIFs
 
 Dependencies built with `elixir_make` whose `c_src/` contains a C NIF (`ERL_NIF_INIT`) are compiled from source against Tonic's `erl_nif.h` and linked into the executable. The `-D` options of the dependency's Makefile `CFLAGS` are applied; compiled objects are cached. A module's `@on_load` callback runs at startup, `:erlang.load_nif/2` binds the linked library, and functions whose body is `:erlang.nif_error/1` call into it.
 
-Tonic implements a subset of the `erl_nif` API: terms, binaries, resources, environments, messages, mutexes and monotonic time. NIF calls run on the calling process's scheduler thread. Resources referenced from terms are never released. Rust NIFs (Rustler), prebuilt `.so`/`.dylib` files and dirty-scheduler semantics are not supported.
+Tonic implements a subset of the `erl_nif` API: terms, binaries, resources, environments, messages, mutexes and monotonic time. NIF calls run on the calling process's scheduler thread. Managed resource references retain native state across GC, process messages, ETS, serialization roundtrips and NIF environments; the final release invokes the native destructor. Explicit `enif_keep_resource`/`enif_release_resource` ownership is preserved independently of term lifetimes. `runtime/tests/resources.rs` and `compiler/tests/resources.rs` exercise reclamation and copies. Rust NIFs (Rustler), prebuilt `.so`/`.dylib` files and dirty-scheduler semantics are not supported.
 
 ## Networking
 
-`:gen_tcp` provides TCP listen, accept, connect, send, recv, close, shutdown and controlling process, in passive, `active: :once`, `active: true` and `active: N` modes. `:inet` covers `setopts`, `getopts`, `sockname`, `peername`, `getstat`, `port`, address parsing and formatting. Waiting socket operations run on the runtime's I/O driver and do not block scheduler threads. Only `:raw` packets are supported; `:erlang.decode_packet/3` handles raw, length-prefixed, line and HTTP packets.
+`:gen_tcp` provides TCP listen, accept, connect, send, recv, close, shutdown and controlling process, in passive, `active: :once`, `active: true` and `active: N` modes. List delivery is the default; binary/header delivery and raw, 1/2/4-byte length-prefixed and line packets are supported. Socket options include local address/family binding, keepalive, nodelay, receive/send buffers and send timeouts; unsupported options return errors. `:inet` covers `setopts`, `getopts`, `sockname`, `peername`, `getstat`, `port`, address parsing and formatting. Waiting socket operations run on the runtime's I/O driver and do not block scheduler threads. `:erlang.decode_packet/3` additionally handles HTTP packet decoding.
 
 `:gen_udp` provides `open/1,2`, `send/3,4` (address tuples or host names), `recv/2,3`, `close/1` and `controlling_process/2`, in passive, `active: :once`, `active: true` and `active: N` modes with `{:udp, socket, ip, port, data}` and `{:udp_passive, socket}` messages, `:list` or `:binary` delivery, and `:inet`/`:inet6`, `:ip`, `:reuseaddr`, `:reuseport`, `:broadcast`, `:recbuf` and `:sndbuf` options. `:inet.setopts/2`, `getopts/2`, `sockname/1`, `port/1`, `getstat/1` and `close/1` accept UDP sockets.
 
@@ -796,16 +886,16 @@ These differ from Elixir 1.18 / OTP 27 in this release. Each is either intention
 
 - Redefining a module (a second `defmodule` with the same name) is a compile error; Elixir replaces the module at run time.
 - `:erlang.phash/2` and `:erlang.phash2/1,2` match OTP 27 for every term except pids, references and anonymous or local funs. Pids and references hash their printed numbers, which differ from the BEAM's; anonymous funs cannot reproduce OTP's per-module code checksum. External funs (`&Mod.fun/arity`) match.
-- `Macro.expand/2` and `Macro.expand_once/2` expand aliases, user macros (remote, and imported ones when given `__ENV__`) and the Kernel macros `if`, `unless`, `&&`, `||`, `!`, `|>`, `is_nil`, `then`, `tap`, `to_string`, `to_charlist` and `match?`. Other Kernel macros and `defguard` guards are returned unexpanded.
+- `Macro.expand/2` and `Macro.expand_once/2` expand aliases, user macros (remote, and imported ones when given `__ENV__`), public `defguard` macros including defaults, and the Kernel macros `if`, `unless`, `&&`, `||`, `!`, `|>`, `is_nil`, `then`, `tap`, `to_string`, `to_charlist` and `match?`. Other Kernel macros can remain unexpanded.
 - `:calendar.local_time_to_universal_time/1` applies the current UTC offset rather than the offset in effect at the given local time, so results differ across a daylight saving change.
 - Elixir's unused variable, ungrouped clause and duplicate map key warnings are emitted for code you write, but not inside code a dependency's macro generates (for example the body of a `Plug.Router` route). Elixir's other warnings (deprecations, type checking, unused functions, aliases and imports) are not emitted, and some invalid programs Elixir rejects are still accepted.
 - Stack trace frames for anonymous functions inside `with ... else` and other inlined code are named after the enclosing function, where the BEAM names a generated function such as `-w/1-fun-0-`.
 - A `quote` of a sigil omits the `delimiter:` metadata.
-- `:atomics` and `:counters` arrays are never freed.
-- `:zlib` streams that are never closed are not freed, and closing a stream twice raises `:badarg` rather than `:not_initialized`. Compressed bytes come from stock zlib 1.3.2 and match an OTP built against stock zlib; an OTP linked to a different zlib (such as zlib-ng) can produce different bytes, though each decompresses the other's output.
+- `quote bind_quoted:` supports literal keyword lists and lexical `Kernel.binding`; custom macros or attributes producing that option are not fully expanded before validation and can be rejected.
+- `:zlib` state is reclaimed when its last term owner disappears, including streams never explicitly closed. Closing a stream twice still raises `:badarg` rather than `:not_initialized`. Compressed bytes come from stock zlib 1.3.2; OTP builds linked to another zlib can produce different bytes while remaining mutually decompressible.
 - Sockets are references rather than ports, so they print as `#Reference<...>` and `is_port/1` is false for them.
-- `:gen_udp.connect/2,3`, multicast group membership (`:add_membership`) and ancillary data (`:recvtos`, `:recvttl`) are not implemented; `:multicast_ttl`, `:multicast_loop`, `:recvtos` and similar options are accepted and ignored. A receive error in UDP active mode delivers `{:udp_error, socket, reason}` and stops delivery until `:inet.setopts/2` re-enables it.
-- TLS runs on rustls: only TLS 1.2 and 1.3 (asking only for `:tlsv1` or `:"tlsv1.1"` fails with `{:error, {:options, {:versions, []}}}`), no DTLS, no renegotiation and no session resumption across connections. The cipher suites are rustls': ECDHE with AES-GCM or ChaCha20-Poly1305 for TLS 1.2 and the three AEAD suites for TLS 1.3, so `:ssl.cipher_suites/2` lists those; `:ciphers`, `:eccs`, `:signature_algs`, `:secure_renegotiate`, `:reuse_sessions`, `:depth`, `:partial_chain`, `:verify_fun`, `:crl_check` and `:log_level` are accepted and ignored. Host names are always checked as RFC 6125 with wildcards, which is what `customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]` asks for; a custom `match_fun`, `verify_fun` or `sni_fun` is not called. `:ssl.connect/3` over an `:ssl` socket (nested TLS, `:cb_info`) is not supported.
+- `:gen_udp.connect/2,3`, connected `send/2`, multicast membership, TTL/TOS/dontroute and socket option readback are implemented. Ancillary-data receive APIs remain unsupported; unsupported options return an error instead of being ignored.
+- TLS runs on rustls: TLS 1.2 and 1.3 only, no DTLS, renegotiation or session resumption across independently created connections. Cipher selection/order, verification depth, local binding and socket settings are applied. Client/server `verify_fun`, `partial_chain`, custom hostname `match_fun` and dynamic `sni_fun` callbacks execute through a cancellable process bridge. Rustls/webpki rejects unknown critical X.509 extensions during certificate parsing, so a callback cannot override those failures as OTP can. Unsupported options are rejected. Nested TLS (`:cb_info`) remains unsupported.
 - TLS alert descriptions say `In state handshake` where OTP names its state machine state and source line, and OTP's notice-level log line for each alert is not printed. Local errors map to the alert OTP sends for unknown CAs, host name mismatches (`:handshake_failure`), expired certificates, missing client certificates and ALPN mismatches, and to the closest alert otherwise; the alert a rustls peer sends can differ from OTP's (a tonic client rejecting a host name sends `:bad_certificate` where OTP sends `:handshake_failure`). `connection_information/1` returns `protocol`, `selected_cipher_suite`, `session_resumption`, `sni_hostname` and `versions` only, not the session or option keys.
 - TLS sockets are `{:sslsocket, reference, :tls}` tuples rather than OTP's records holding a port and pids. `:ssl.getstat/1,2` counts decrypted application data with the four `recv_`/`send_` `oct` and `cnt` keys, where OTP reports the TCP socket's statistics. `:ssl` works without starting the `:ssl` application, where OTP exits.
 - `:public_key.cacerts_get/0` reads the system's PEM bundle (`SSL_CERT_FILE`, then /etc/ssl/cert.pem, /etc/ssl/certs/ca-certificates.crt and the other usual paths); OTP on macOS reads the keychains instead. Decoded certificates in the `:otp` form keep extension values as DER, and `:public_key` has no signing, verification, encryption or DER encoding.
@@ -814,17 +904,17 @@ These differ from Elixir 1.18 / OTP 27 in this release. Each is either intention
 - `Code.string_to_quoted/1` error locations report line 0 without a column, and a compiled regex's `re_pattern` is not a real PCRE binary.
 - Small maps with atom keys print keys in source order rather than atom-table order.
 - Memory: each blocked process holds at least one page of its stack, so a process costs about 20 KB on Apple Silicon (16 KB pages) and about 7 KB on Linux (4 KB pages), compared to about 3 KB on the BEAM. Deep non-tail recursion works to any depth memory allows, but a stack frame takes about four times the memory of a BEAM frame (10 million frames of `n + f(n - 1)` use about 2 GB, the BEAM about 0.6 GB).
-- Executables include only the standard library functions the compiler can see a program reach. A call whose function name is built at run time (`apply(Mod, String.to_atom(name), args)`) into a standard library function the program does not otherwise use fails with `UndefinedFunctionError`; compile with `TONIC_KEEP_ALL=1` to keep every function.
-- `mix test` with `compilers: [:tonic]` cannot start the application, since no BEAM files are produced; run tests with the default compilers.
+- Tree shaking conservatively retains matching public targets when an apply, capture, spawn or dynamic call cannot determine its module/function names statically. Runtime-created names do not require `TONIC_KEEP_ALL=1`; that variable remains an explicit request to retain every public function. The standard I/O server accepts runtime-named callbacks, so current analysis retains all public bodies even for hello world (~15 MB on Apple Silicon, versus ~4.5 MB in beta.3). Export metadata is retained independently of code pointers, and private functions remain inaccessible through reflection and dynamic calls.
+- A project configured only with `compilers: [:tonic]` still produces no BEAM files for ordinary Mix tasks. Use the `Tonic.native/1` adapter for native run/test/release workflows, or keep the default compilers to run on the BEAM.
 - Output written by a module body (`IO.puts` inside `defmodule`) appears on stderr while the program compiles, not when it runs.
+- Compile-time process state belongs to the macro host. A process dictionary entry written during compilation does not become an entry in the native executable's runtime process, unlike compilation and execution within one BEAM script process.
 - Logger's `debug`/`info`/... and `log` are functions, so calling them without `require Logger` works where Elixir raises.
-- Some programs Elixir rejects still compile: a keyword list in a tuple (`{a: 1}`), a nested alias in `as:` (`as: Baz.Qux`), a `defguard` and `def` of the same name and arity, and a second `defoverridable` of an already overridable function. A `@spec` for an undefined function is not reported.
+- Tuple keyword misuse, invalid `as:` aliases, guard/function kind conflicts, private guard access, repeated `defoverridable` and undefined `@spec` targets now have focused rejection tests. Complete equivalence with every Elixir diagnostic and warning is not established.
 - Stack traces keep a frame for a function that tail-calls a function the BEAM inlines (such as `String.to_atom/1`), show each frame of repeated body recursion, and add an `erlang.erl` `apply/2` frame to Task crash reports.
 - Sorting terms that compare equal but differ (`1` and `1.0`) can order them differently from `:lists.sort/1`.
 - A few error messages are worded differently: binary construction (`"a" <> 1`), updating a missing map key, `:erlang.binary_to_atom/2` on invalid UTF-8, `Process.exit/2` with a non-pid, and `Base.decode64!/1` on bad padding.
-- `Module.get_attribute(__MODULE__, :doc)` after a `def` still returns the doc that definition consumed.
 - `:inet.getifaddrs/0` is not implemented.
-- `quote bind_quoted:` omits line metadata on the variables it binds, and a variable bound with `var!` in a macro and never used is not warned about.
+- Quoted `bind_quoted` variables retain source line/column metadata and explicit `var!` bindings participate in unused-variable warnings. Broader macro/AST metadata equivalence still needs conformance coverage.
 
 ---
 
@@ -832,7 +922,8 @@ Source: https://github.com/wess/tonic/blob/main/TODO.md
 
 # Tonic TODO
 
-Tonic is in public beta (0.1.0-beta.3), for scripts and applications within
+The development version is 0.1.1-beta.1; the latest public beta is 0.1.0-beta.3.
+Tonic targets scripts and applications within
 the supported boundary in docs/compatibility.md. The next priority is broader
 Elixir source and runtime compatibility, backed by comparisons against
 Elixir/OTP. Supporting `.ex` and `.exs` files does not establish full BEAM
@@ -848,6 +939,20 @@ compatibility.
 
 ## Beta follow-ups
 
+Development source after beta.3 adds these portability checks and fixes:
+
+- [x] Generate an API inventory against pinned Elixir/OTP exports, with reviewed
+  classifications, linked regressions and stale-output checks in CI.
+- [x] Retain dynamically named apply/capture/spawn targets conservatively.
+- [x] Embed remote captures from interpreted compile-time modules in module
+  attributes; compare unchanged Req GET/POST/redirect/status behavior with BEAM.
+- [x] Reclaim atomics/counters, unclosed zlib state and NIF resources when their
+  final term/native owner disappears, including messages, ETS and ETF recovery.
+- [x] Exercise TLS verification/hostname/partial-chain/SNI callbacks and socket
+  options, connected UDP/multicast, and TCP framing/list delivery against BEAM.
+- [x] Run ExUnit natively and produce relocatable native application bundles;
+  opt-in Mix aliases preserve ordinary run/test/release command workflows.
+
 Known differences are listed in docs/compatibility.md. In priority order:
 
 - [x] Grow process stacks on demand: functions continue on a new stack segment
@@ -859,9 +964,10 @@ Known differences are listed in docs/compatibility.md. In priority order:
 - [ ] Per-process baseline: a blocked process holds a stack page (16 KB on
   Apple Silicon). Copying small stacks out on block would approach the BEAM's
   ~3 KB.
-- [ ] Executable size: PCRE2 and the inspect/exception machinery are always
-  linked (hello world is ~4.5 MB); make regex and exception formatting
-  reachable only when used.
+- [ ] Executable size: hello world is now ~15 MB on Apple Silicon because
+  runtime-named I/O callbacks conservatively retain all public functions.
+  Specialize I/O request reachability without breaking dynamic apply; also
+  make regex and exception formatting reachable only when used.
 - [ ] Make `:calendar.local_time_to_universal_time/1` use the offset in effect
   at that local time, as the BEAM does.
 - [ ] Emit Elixir's remaining compile warnings (unused functions, aliases and
@@ -880,14 +986,14 @@ Known differences are listed in docs/compatibility.md. In priority order:
   `Record.is_record`, and record extraction from Erlang headers.
 - [x] Audit the remaining `:array` operations: the bundled module is now OTP
   27.3's own `array.erl`.
-- [ ] Audit Erlang preprocessing conditions. Unsupported expressions must
+- [x] Audit Erlang preprocessing conditions. Unsupported expressions must
   produce diagnostics rather than silently evaluate to false.
 - [ ] Continue adding file-and-line diagnostics for unsupported constructs;
   avoid accepting code whose executable behavior is discarded.
 
 ## Runtime and standard library
 
-- [ ] Build an API coverage inventory for the bundled Elixir and Erlang library:
+- [x] Build an API coverage inventory for the bundled Elixir and Erlang library:
   implemented, partially implemented, unsupported, and intentionally different.
   Link entries to runnable tests.
 - [ ] Broaden process tests for mailbox ordering, links, monitors, exit signals,
@@ -902,14 +1008,15 @@ Known differences are listed in docs/compatibility.md. In priority order:
 
 ## Mix and package compatibility
 
-- [ ] Expand coverage beyond the current Decimal, Jason, NimbleOptions, and
-  DeepMerge scenarios. Exercise more APIs within each package as well as more
+- [ ] Expand coverage beyond the current Decimal, Jason, NimbleOptions,
+  DeepMerge and Req scenarios. Exercise more APIs within each package as well as more
   real packages; keep exact versions and lockfiles.
 - [ ] Test representative applications with dependencies, startup callbacks,
   runtime configuration, and supervised services—not only isolated functions.
 - [ ] Strengthen environment/target, optional dependency, protocol, and stale
   cache coverage across project and dependency sources.
-- [ ] Decide and document support for umbrella roots and custom compilers.
+- [x] Support umbrella roots, yecc/leex and explicitly configured Mix source
+  generators; reject unsupported artifact-only compiler pipelines.
 - [x] Turn `examples/helloweb` into an automated test (`compiler/tests/helloweb.rs`,
   run in CI): build it natively and exercise its HTTP endpoints.
 - [x] Refresh `licenses/cargo` for the crates tokio's `net` feature added
@@ -921,12 +1028,13 @@ These are outside the current release. They need explicit design work and
 dedicated interoperability tests before any compatibility claims.
 
 - [x] Ports to external programs (`spawn`, `spawn_executable`), with `System.cmd/3` and `:os.cmd/1` over them. Port drivers, `{:fd, _, _}` and `:erlang.port_control/3` remain unsupported.
-- [ ] Extend the `erl_nif` subset (maps, monitors, select, dirty schedulers) and
-  release resources when no term references them. The same release would
-  free unclosed `:zlib` streams and `:atomics` arrays.
+- [ ] Extend the `erl_nif` subset (maps, monitors, select, dirty schedulers).
+  Term/native resource lifetime tracking is implemented and tested separately.
 - [x] SSL sockets: `:ssl` TLS 1.2/1.3 clients and servers on rustls.
-- [ ] `:gen_udp.connect`, UDP multicast, DTLS, and TLS session resumption,
-  custom `verify_fun`/`match_fun`/`sni_fun` callbacks and nested TLS.
+- [x] `:gen_udp.connect`, UDP multicast and custom
+  `verify_fun`/`match_fun`/`sni_fun`/`partial_chain` callbacks.
+- [ ] DTLS, TLS session resumption across independently created configurations,
+  nested TLS and callback overrides for unknown critical X.509 extensions.
 - [ ] Define the scope of distributed-node support and BEAM interoperability.
 - [ ] Decide how dynamic module loading and hot code replacement would work
   with native compilation.

@@ -307,6 +307,14 @@ defmodule Tonic.MacroHost do
   end
 
   defp embeddable?(value) when is_atom(value) or is_number(value) or is_bitstring(value), do: true
+  defp embeddable?(value) when is_function(value) do
+    try do
+      Tonic.Eval.capture_identity(value)
+      true
+    rescue
+      ArgumentError -> false
+    end
+  end
   defp embeddable?(value) when is_list(value), do: Enum.all?(value, &embeddable?/1)
   defp embeddable?(value) when is_tuple(value), do: value |> Tuple.to_list() |> Enum.all?(&embeddable?/1)
   defp embeddable?(value) when is_map(value), do: Enum.all?(Map.to_list(value), fn {key, item} -> embeddable?(key) and embeddable?(item) end)

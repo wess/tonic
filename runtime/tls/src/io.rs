@@ -4,11 +4,12 @@ use crate::alert::{self, Failure};
 use crate::options::Opts;
 use crate::packet;
 use crate::{data_term, sock_term, Conn, Info, Socket, State, Tls};
-use tonic_core::net::{a, deliver, Active};
-use tonic_core::term::*;
+use std::os::fd::AsRawFd;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tonic_core::net::{a, deliver, Active};
+use tonic_core::term::*;
 
 fn info(tls: &Tls) -> Info {
     let (common, server, sni): (&rustls::CommonState, bool, Option<String>) = match tls {
@@ -25,10 +26,16 @@ fn info(tls: &Tls) -> Info {
     Info {
         server,
         protocol,
-        suite: common.negotiated_cipher_suite().map(|s| format!("{:?}", s.suite())).unwrap_or_default(),
+        suite: common
+            .negotiated_cipher_suite()
+            .map(|s| format!("{:?}", s.suite()))
+            .unwrap_or_default(),
         alpn: common.alpn_protocol().map(<[u8]>::to_vec),
         sni,
-        peercerts: common.peer_certificates().map(|cs| cs.iter().map(|c| c.to_vec()).collect()).unwrap_or_default(),
+        peercerts: common
+            .peer_certificates()
+            .map(|cs| cs.iter().map(|c| c.to_vec()).collect())
+            .unwrap_or_default(),
     }
 }
 
@@ -38,8 +45,10 @@ pub fn adopt(id: u64, tls: Tls, owner: u64, opts: &Opts) -> Arc<Conn> {
     let _ = tcp.set_nodelay(opts.nodelay);
     let (local, peer) = (tcp.local_addr().ok(), tcp.peer_addr().ok());
     let info = info(&tls);
+    let tcp_fd = tcp.as_raw_fd();
     let (reader, writer) = tokio::io::split(tls);
     let conn = Arc::new(Conn {
+        tcp_fd,
         reader: tokio::sync::Mutex::new(reader),
         writer: tokio::sync::Mutex::new(writer),
         state: parking_lot::Mutex::new(State {
@@ -51,6 +60,8 @@ pub fn adopt(id: u64, tls: Tls, owner: u64, opts: &Opts) -> Arc<Conn> {
             reading: false,
             eof: false,
             stats: [0; 4],
+            read_buffer: opts.buffer,
+            packet_size: opts.packet_size,
         }),
         closed: tokio::sync::watch::channel(false).0,
         info,
@@ -76,6 +87,9 @@ pub async fn read(conn: &Arc<Conn>, want: usize) -> Read {
     loop {
         {
             let mut st = conn.state.lock();
+            if packet::too_large(st.packet, &st.buffer, st.packet_size) {
+                return Read::Failed(Failure::Posix("emsgsize"));
+            }
             if let Some(f) = packet::frame(st.packet, &st.buffer, want) {
                 let data = st.buffer[f.skip..f.skip + f.len].to_vec();
                 st.buffer.drain(..f.skip + f.len);
@@ -88,7 +102,7 @@ pub async fn read(conn: &Arc<Conn>, want: usize) -> Read {
         if *closed.borrow() {
             return Read::Closed;
         }
-        let mut chunk = vec![0u8; 32768];
+        let mut chunk = vec![0u8; conn.state.lock().read_buffer];
         let n = tokio::select! {
             r = reader.read(&mut chunk) => r,
             _ = closed.wait_for(|c| *c) => return Read::Closed,
@@ -121,10 +135,18 @@ fn peer_closed(conn: &Arc<Conn>) {
 
 fn is_closed(e: &std::io::Error) -> bool {
     use std::io::ErrorKind::*;
-    matches!(e.kind(), UnexpectedEof | ConnectionReset | BrokenPipe | ConnectionAborted)
+    matches!(
+        e.kind(),
+        UnexpectedEof | ConnectionReset | BrokenPipe | ConnectionAborted
+    )
 }
 
-fn send_to(owner: u64, id: u64, tag: &str, payload: Option<impl FnOnce(&mut tonic_core::nif::Env) -> Term>) {
+fn send_to(
+    owner: u64,
+    id: u64,
+    tag: &str,
+    payload: Option<impl FnOnce(&mut tonic_core::nif::Env) -> Term>,
+) {
     deliver(owner, |env| {
         let s = sock_term(env, id);
         match payload {
@@ -183,7 +205,12 @@ pub fn start_reader(id: u64, conn: Arc<Conn>) {
                     }
                     let binary = st.binary;
                     drop(st);
-                    send_to(owner, id, "ssl", Some(|env: &mut tonic_core::nif::Env| data_term(env, &data, binary)));
+                    send_to(
+                        owner,
+                        id,
+                        "ssl",
+                        Some(|env: &mut tonic_core::nif::Env| data_term(env, &data, binary)),
+                    );
                     if passive {
                         send_to(owner, id, "ssl_passive", None::<NoPayload>);
                     }
@@ -200,7 +227,12 @@ pub fn start_reader(id: u64, conn: Arc<Conn>) {
                 Read::Failed(f) => {
                     st.reading = false;
                     drop(st);
-                    send_to(owner, id, "ssl_error", Some(|env: &mut tonic_core::nif::Env| alert::term(env, &f)));
+                    send_to(
+                        owner,
+                        id,
+                        "ssl_error",
+                        Some(|env: &mut tonic_core::nif::Env| alert::term(env, &f)),
+                    );
                     return;
                 }
             }

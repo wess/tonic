@@ -71,13 +71,14 @@ pub struct Env {
     buffers: Vec<Vec<u8>>,
     exception: Option<Term>,
     priv_data: *mut c_void,
+    offheap: Vec<Term>,
 }
 
 const CHUNK: usize = 1024;
 
 impl Env {
     pub fn new(ctx: *mut Ctx, priv_data: *mut c_void) -> Env {
-        Env { ctx, fragments: Vec::new(), chunks: Vec::new(), used: 0, buffers: Vec::new(), exception: None, priv_data }
+        Env { ctx, fragments: Vec::new(), chunks: Vec::new(), used: 0, buffers: Vec::new(), exception: None, priv_data, offheap: Vec::new() }
     }
 
     pub fn alloc(&mut self, words: usize) -> *mut u64 {
@@ -128,10 +129,13 @@ impl Env {
         let mut buf: Vec<u64> = vec![0; words.max(1)];
         let mut free = buf.as_mut_ptr();
         let root = unsafe { crate::heap::copy_term_by(t, &inside, &mut free) };
-        Fragment { buf, root }
+        Fragment::new(buf, root, free)
     }
 
     fn clear(&mut self) {
+        for t in self.offheap.drain(..) {
+            unsafe { crate::resource::release(t) };
+        }
         self.fragments.clear();
         self.chunks.clear();
         self.used = 0;
@@ -213,6 +217,12 @@ impl Env {
             list = self.cons(small(*b as i64), list);
         }
         list
+    }
+}
+
+impl Drop for Env {
+    fn drop(&mut self) {
+        self.clear();
     }
 }
 
@@ -896,8 +906,7 @@ struct ResourceHeader {
 
 const RESOURCE_HEADER: usize = std::mem::size_of::<ResourceHeader>();
 
-/// Live resources by reference id. A resource referenced from a term stays
-/// alive: the collector reports no term deaths, so such references leak.
+// native keep_resource references can outlive every term wrapper
 static RESOURCES: parking_lot::Mutex<Option<HashMap<u64, usize>>> = parking_lot::const_mutex(None);
 
 fn resource_header(obj: *mut c_void) -> *mut ResourceHeader {
@@ -959,12 +968,12 @@ pub unsafe extern "C" fn enif_keep_resource(obj: *mut c_void) {
 #[no_mangle]
 pub unsafe extern "C" fn enif_release_resource(obj: *mut c_void) {
     let h = resource_header(obj);
+    let mut resources = RESOURCES.lock();
     if (*h).refs.fetch_sub(1, Ordering::AcqRel) != 1 {
         return;
     }
-    if let Some(map) = RESOURCES.lock().as_mut() {
-        map.remove(&(*h).id);
-    }
+    resources.as_mut().unwrap().remove(&(*h).id);
+    drop(resources);
     if let Some(dtor) = (*(*h).kind).dtor {
         let mut e = Env::new(std::ptr::null_mut(), std::ptr::null_mut());
         dtor(&mut e, obj);
@@ -972,29 +981,46 @@ pub unsafe extern "C" fn enif_release_resource(obj: *mut c_void) {
     libc_free(h as *mut c_void);
 }
 
+pub(crate) struct ResourceTerm {
+    obj: usize,
+}
+
+pub(crate) fn resource_from_id(id: u64) -> Option<ResourceTerm> {
+    let resources = RESOURCES.lock();
+    let base = *resources.as_ref()?.get(&id)?;
+    let obj = unsafe { (base as *mut u8).add(RESOURCE_HEADER) as *mut c_void };
+    unsafe { enif_keep_resource(obj) };
+    Some(ResourceTerm { obj: obj as usize })
+}
+
+impl Drop for ResourceTerm {
+    fn drop(&mut self) {
+        unsafe { enif_release_resource(self.obj as *mut c_void) };
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn enif_make_resource(e: *mut Env, obj: *mut c_void) -> Term {
     let h = resource_header(obj);
     (*h).refs.fetch_add(1, Ordering::AcqRel);
-    let p = env(e).alloc(2);
-    *p = header(T_REF, 1);
-    *p.add(1) = (*h).id;
+    let e = env(e);
+    let p = e.alloc(3);
+    crate::resource::write(p, (*h).id, ResourceTerm { obj: obj as usize });
+    e.offheap.push(p as Term);
     p as Term
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn enif_get_resource(_e: *mut Env, t: Term, kind: *mut ResourceType, objp: *mut *mut c_void) -> c_int {
-    if !is_ref(t) {
+    let Some(resource) = crate::resource::get::<ResourceTerm>(t) else {
+        return 0;
+    };
+    let obj = resource.obj as *mut c_void;
+    if (*resource_header(obj)).kind != kind as *const ResourceType {
         return 0;
     }
-    let found = RESOURCES.lock().as_ref().and_then(|m| m.get(&word(t, 1)).copied());
-    match found {
-        Some(base) if (*(base as *const ResourceHeader)).kind == kind as *const ResourceType => {
-            *objp = (base as *mut u8).add(RESOURCE_HEADER) as *mut c_void;
-            1
-        }
-        _ => 0,
-    }
+    *objp = obj;
+    1
 }
 
 // ---------------------------------------------------------------------------

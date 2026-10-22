@@ -300,6 +300,7 @@ pub fn runtime_syms() -> &'static HashMap<String, usize> {
             include_str!("../../runtime/tls/src/open.rs"),
             include_str!("../../runtime/tls/src/control.rs"),
             include_str!("../../runtime/tls/src/info.rs"),
+            include_str!("../../runtime/tls/src/callback.rs"),
         ];
         let mut m = HashMap::new();
         for src in srcs {

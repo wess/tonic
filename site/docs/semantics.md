@@ -27,7 +27,7 @@ Upstream documentation defines documented behavior; pinned source and small
 reference programs resolve edge cases. Tonic's tests establish the behavior
 actually exercised. An exported function or an accepted option alone does not
 establish correct implementation. Consult the compatibility report for partial
-implementations and accepted options that currently have no effect.
+implementations, unsupported options, and backend limits.
 
 ## Preserve Elixir semantics
 
@@ -137,7 +137,10 @@ With Tonic's Mix archive installed, `mix tonic check`, `mix tonic build`, and
 `mix tonic run` invoke the native compiler. Ordinary `mix compile`, `mix run`,
 and `mix release` use the project's configured Mix pipeline. Opting into the
 `:tonic` compiler produces a native artifact; it does not produce BEAM modules
-for `mix run` or `mix release`.
+for `mix run` or `mix release`. The development `Tonic.native/1` project adapter
+routes ordinary run/test/release tasks to native equivalents. `tonic test` and
+`mix tonic test` run ExUnit natively, and `mix tonic release` bundles the native
+executable with relocatable application assets and runtime configuration.
 
 Current project boundaries, supported dependency compilers, NIF restrictions,
 and application startup behavior are in the

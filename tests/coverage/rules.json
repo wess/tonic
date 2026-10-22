@@ -1,0 +1,342 @@
+{
+  "apis": [
+    {
+      "module": "Elixir.Kernel",
+      "name": "is_integer",
+      "arity": 1,
+      "kind": "function",
+      "status": "implemented",
+      "reason": "reviewed implementation with bounded semantic regression and live Elixir comparison",
+      "tests": [
+        "tests/cases/portability.exs"
+      ]
+    },
+    {
+      "module": "Elixir.Kernel",
+      "name": "==",
+      "arity": 2,
+      "kind": "function",
+      "status": "implemented",
+      "reason": "reviewed implementation with bounded semantic regression and live Elixir comparison",
+      "tests": [
+        "tests/cases/portability.exs"
+      ]
+    },
+    {
+      "module": "Elixir.Kernel",
+      "name": "===",
+      "arity": 2,
+      "kind": "function",
+      "status": "implemented",
+      "reason": "reviewed implementation with bounded semantic regression and live Elixir comparison",
+      "tests": [
+        "tests/cases/portability.exs"
+      ]
+    },
+    {
+      "module": "Elixir.Keyword",
+      "name": "get_values",
+      "arity": 2,
+      "kind": "function",
+      "status": "implemented",
+      "reason": "reviewed implementation with bounded semantic regression and live Elixir comparison",
+      "tests": [
+        "tests/cases/portability.exs"
+      ]
+    },
+    {
+      "module": "Elixir.Map",
+      "name": "fetch!",
+      "arity": 2,
+      "kind": "function",
+      "status": "implemented",
+      "reason": "reviewed implementation with bounded semantic regression and live Elixir comparison",
+      "tests": [
+        "tests/cases/portability.exs"
+      ]
+    },
+    {
+      "module": "Elixir.String",
+      "name": "length",
+      "arity": 1,
+      "kind": "function",
+      "status": "partial",
+      "reason": "Unicode grapheme cases are tested; full Unicode/library parity is not established",
+      "tests": [
+        "tests/cases/portability.exs",
+        "tests/cases/strings.exs"
+      ]
+    },
+    {
+      "module": "erlang",
+      "name": "phash2",
+      "arity": 2,
+      "kind": "function",
+      "status": "different",
+      "reason": "pid/reference identity and anonymous function code checksums differ from OTP",
+      "tests": [
+        "tests/cases/phash.exs"
+      ]
+    },
+    {
+      "module": "calendar",
+      "name": "local_time_to_universal_time",
+      "arity": 1,
+      "kind": "function",
+      "status": "different",
+      "reason": "current UTC offset used rather than historical daylight saving offset",
+      "tests": [
+        "tests/cases/rfc3339.exs"
+      ]
+    },
+    {
+      "module": "Elixir.Macro",
+      "name": "expand",
+      "arity": 2,
+      "kind": "function",
+      "status": "partial",
+      "reason": "Kernel macro and guard expansion coverage is incomplete",
+      "tests": [
+        "tests/cases/macros.exs",
+        "compiler/tests/guards.rs"
+      ]
+    },
+    {
+      "module": "atomics",
+      "name": "new",
+      "arity": 2,
+      "kind": "function",
+      "status": "partial",
+      "reason": "managed lifetime, cross-process/ETS retention and live serialization roundtrips are tested; full API semantics remain under review",
+      "tests": [
+        "runtime/tests/resources.rs",
+        "compiler/tests/resources.rs"
+      ]
+    },
+    {
+      "module": "counters",
+      "name": "new",
+      "arity": 2,
+      "kind": "function",
+      "status": "partial",
+      "reason": "managed array lifetime and concurrent handle copies are tested",
+      "tests": [
+        "runtime/tests/resources.rs",
+        "compiler/tests/resources.rs"
+      ]
+    },
+    {
+      "module": "zlib",
+      "name": "open",
+      "arity": 0,
+      "kind": "function",
+      "status": "partial",
+      "reason": "unclosed state reclamation, controlling-process transfer and live serialization roundtrips are tested",
+      "tests": [
+        "runtime/tests/resources.rs",
+        "compiler/tests/resources.rs"
+      ]
+    },
+    {
+      "module": "ssl",
+      "name": "connect",
+      "arity": 3,
+      "kind": "function",
+      "status": "partial",
+      "reason": "client callback/cipher policy and cancellation are tested; full SSL API parity remains incomplete",
+      "tests": [
+        "compiler/tests/network.rs"
+      ]
+    },
+    {
+      "module": "gen_tcp",
+      "name": "recv",
+      "arity": 3,
+      "kind": "function",
+      "status": "partial",
+      "reason": "list/binary delivery, framing and socket settings are tested",
+      "tests": [
+        "compiler/tests/network.rs"
+      ]
+    },
+    {
+      "module": "gen_udp",
+      "name": "connect",
+      "arity": 3,
+      "kind": "function",
+      "status": "partial",
+      "reason": "connected send and filtering are compared with BEAM",
+      "tests": [
+        "compiler/tests/network.rs"
+      ]
+    },
+    {
+      "module": "Elixir.Function",
+      "name": "capture",
+      "arity": 3,
+      "kind": "function",
+      "status": "partial",
+      "reason": "generated module/function names retain public targets without manual keep-all configuration",
+      "tests": [
+        "compiler/tests/reachability.rs"
+      ]
+    },
+    {
+      "module": "code",
+      "name": "all_available",
+      "arity": 0,
+      "kind": "function",
+      "status": "unsupported",
+      "reason": "declared placeholder does not implement native module enumeration, code-path lookup or BEAM code loading/purging",
+      "tests": []
+    },
+    {
+      "module": "code",
+      "name": "all_loaded",
+      "arity": 0,
+      "kind": "function",
+      "status": "unsupported",
+      "reason": "declared placeholder does not implement native module enumeration, code-path lookup or BEAM code loading/purging",
+      "tests": []
+    },
+    {
+      "module": "code",
+      "name": "which",
+      "arity": 1,
+      "kind": "function",
+      "status": "unsupported",
+      "reason": "declared placeholder does not implement native module enumeration, code-path lookup or BEAM code loading/purging",
+      "tests": []
+    },
+    {
+      "module": "code",
+      "name": "get_object_code",
+      "arity": 1,
+      "kind": "function",
+      "status": "unsupported",
+      "reason": "declared placeholder does not implement native module enumeration, code-path lookup or BEAM code loading/purging",
+      "tests": []
+    },
+    {
+      "module": "code",
+      "name": "purge",
+      "arity": 1,
+      "kind": "function",
+      "status": "unsupported",
+      "reason": "declared placeholder does not implement native module enumeration, code-path lookup or BEAM code loading/purging",
+      "tests": []
+    },
+    {
+      "module": "code",
+      "name": "soft_purge",
+      "arity": 1,
+      "kind": "function",
+      "status": "unsupported",
+      "reason": "declared placeholder does not implement native module enumeration, code-path lookup or BEAM code loading/purging",
+      "tests": []
+    },
+    {
+      "module": "code",
+      "name": "delete",
+      "arity": 1,
+      "kind": "function",
+      "status": "unsupported",
+      "reason": "declared placeholder does not implement native module enumeration, code-path lookup or BEAM code loading/purging",
+      "tests": []
+    },
+    {
+      "module": "code",
+      "name": "ensure_modules_loaded",
+      "arity": 1,
+      "kind": "function",
+      "status": "unsupported",
+      "reason": "declared placeholder does not implement native module enumeration, code-path lookup or BEAM code loading/purging",
+      "tests": []
+    }
+  ],
+  "capabilities": [
+    {
+      "name": "Elixir source and macro semantics",
+      "status": "partial",
+      "reason": "Focused compile rejection, quote metadata, guard and capture comparisons; complete language conformance is not established.",
+      "tests": [
+        "compiler/tests/semantics.rs",
+        "tests/cases/portability.exs",
+        "compiler/tests/guards.rs",
+        "compiler/tests/captures.rs"
+      ]
+    },
+    {
+      "name": "Runtime code evaluation",
+      "status": "partial",
+      "reason": "Fresh interpreted-module public calls, captures, reflection and exceptions; full generated-module introspection and native replacement remain incomplete.",
+      "tests": [
+        "compiler/tests/evaluation.rs",
+        "compiler/tests/guards.rs"
+      ]
+    },
+    {
+      "name": "Erlang preprocessing",
+      "status": "partial",
+      "reason": "Scalar conditions and defined macros compared to OTP EPP; unsupported forms are explicit errors.",
+      "tests": [
+        "compiler/tests/preprocessor.rs"
+      ]
+    },
+    {
+      "name": "Managed native resource lifetimes",
+      "status": "implemented",
+      "reason": "Reclamation, moving GC, process/ETS copies, live ETF recovery and explicit native NIF keep/release ownership.",
+      "tests": [
+        "runtime/tests/resources.rs",
+        "compiler/tests/resources.rs"
+      ]
+    },
+    {
+      "name": "TCP UDP and TLS semantics",
+      "status": "partial",
+      "reason": "Framing, delivery modes, socket settings and TLS callback policy compared to BEAM; backend and protocol gaps remain.",
+      "tests": [
+        "compiler/tests/network.rs",
+        "tests/cases/ssl.exs",
+        "tests/cases/udp.exs"
+      ]
+    },
+    {
+      "name": "Native Mix workflows",
+      "status": "partial",
+      "reason": "Tests, filters, umbrella projects, source generators and relocatable releases; unsupported Mix/ERTS protocols remain explicit.",
+      "tests": [
+        "compiler/tests/tooling.rs",
+        "compiler/tests/tooling/filtering.rs",
+        "mix/tests/tests.exs"
+      ]
+    },
+    {
+      "name": "Locked Req package portability",
+      "status": "partial",
+      "reason": "Req 0.7.5 GET/POST/redirect/status with unchanged package sources; optional adapters and codecs are not fully covered.",
+      "tests": [
+        "compiler/tests/req.rs"
+      ]
+    },
+    {
+      "name": "Distributed BEAM node interoperability",
+      "status": "unsupported",
+      "reason": "No distributed-node transport/protocol implementation.",
+      "tests": []
+    },
+    {
+      "name": "BEAM artifact loading and hot code replacement",
+      "status": "unsupported",
+      "reason": "Native executables do not load BEAM bytecode or implement ERTS release upgrade protocols.",
+      "tests": []
+    },
+    {
+      "name": "Dirty NIF schedulers and prebuilt NIF binaries",
+      "status": "unsupported",
+      "reason": "Supported C NIF sources are linked into the native executable and calls run on the calling scheduler thread.",
+      "tests": []
+    }
+  ]
+}
