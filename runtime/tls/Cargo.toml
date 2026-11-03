@@ -17,5 +17,5 @@ parking_lot = "0.12"
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
 rustls-pki-types = { version = "=1.15.1", features = ["std"] }
-rustls-webpki = { version = "=0.103.15", default-features = false, features = ["ring", "std"] }
+rustls-webpki = { version = "=0.103.16", default-features = false, features = ["ring", "std"] }
 socket2 = { version = "0.6", features = ["all"] }
