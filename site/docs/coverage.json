@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "tonic": "0.1.1-beta.1",
+  "tonic": "0.1.1-beta.2",
   "reference": {
     "otp": "27",
     "elixir": "1.18.3",
