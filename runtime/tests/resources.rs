@@ -17,6 +17,11 @@ fn context() -> Box<Ctx> {
     Ctx::new(MIN_HEAP_WORDS)
 }
 
+fn exclusive() -> parking_lot::MutexGuard<'static, ()> {
+    static LOCK: parking_lot::Mutex<()> = parking_lot::const_mutex(());
+    LOCK.lock()
+}
+
 struct Tracked(Arc<AtomicUsize>);
 
 impl Drop for Tracked {
@@ -62,6 +67,7 @@ fn collect_all(ctx: &mut Ctx) {
 
 #[test]
 fn gc_reclaims_unreachable_refs_and_preserves_promoted_live_refs() {
+    let _guard = exclusive();
     let drops = Arc::new(AtomicUsize::new(0));
     let mut ctx = context();
     let r = ctx.managed_ref(Tracked(drops.clone()));
@@ -78,6 +84,7 @@ fn gc_reclaims_unreachable_refs_and_preserves_promoted_live_refs() {
 
 #[test]
 fn copied_messages_outlive_sender_and_release_after_last_receiver() {
+    let _guard = exclusive();
     let drops = Arc::new(AtomicUsize::new(0));
     let mut sender = context();
     let r = sender.managed_ref(Tracked(drops.clone()));
@@ -99,6 +106,7 @@ fn copied_messages_outlive_sender_and_release_after_last_receiver() {
 
 #[test]
 fn ets_retains_resources_until_objects_are_deleted() {
+    let _guard = exclusive();
     let process = shared(8101);
     let mut ctx = context();
     ctx.shared = &process;
@@ -124,6 +132,7 @@ unsafe extern "C" fn destroy(_env: *mut Env, obj: *mut c_void) {
 
 #[test]
 fn nif_destructor_runs_once_after_envs_copies_and_native_refs_release() {
+    let _guard = exclusive();
     let drops = Arc::new(AtomicUsize::new(0));
     unsafe {
         let mut env = Env::new(std::ptr::null_mut(), std::ptr::null_mut());
@@ -176,6 +185,7 @@ fn nif_destructor_runs_once_after_envs_copies_and_native_refs_release() {
 
 #[test]
 fn atomics_and_zlib_handles_survive_copies_and_close_is_shared() {
+    let _guard = exclusive();
     let process = shared(8102);
     let mut ctx = context();
     ctx.shared = &process;
@@ -205,6 +215,7 @@ fn atomics_and_zlib_handles_survive_copies_and_close_is_shared() {
 
 #[test]
 fn unclosed_streams_and_atomics_are_reclaimed_on_gc_and_process_teardown() {
+    let _guard = exclusive();
     let process = shared(8103);
     let mut ctx = context();
     ctx.shared = &process;
@@ -241,6 +252,7 @@ fn unclosed_streams_and_atomics_are_reclaimed_on_gc_and_process_teardown() {
 
 #[test]
 fn deserialized_resources_retain_native_state_only_while_a_handle_is_alive() {
+    let _guard = exclusive();
     let drops = Arc::new(AtomicUsize::new(0));
     let mut ctx = context();
     let original = ctx.managed_ref(Tracked(drops.clone()));
