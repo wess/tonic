@@ -35,7 +35,7 @@ end
     f.write("test/selection_test.exs", selected);
     f.write("test/nested/other_test.exs", "defmodule OtherTest do\n use ExUnit.Case\n test \"other\", do: File.write!(System.fetch_env!(\"SELECTION_LOG\"), \"other\\n\", [:append])\nend\n");
     f.write("test/failing_test.exs", "defmodule FailingTest do\n use ExUnit.Case\n test \"first\" do\n File.write!(System.fetch_env!(\"SELECTION_LOG\"), \"failure\\n\", [:append])\n assert false\n end\n test \"second\" do\n File.write!(System.fetch_env!(\"SELECTION_LOG\"), \"failure\\n\", [:append])\n assert false\n end\nend\n");
-    f.write("test/timeout_test.exs", "defmodule TimeoutTest do\n use ExUnit.Case\n test \"times out\", do: Process.sleep(100)\nend\n");
+    f.write("test/timeout_test.exs", "defmodule TimeoutTest do\n use ExUnit.Case\n test \"times out\", do: Process.sleep(1000)\nend\n");
     let log = f.0.join("selectionlog");
     let compare = |args: &[&str], expected: &[&str], status: i32, check_options: bool| {
         let mut reference = Command::new("mix");
@@ -150,7 +150,7 @@ end
         2,
         false,
     );
-    compare(&["test/timeout_test.exs", "--timeout", "1"], &[], 2, false);
+    compare(&["test/timeout_test.exs", "--timeout", "50"], &[], 2, false);
     let mut command = f.tonic("test");
     command
         .args(["--unsupported-filter"])
