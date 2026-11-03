@@ -1,4 +1,4 @@
-# Tonic 0.1.0-beta.3
+# Tonic 0.1.1-beta.2
 
 Beta Elixir-to-native compiler with LLVM code generation, a moving
 garbage collector, and a concurrent process runtime. Supports `.ex` modules,
@@ -11,6 +11,16 @@ limited to the language and runtime APIs Tonic implements. See
 verified by the release tests. Distributed BEAM nodes, hot code loading, port
 drivers, arbitrary NIFs, custom dependency build systems, and umbrella root builds are
 outside the current support boundary.
+
+## What changed in 0.1.1-beta.2
+
+- Function and macro calls, captures, reflection, lexical quote binding and
+  target-aware runtime macro defaults now match the BEAM across the expanded
+  portability suite.
+- Compatible locked dependencies are refreshed, including the patched
+  `rustls-webpki` 0.103.16 release.
+- Release workflows now pin every GitHub Action to an immutable commit, with
+  weekly dependency tracking for future action updates.
 
 ## What changed in 0.1.0-beta.3
 
@@ -113,14 +123,14 @@ export PATH="$HOME/.local/bin:$PATH"
 
 The script downloads the latest bundle for your machine, checks its SHA-256,
 and installs it into `~/.local` along with the Mix tasks when Mix is present.
-`TONIC_VERSION=0.1.0-beta.3` pins a release, `TONIC_PREFIX` picks another
+`TONIC_VERSION=0.1.1-beta.2` pins a release, `TONIC_PREFIX` picks another
 prefix, and `TONIC_NO_MIX=1` skips the Mix tasks. Run it again to upgrade.
 
 ### Debian and Ubuntu (x86-64)
 
 ```sh
-curl -fLO https://github.com/wess/tonic/releases/download/v0.1.0-beta.3/tonic0.1.0-beta.3.linuxx64.deb
-sudo apt install ./tonic0.1.0-beta.3.linuxx64.deb
+curl -fLO https://github.com/wess/tonic/releases/download/v0.1.1-beta.2/tonic0.1.1-beta.2.linuxx64.deb
+sudo apt install ./tonic0.1.1-beta.2.linuxx64.deb
 mix archive.install /usr/lib/tonic/share/tonic/tonic.ez --force
 ```
 
@@ -131,15 +141,15 @@ the distribution's clang. Ubuntu 24.04 or newer (or Debian with glibc 2.39+).
 
 Download the bundle matching your machine from the release assets:
 
-* `tonic0.1.0-beta.3.linuxx64.tar.gz`: Linux x86-64.
-* `tonic0.1.0-beta.3.macosarm64.tar.gz`: Apple Silicon macOS.
+* `tonic0.1.1-beta.2.linuxx64.tar.gz`: Linux x86-64.
+* `tonic0.1.1-beta.2.macosarm64.tar.gz`: Apple Silicon macOS.
 
 Verify the matching `.tar.sha256` file before extracting (Linux: `sha256sum -c`;
 macOS: `shasum -a 256 -c`). Then:
 
 ```sh
-tar -xzf tonic0.1.0-beta.3.macosarm64.tar.gz
-cd tonic0.1.0-beta.3
+tar -xzf tonic0.1.1-beta.2.macosarm64.tar.gz
+cd tonic0.1.1-beta.2
 bash install.sh "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 tonic run hello.exs
@@ -181,7 +191,7 @@ different toolchain versions.
 
 The GitHub release workflow first requires the full Linux/macOS CI suite,
 builds and verifies both installation bundles, then publishes a prerelease on
-a `v0.1.0-beta.3` tag. A manual workflow run verifies and uploads build artifacts
+a `v0.1.1-beta.2` tag. A manual workflow run verifies and uploads build artifacts
 without publishing a release. Tag and manifest versions must match.
 
 After publishing, the `packages` workflow builds the Debian package from the
