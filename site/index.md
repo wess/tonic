@@ -1,6 +1,6 @@
 # tonic
 
-**0.1.1-beta.1 · development beta.** Start with scripts and small native applications.
+**0.1.1-beta.2 · development beta.** Start with scripts and small native applications.
 Visit the [Tonic website](https://wess.io/tonic/).
 Install with `brew install wess/packages/tonic` or
 `curl -fsSL https://wess.io/tonic/install.sh | sh`; the
@@ -9,7 +9,7 @@ tasks. See the
 [compatibility report](https://github.com/wess/tonic/blob/main/docs/compatibility.md) for tested packages and limitations.
 Remaining work is tracked in [TODO.md](https://github.com/wess/tonic/blob/main/TODO.md).
 
-The 0.1.1-beta.1 source checkout includes unreleased portability changes after
+The 0.1.1-beta.2 source checkout includes unreleased portability changes after
 0.1.0-beta.3: native test/release workflows, umbrella builds, an API conformance
 inventory, Req support, resource reclamation and expanded networking. Build
 from source for those changes; published beta.3 bundles retain their original

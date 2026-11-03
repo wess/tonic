@@ -1,6 +1,6 @@
 # Tonic TODO
 
-The development version is 0.1.1-beta.1; the latest public beta is 0.1.0-beta.3.
+The development version is 0.1.1-beta.2; the latest public beta is 0.1.0-beta.3.
 Tonic targets scripts and applications within
 the supported boundary in docs/compatibility.md. The next priority is broader
 Elixir source and runtime compatibility, backed by comparisons against

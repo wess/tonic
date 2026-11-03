@@ -18,7 +18,7 @@ the current release. Read the compatibility report before recommending an API,
 package, or deployment workflow. A successful package test covers the tested
 scenario, not every API in that package.
 
-This index follows 0.1.1-beta.1 development source, including unreleased changes after
+This index follows 0.1.1-beta.2 development source, including unreleased changes after
 0.1.0-beta.3. Use the documentation from the matching tag for installed release
 bundles; new native test/release and networking behavior requires the checkout.
 
@@ -298,7 +298,7 @@ Source: https://github.com/wess/tonic/blob/main/README.md
 
 # tonic
 
-**0.1.1-beta.1 · development beta.** Start with scripts and small native applications.
+**0.1.1-beta.2 · development beta.** Start with scripts and small native applications.
 Visit the [Tonic website](https://wess.io/tonic/).
 Install with `brew install wess/packages/tonic` or
 `curl -fsSL https://wess.io/tonic/install.sh | sh`; the
@@ -307,7 +307,7 @@ tasks. See the
 [compatibility report](https://github.com/wess/tonic/blob/main/docs/compatibility.md) for tested packages and limitations.
 Remaining work is tracked in [TODO.md](https://github.com/wess/tonic/blob/main/TODO.md).
 
-The 0.1.1-beta.1 source checkout includes unreleased portability changes after
+The 0.1.1-beta.2 source checkout includes unreleased portability changes after
 0.1.0-beta.3: native test/release workflows, umbrella builds, an API conformance
 inventory, Req support, resource reclamation and expanded networking. Build
 from source for those changes; published beta.3 bundles retain their original
@@ -782,7 +782,7 @@ Source: https://github.com/wess/tonic/blob/main/docs/compatibility.md
 
 # Compatibility
 
-Tonic 0.1.1-beta.1 development source compiles supported Elixir and Erlang source to LLVM and links a native runtime. `.exs` scripts use the same compiler. Native executables do not contain BEAM bytecode.
+Tonic 0.1.1-beta.2 development source compiles supported Elixir and Erlang source to LLVM and links a native runtime. `.exs` scripts use the same compiler. Native executables do not contain BEAM bytecode.
 
 This report follows the current development source. The API inventory, Req
 coverage, managed native-resource lifetimes, expanded socket semantics, and
@@ -922,7 +922,7 @@ Source: https://github.com/wess/tonic/blob/main/TODO.md
 
 # Tonic TODO
 
-The development version is 0.1.1-beta.1; the latest public beta is 0.1.0-beta.3.
+The development version is 0.1.1-beta.2; the latest public beta is 0.1.0-beta.3.
 Tonic targets scripts and applications within
 the supported boundary in docs/compatibility.md. The next priority is broader
 Elixir source and runtime compatibility, backed by comparisons against
