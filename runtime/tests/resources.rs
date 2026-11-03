@@ -52,10 +52,14 @@ fn shared(pid: u64) -> ProcShared {
 
 fn collect_all(ctx: &mut Ctx) {
     // fill the old generation too, forcing a major after any minor collections
-    for _ in 0..8 {
+    for _ in 0..32 {
         ctx.gc(0);
-        let n = ctx.old_words + ctx.heap_words + 64;
-        ctx.reserve(n);
+        // Fill the current young generation so the next collection must
+        // exercise promotion and, once old space is full, a major cycle.
+        // Using the available space keeps this bounded by the collector's
+        // current heap instead of geometrically inflating the requested size.
+        let n = ctx.avail();
+        assert!(n >= 2);
         let p = ctx.alloc_nogc(n);
         unsafe {
             *p = header(T_BINARY, (n - 1) as u64);
